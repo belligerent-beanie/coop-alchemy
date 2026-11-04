@@ -1,0 +1,19 @@
+# Secrets and per-machine runtime state (see README "Files" section)
+accounts.json
+saves/
+*.pem
+drafts.json
+reload_snapshot.json*
+alchemy.pid
+progress.json
+
+# AI generator: caches, local model config, run logs, stray split chunks
+aigen/cache/
+aigen/model.json
+aigen/runs/
+aigen/part-*
+
+# Python / OS noise
+__pycache__/
+*.pyc
+.DS_Store

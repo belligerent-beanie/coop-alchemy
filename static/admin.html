@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Review proposals · Co-op Alchemy</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script>
+    if (/iPhone|iPod|Android.+Mobile|Mobi/i.test(navigator.userAgent) ||
+        (matchMedia("(pointer: coarse)").matches && Math.min(screen.width, screen.height) < 600)) {
+      location.replace("/laptop");
+    }
+  </script>
+</head>
+<body class="admin">
+  <main id="admin-main">
+    <p><a href="/">← Home</a></p>
+    <h1>Review proposals</h1>
+    <p class="who">Players propose recipes from Create Recipes. Accepting marks the proposal and tells the player;
+      it does not edit <code>recipes.json</code>. Copy the approved snippet (below) into the recipe file yourself,
+      then run <code>python3 reload.py</code>.</p>
+    <p id="admin-msg" class="error" role="alert"></p>
+
+    <section id="swipe" hidden>
+      <p id="left" class="who"></p>
+      <article id="card" class="proposal" aria-live="polite">
+        <div class="equation">
+          <div class="face" id="face-a"><span class="art"></span><span class="name"></span></div>
+          <span class="op">+</span>
+          <div class="face" id="face-b"><span class="art"></span><span class="name"></span></div>
+          <span class="op">=</span>
+          <div class="face" id="face-c"><span class="art"></span><span class="name"></span></div>
+        </div>
+        <p id="tags"></p>
+        <p id="credit" class="who"></p>
+        <p id="note" class="note"></p>
+        <div id="competing"></div>
+      </article>
+      <input id="reply" type="text" maxlength="300" placeholder="Optional reply to the player (shown on their draft)">
+      <div class="swipe-buttons">
+        <button type="button" id="reject" class="danger">&larr; Reject</button>
+        <button type="button" id="undo" disabled>Undo (Z)</button>
+        <button type="button" id="skip">Skip (S)</button>
+        <button type="button" id="accept">Accept &rarr;</button>
+      </div>
+      <p class="who keys">Keys: &larr; reject, &rarr; accept, S or &darr; skip (decide later), Z undo (not while typing a reply).</p>
+      <section id="dependents">
+        <h2 id="dep-title"></h2>
+        <ul id="dep-list" class="chips"></ul>
+      </section>
+    </section>
+
+    <p id="empty" class="who" hidden>No proposals are waiting. You are all caught up.</p>
+
+    <details id="approved-box">
+      <summary>Approved so far (<span id="approved-count">0</span> not in the recipe file yet)</summary>
+      <p class="who">Paste these into <code>recipes.json</code>: elements into <code>"elements"</code>, recipes into <code>"recipes"</code>.</p>
+      <ul id="approved-list"></ul>
+      <button type="button" id="copy">Copy snippet</button>
+      <pre id="snippet"></pre>
+    </details>
+  </main>
+  <script src="/static/auth.js"></script>
+  <script src="/static/pictures.js"></script>
+  <script src="/static/admin.js"></script>
+</body>
+</html>

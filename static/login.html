@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Log in · Co-op Alchemy</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script>
+    // Phones are not supported (the server also redirects them; this catches desktop-mode browsers).
+    if (/iPhone|iPod|Android.+Mobile|Mobi/i.test(navigator.userAgent) ||
+        (matchMedia("(pointer: coarse)").matches && Math.min(screen.width, screen.height) < 600)) {
+      location.replace("/laptop");
+    }
+  </script>
+</head>
+<body class="home">
+  <main id="home" class="auth">
+    <h1>⚗️ Co-op Alchemy</h1>
+    <div class="tabs" role="tablist">
+      <button type="button" id="tab-login" role="tab" aria-selected="true">Log in</button>
+      <button type="button" id="tab-register" role="tab" aria-selected="false">Create account</button>
+    </div>
+    <form id="auth-form" autocomplete="on">
+      <label for="username">Username</label>
+      <input id="username" name="username" autocomplete="username" maxlength="24" required autofocus>
+      <p id="username-hint" class="muted" hidden>3 to 24 characters: letters, digits, spaces, _ - . This is the name other
+        players see, and no one else can use it.</p>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" maxlength="128" required>
+      <p id="password-hint" class="muted" hidden>At least 8 characters. Don't reuse a password from anywhere important:
+        on this network it may be sent unencrypted.</p>
+      <label for="password2" id="password2-label" hidden>Password again</label>
+      <input id="password2" type="password" autocomplete="new-password" maxlength="128" hidden>
+      <button type="submit" id="auth-submit">Log in</button>
+      <p id="auth-error" class="error" role="alert"></p>
+    </form>
+  </main>
+  <script src="/static/auth.js"></script>
+  <script src="/static/login.js"></script>
+</body>
+</html>

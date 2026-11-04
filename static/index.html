@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Co-op Alchemy</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script>
+    // Phones are not supported (the server also redirects them; this catches desktop-mode browsers).
+    if (/iPhone|iPod|Android.+Mobile|Mobi/i.test(navigator.userAgent) ||
+        (matchMedia("(pointer: coarse)").matches && Math.min(screen.width, screen.height) < 600)) {
+      location.replace("/laptop");
+    }
+  </script>
+</head>
+<body>
+  <section id="join">
+    <form id="join-form" autocomplete="off">
+      <h1>⚗️ Co-op Alchemy</h1>
+      <p id="join-game" class="game-title"></p>
+      <p>Combine elements together with your friends on one shared board.</p>
+      <p class="who">Playing as <strong id="name"></strong> · <button type="button" id="logout" class="link">Not you? Log out</button></p>
+      <button type="submit" autofocus>Join</button>
+      <p id="join-error" class="error" role="alert"></p>
+      <a href="/">← All games</a>
+    </form>
+  </section>
+
+  <div id="update" class="update" role="status" hidden>
+    A new version of the game is ready.
+    <button type="button" id="update-reload">Reload</button>
+    <button type="button" id="update-later" class="link">Later</button>
+  </div>
+
+  <div id="app" hidden>
+    <header>
+      <a class="back" href="/" title="Back to all games">←</a>
+      <h1>⚗️ Co-op Alchemy</h1>
+      <span id="game-name" class="game-name"></span>
+      <button id="invite" class="invite-btn" type="button" title="Copy a link that friends on your network can open to join this game">🔗 Invite</button>
+      <span id="count" title="Elements discovered by everyone">Found 0 / 0</span>
+      <ul id="key" aria-label="Players"></ul>
+      <span id="status" class="status" title="Connection"></span>
+      <button id="end" class="end-btn" type="button" title="End this game for everyone">End game</button>
+      <button id="cat" class="cat" type="button" title="Let the cat tidy up (clears the workspace for everyone)"
+              aria-label="Clear the shared workspace">🐈</button>
+    </header>
+    <main>
+      <div id="workspace" aria-label="Shared workspace">
+        <div id="cursor-layer"></div>
+        <p id="hint">Drag elements here from the list, then drop one tile onto another to combine them.</p>
+      </div>
+      <aside id="sidebar">
+        <details id="hints">
+          <summary>💡 Hints</summary>
+          <div class="hint-buttons">
+            <button type="button" data-hint="can_make">What can I make?</button>
+            <button type="button" data-hint="try">A combination to try</button>
+          </div>
+          <form id="hint-find" autocomplete="off">
+            <input id="hint-target" maxlength="64" placeholder="How do I make…" aria-label="Element to find a recipe for">
+            <button type="submit">Find</button>
+          </form>
+          <div id="hint-result" aria-live="polite"></div>
+        </details>
+        <section id="genie" hidden>
+          <div class="genie-head"><strong>🧞 Djinn</strong> <span id="genie-status"></span></div>
+          <button type="button" id="genie-use">Use a wish</button>
+          <p id="genie-note"></p>
+        </section>
+        <input id="filter" type="search" placeholder="Search elements…" aria-label="Search elements">
+        <div id="items"></div>
+      </aside>
+    </main>
+  </div>
+
+  <dialog id="end-dialog">
+    <form method="dialog">
+      <h2>End this game?</h2>
+      <p>This closes the game for everyone in it. Saving keeps what you have discovered for 3 days, and the players can
+        resume it from the home page. The workspace itself is not saved.</p>
+      <p id="end-note" class="muted"></p>
+      <div class="dialog-buttons">
+        <button type="button" id="end-save">Save and end</button>
+        <button type="button" id="end-nosave" class="danger">End without saving</button>
+        <button type="button" id="end-cancel">Keep playing</button>
+      </div>
+    </form>
+  </dialog>
+  <div id="ended" hidden><div><h2 id="ended-title"></h2><p id="ended-text"></p><a class="btn" href="/">Back to all games</a></div></div>
+
+  <div id="tooltip" hidden></div>
+  <div id="toasts" aria-live="polite"></div>
+  <script src="/static/auth.js"></script>
+  <script src="/static/pictures.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

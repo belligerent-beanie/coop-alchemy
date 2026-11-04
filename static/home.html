@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Co-op Alchemy</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script>
+    // Phones are not supported (the server also redirects them; this catches desktop-mode browsers).
+    if (/iPhone|iPod|Android.+Mobile|Mobi/i.test(navigator.userAgent) ||
+        (matchMedia("(pointer: coarse)").matches && Math.min(screen.width, screen.height) < 600)) {
+      location.replace("/laptop");
+    }
+  </script>
+</head>
+<body class="home">
+  <main id="home">
+    <h1>⚗️ Co-op Alchemy</h1>
+    <p class="who">Logged in as <strong id="who"></strong> · <button type="button" id="logout" class="link">Log out</button></p>
+
+    <section>
+      <h2>Create recipes</h2>
+      <p class="muted">A solo playground with every element unlocked. Invent new combinations and, if you like one,
+        promote it so the admins can add it to the game, with your name as credit.</p>
+      <p class="home-links">
+        <a class="btn" href="/create">Create recipes</a>
+        <a id="admin-link" class="btn" href="/admin" hidden>Review proposals <span id="admin-pending" class="pill" hidden></span></a>
+      </p>
+    </section>
+
+    <section id="recent-section" hidden>
+      <h2>Recently joined</h2>
+      <p class="muted">Games you left that are still running.</p>
+      <ul id="recent"></ul>
+    </section>
+
+    <section>
+      <h2>Running games <span id="game-count" class="muted"></span></h2>
+      <ul id="games"></ul>
+      <p id="no-games" class="muted" hidden>No games are running. Start one below!</p>
+    </section>
+
+    <section>
+      <h2>Start a new game</h2>
+      <form id="new-game" autocomplete="off">
+        <input id="new-name" maxlength="30" placeholder="Game name (optional)" aria-label="Game name">
+        <button type="submit" id="create">Create game</button>
+      </form>
+      <p id="create-error" class="error" role="alert"></p>
+    </section>
+
+    <section>
+      <h2>Saved games</h2>
+      <p class="muted">Games you played in that were ended with saving. Saves are kept for 3 days and don't count
+        towards the limit of running games.</p>
+      <ul id="saved-games"></ul>
+      <p id="no-saved" class="muted" hidden>You have no saved games.</p>
+      <p id="saved-msg" class="error" role="alert"></p>
+    </section>
+  </main>
+  <script src="/static/auth.js"></script>
+  <script src="/static/home.js"></script>
+</body>
+</html>

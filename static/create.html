@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Create Recipes · Co-op Alchemy</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script>
+    // Phones are not supported (the server also redirects them; this catches desktop-mode browsers).
+    if (/iPhone|iPod|Android.+Mobile|Mobi/i.test(navigator.userAgent) ||
+        (matchMedia("(pointer: coarse)").matches && Math.min(screen.width, screen.height) < 600)) {
+      location.replace("/laptop");
+    }
+  </script>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <a class="back" href="/" title="Back to the home page">←</a>
+      <h1>🧪 Create Recipes</h1>
+      <span id="count" title="Elements you can use">0 elements</span>
+      <span class="spacer"></span>
+      <button id="clear" type="button">Clear workspace</button>
+    </header>
+    <main>
+      <div id="workspace" aria-label="Workspace">
+        <p id="hint">Everything is unlocked here. Drag two elements together: if they don't make anything yet,
+          you can name what they make.</p>
+      </div>
+      <aside id="sidebar">
+        <details id="drafts" open>
+          <summary>✏️ My recipes <span id="draft-count" class="muted"></span></summary>
+          <p id="draft-empty" class="muted">Nothing yet. Recipes you create are only yours, and only here, until
+            you promote them.</p>
+          <ul id="draft-list"></ul>
+        </details>
+        <input id="filter" type="search" placeholder="Search elements…" aria-label="Search elements">
+        <div id="items"></div>
+      </aside>
+    </main>
+  </div>
+
+  <dialog id="name-dialog" class="dialog">
+    <form id="name-form" method="dialog" autocomplete="off">
+      <h2 id="name-title">What do these make?</h2>
+      <p class="muted">Nobody has found a recipe for this pair yet. Name the result: a new name creates a new
+        element; the name of an existing element adds another way to make it.</p>
+      <input id="name-input" maxlength="64" placeholder="Name of the result" aria-label="Name of the result" required>
+      <p id="name-error" class="error" role="alert"></p>
+      <div class="dialog-buttons">
+        <button type="submit" id="name-ok">Create</button>
+        <button type="button" id="name-cancel">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="promote-dialog" class="dialog">
+    <form id="promote-form" method="dialog">
+      <h2 id="promote-title">Promote this recipe?</h2>
+      <p class="muted">This sends a request to the admins, with your name as the credit. If the recipe uses
+        other new elements you made, the recipes that make them are sent too. Nothing changes in the game
+        until an admin adds it.</p>
+      <textarea id="promote-note" maxlength="300" rows="3" placeholder="Why should it be in the game? (optional)"
+                aria-label="Note for the admins"></textarea>
+      <p id="promote-error" class="error" role="alert"></p>
+      <div class="dialog-buttons">
+        <button type="submit" id="promote-ok">Send request</button>
+        <button type="button" id="promote-cancel">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toasts" aria-live="polite"></div>
+  <script src="/static/auth.js"></script>
+  <script src="/static/pictures.js"></script>
+  <script src="/static/create.js"></script>
+</body>
+</html>
