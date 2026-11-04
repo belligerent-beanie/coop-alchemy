@@ -42,6 +42,7 @@
       <ul id="key" aria-label="Players"></ul>
       <span id="status" class="status" title="Connection"></span>
       <button id="end" class="end-btn" type="button" title="End this game for everyone">End game</button>
+      <button id="journal-open" class="journal-btn" type="button" title="Everything you have discovered, and how elements connect">📖 Journal</button>
       <button id="cat" class="cat" type="button" title="Let the cat tidy up (clears the workspace for everyone)"
               aria-label="Clear the shared workspace">🐈</button>
     </header>
@@ -89,10 +90,26 @@
   </dialog>
   <div id="ended" hidden><div><h2 id="ended-title"></h2><p id="ended-text"></p><a class="btn" href="/">Back to all games</a></div></div>
 
+  <dialog id="journal-dialog" class="dialog">
+    <div class="journal-head">
+      <h2>📖 Journal</h2>
+      <button type="button" id="journal-close" class="link" aria-label="Close the journal">Close</button>
+    </div>
+    <div class="journal-body">
+      <div class="journal-side">
+        <input id="journal-filter" type="search" placeholder="Search the journal…" aria-label="Search the journal" autocomplete="off">
+        <div id="journal-list" role="listbox" aria-label="Discovered elements"></div>
+      </div>
+      <div id="journal-detail" aria-live="polite"></div>
+    </div>
+    <p class="muted journal-foot">Only recipes you have fully discovered are listed.</p>
+  </dialog>
+
   <div id="tooltip" hidden></div>
   <div id="toasts" aria-live="polite"></div>
   <script src="/static/auth.js"></script>
   <script src="/static/pictures.js"></script>
   <script src="/static/app.js"></script>
+  <script src="/static/journal.js"></script>
 </body>
 </html>

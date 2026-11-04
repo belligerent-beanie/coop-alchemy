@@ -368,7 +368,10 @@ class StateTests(unittest.TestCase):
         drain(self.sub_b)
         self.assertEqual(self.state.clear_tiles(self.bob.token), {"cleared": 2})
         self.assertEqual(self.state.tiles(), [])
-        self.assertEqual(names(drain(self.sub_a)), ["tiles_cleared"])
+        events = drain(self.sub_a)
+        self.assertEqual(names(events), ["tiles_cleared"])
+        self.assertEqual(events[0][1], {"pid": self.bob.pid, "name": "Bob"})  # everyone is told who sent the cat
+        self.assertEqual(drain(self.sub_b), [])  # the person who sent it already knows
 
     # ---- combining ----
 
@@ -549,6 +552,61 @@ class HintTests(unittest.TestCase):
         self.assertEqual(
             set(hint_recipe(self.book, self.starters | {"lava"}, depth, "stone") or ()) - {"lava"} <= self.starters, True
         )
+
+
+class JournalTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.state = GameState(load_recipes(RECIPES), rng=random.Random(3))
+        self.alice = self.state.join("Alice")
+        self.bob = self.state.join("Bob")
+        self.sub_b = self.state.subscribe(self.bob.token)
+        assert self.sub_b
+        drain(self.sub_b)
+
+    def entry(self, element: str) -> dict[str, Any]:
+        entries = self.state.journal(self.alice.token)["elements"]
+        return next(e for e in entries if e["id"] == element)
+
+    def make(self, a: str, b: str) -> None:
+        tile = self.state.add_tile(self.alice.token, a, 0.2, 0.2)
+        other = self.state.add_tile(self.alice.token, b, 0.6, 0.6)
+        self.state.grab_tile(self.alice.token, tile["id"])
+        self.state.combine(self.alice.token, other["id"], tile=tile["id"], x=0.6, y=0.6)
+
+    def test_starts_with_only_the_starting_elements_and_no_recipes(self) -> None:
+        entries = self.state.journal(self.alice.token)["elements"]
+        self.assertEqual(sorted(e["id"] for e in entries), ["air", "earth", "fire", "water"])
+        for e in entries:
+            self.assertTrue(e["starter"])
+            self.assertEqual((e["made_from"], e["used_in"]), ([], []))
+            self.assertEqual(set(e), {"id", "label", "emoji", "by", "starter", "made_from", "used_in"})
+
+    def test_a_discovery_links_its_ingredients_and_result(self) -> None:
+        self.make("water", "fire")
+        steam = self.entry("steam")
+        self.assertFalse(steam["starter"])
+        self.assertEqual(steam["by"], "Alice")
+        self.assertEqual([sorted(pair) for pair in steam["made_from"]], [["fire", "water"]])
+        self.assertEqual(self.entry("water")["used_in"], [["fire", "steam"]])
+        self.assertEqual(self.entry("fire")["used_in"], [["water", "steam"]])
+
+    def test_undiscovered_recipes_and_elements_are_never_revealed(self) -> None:
+        self.make("water", "fire")
+        everything = json.dumps(self.state.journal(self.alice.token))
+        for hidden in ("mud", "lava", "dust", "puddle", "cloud"):  # nobody has made these yet
+            self.assertNotIn(f'"{hidden}"', everything)
+        self.assertEqual(self.entry("earth")["used_in"], [])  # its recipes all give undiscovered results
+
+    def test_a_pair_of_the_same_element_is_listed_once(self) -> None:
+        self.make("water", "water")
+        self.assertEqual(self.entry("puddle")["made_from"], [["water", "water"]])
+        self.assertEqual(self.entry("water")["used_in"], [["water", "puddle"]])
+
+    def test_the_journal_is_private_and_needs_a_player(self) -> None:
+        self.state.journal(self.alice.token)
+        self.assertEqual(drain(self.sub_b), [])
+        with self.assertRaises(GameError):
+            self.state.journal("not-a-token")
 
 
 class HintStateTests(unittest.TestCase):
@@ -1512,6 +1570,17 @@ class ServerTests(unittest.TestCase):
         status, data = self.post(slug, who, "/genie", element="fire")
         self.assertEqual(status, 409)
         self.assertIn("not unlocked", data["error"])
+
+    def test_journal_endpoint(self) -> None:
+        slug = self.new_game()
+        who = self.join(slug, "Writer")
+        status, data = self.post(slug, who, "/journal")
+        self.assertEqual(status, 200)
+        self.assertEqual(sorted(e["id"] for e in data["elements"]), ["air", "earth", "fire", "water"])
+        self.assertEqual(call(self.port, "POST", f"/g/{slug}/journal", {"player": "zzz"})[0], 403)
+        self.assertEqual(call(self.port, "POST", f"/g/{slug}/journal", {})[0], 400)  # no token
+        for name in ("journal.js",):
+            self.assertEqual(call(self.port, "GET", f"/static/{name}")[0], 200)
 
     def test_the_game_list_shows_players_and_the_genie(self) -> None:
         slug = self.new_game()

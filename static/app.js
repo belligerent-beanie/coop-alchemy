@@ -852,10 +852,11 @@ function buildSmoke() {
 }
 
 /** Smoke descends, `onPeak` clears the tiles while they are hidden, then the smoke lifts. */
-function catSweep(onPeak) {
+function catSweep(onPeak, message = "") {
+  if (message) toast(message);
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || catBusy) {
     onPeak();
-    if (!catBusy) toast("🐈 The cat tidied up");
+    if (!catBusy && !message) toast("🐈 The cat tidied up");
     return;
   }
   catBusy = true;
@@ -900,6 +901,7 @@ const handlers = {
     setPlayers(s.players);
     s.tiles.forEach((t) => addTile(t));
     updateCounter();
+    if (typeof refreshJournal === "function") refreshJournal();
   },
 
   players(s) {
@@ -915,6 +917,7 @@ const handlers = {
         item.classList.add("new");
         setTimeout(() => item.classList.remove("new"), 3000);
       }
+      if (typeof refreshJournal === "function") refreshJournal();
       return;
     }
     const who = d.pid === me.pid ? "You" : players.get(d.pid)?.name ?? el.by ?? "Someone";
@@ -926,6 +929,7 @@ const handlers = {
       if (d.pid === me.pid) item.scrollIntoView({ block: "nearest" });
     }
     if (total && elements.size >= total) toast("🎉 Every element has been discovered!");
+    if (typeof refreshJournal === "function") refreshJournal();
   },
 
   cursor(d) {
@@ -977,8 +981,9 @@ const handlers = {
     }
   },
 
-  tiles_cleared() {
-    catSweep(clearAllTiles);
+  tiles_cleared(d) {
+    const who = d.name || players.get(d.pid)?.name || "Someone";
+    catSweep(clearAllTiles, `🐈 ${who} sent the cat to clear the workspace`);
   },
 };
 

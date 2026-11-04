@@ -51,9 +51,14 @@ cause: allow incoming connections for Python on the port you chose.
 4. **Playing.** Drag an element from the list onto the workspace, then drop one
    tile onto another to combine them. Everyone sees the same tiles and each
    other's cursors. Double-click a tile to make a copy of it; the copy appears half a tile right and down, so it overlaps the original by half. Elements are listed alphabetically. Hover an element to see who discovered it. The cat 🐈 clears
-   the whole workspace for everyone (after a confirmation).
+   the whole workspace for everyone (after a confirmation); there is no undo, and the other
+   players get a message saying who sent the cat. The search box above the element list
+   filters it by name.
 5. **Hints** (sidebar): something you can make now, a combination to try, or one
-   recipe for an element you type in.
+   recipe for an element you type in. **📖 Journal** (header) lists every element you have
+   discovered. Pick one to see who found it, what it was made from, and what it makes
+   when combined with other elements. Only recipes whose ingredients and result have
+   all been discovered are listed, so the journal never spoils anything; it updates live while it is open.
 6. **The Djinn** 🧞: the Djinn panel is hidden until someone discovers the Djinn element;
    then it slides into the sidebar for everyone and the game gets
    3 wishes plus 1 more for every 50 elements found after that. A wish combines
@@ -391,6 +396,7 @@ skipped if `recipes.json` is missing.
 | `validate_recipes.py`, `recipe_report.py`, `recipe_flowchart.py` | Recipe tools. |
 | `static/` | The pages: login, home, game, and the "use a laptop" page. |
 | `static/create.*`, `static/admin.*` | The Create Recipes page and the admin review page. |
+| `static/journal.js` | The in-game journal (elements, what made them, what they make). |
 | `static/elements/` | Element pictures, one PNG per element. |
 | `aigen/` | The optional AI suggestion tool (see *AI suggestions*); `python3 -m aigen --help`. |
 | `image_check.py` | Lists elements without a picture and pictures that match nothing. |

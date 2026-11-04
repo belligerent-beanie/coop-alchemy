@@ -41,10 +41,12 @@ Per game, under /g/<game-id> (every POST except /join also carries {"player": <t
     POST /g/<id>/combine       {"b": target tile, and "a": held tile or "element",
                                 "x", "y"}                 -> {"results", "new", "tiles", "removed"}
     POST /g/<id>/hint          {"kind": "can_make" | "try" | "find", "target"}  -> a private hint
+    POST /g/<id>/journal       {}                         -> {"elements": [...]}   every discovered element with the
+                                           recipes that make it and use it (only fully discovered ones)
     POST /g/<id>/genie         {"element"}                -> {"results", "new", "tiles", "genie"}
     GET  /g/<id>/events?player=<token>                    -> server-sent events:
         snapshot, players, discovered, genie, cursor, tile_added, tile_grabbed,
-        tile_moved, tile_dropped, tile_removed, tiles_cleared, ended
+        tile_moved, tile_dropped, tile_removed, tiles_cleared ({"pid", "name"} of whoever sent the cat), ended
 Positions are fractions (0..1) of the workspace size.
 """
 from __future__ import annotations
@@ -81,7 +83,7 @@ BASE_DIR = Path(__file__).resolve().parent
 MAX_BODY = 4096
 KEEPALIVE_SECONDS = 3  # a closed browser is noticed on the second failed write, so about 6 s
 
-ACTIONS = ("/end", "/combine", "/cursor", "/genie", "/hint", "/tile/add", "/tile/grab", "/tile/move",
+ACTIONS = ("/end", "/combine", "/cursor", "/genie", "/hint", "/journal", "/tile/add", "/tile/grab", "/tile/move",
            "/tile/drop", "/tile/remove", "/tiles/clear")
 # Phones are not supported: they are sent to /laptop and get nothing else.
 PHONE_RE = re.compile(r"iPhone|iPod|Windows Phone|Android.+Mobile|Mobile.+Android|\bMobi", re.I)
@@ -113,6 +115,8 @@ def run_action(state: GameState, path: str, token: str, body: dict[str, Any]) ->
         return state.clear_tiles(token)
     if path == "/hint":
         return state.hint(token, body.get("kind"), body.get("target"))
+    if path == "/journal":
+        return state.journal(token)
     if path == "/genie":
         return state.genie_use(token, body.get("element"))
     raise GameError(404, "not found")

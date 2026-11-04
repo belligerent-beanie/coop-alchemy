@@ -455,7 +455,7 @@ class GameState:
             player = self._require_player(token)
             cleared = len(self._tiles)
             self._tiles.clear()
-            self._publish("tiles_cleared", {}, exclude_pid=player.pid)
+            self._publish("tiles_cleared", {"pid": player.pid, "name": player.name}, exclude_pid=player.pid)
             return {"cleared": cleared}
 
     # ---- the genie ---------------------------------------------------------------
@@ -657,6 +657,44 @@ class GameState:
         with self._lock:
             self._prune()
             return not self._seated() and not self._subs and self._clock() - self._touched >= idle_seconds
+
+    # ---- the journal ----------------------------------------------------------
+
+    def journal(self, token: str) -> dict[str, Any]:
+        """Every discovered element with the recipes around it, for the journal page. Private; nothing is broadcast.
+
+        A recipe is listed only when its ingredients and its result have all been discovered, so the
+        journal never gives away an element nobody has found. `made_from` is [ingredient, ingredient]
+        pairs; `used_in` is [other ingredient, result] pairs.
+        """
+        with self._lock:
+            self._require_player(token)
+            have = self._discovered
+            made_from: dict[str, list[list[str]]] = {eid: [] for eid in have}
+            used_in: dict[str, list[list[str]]] = {eid: [] for eid in have}
+            for (a, b), results in self.book.lookup.items():
+                if a not in have or b not in have:
+                    continue
+                for result in results:
+                    if result not in have:
+                        continue
+                    made_from[result].append([a, b])
+                    used_in[a].append([b, result])
+                    if b != a:
+                        used_in[b].append([a, result])
+
+            def label(eid: str) -> str:
+                return self.book.elements[eid].label.casefold()
+
+            entries = []
+            for eid in sorted(have, key=label):
+                entries.append({
+                    **self._element_json(eid, with_by=True),
+                    "starter": eid in self.book.starters,
+                    "made_from": sorted(made_from[eid], key=lambda p: (label(p[0]), label(p[1]))),
+                    "used_in": sorted(used_in[eid], key=lambda p: (label(p[1]), label(p[0]))),
+                })
+            return {"elements": entries}
 
     # ---- hints ----------------------------------------------------------------
 
