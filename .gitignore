@@ -3,6 +3,7 @@ accounts.json
 saves/
 *.pem
 drafts.json
+daily.json
 reload_snapshot.json*
 alchemy.pid
 progress.json

@@ -170,6 +170,29 @@ training stay local).
 `aigen/README.md` lists every option, and each run's full log (every suggestion and why it was kept
 or dropped) is saved in `aigen/runs/`.
 
+### Daily challenge
+
+Every day has one random **target element**, the same for everyone. On the home page press
+**Play** and you get a private workspace with only the starting elements. Discover the target
+while unlocking as **few elements** as you can. Your score is the number of elements you have
+discovered when you find it: the target counts, the starting elements do not, and so do detours
+and elements a recipe makes as a side effect. Lower is better.
+
+- It is solo: nobody else can join your attempt, and it does not use one of the 3 game slots.
+- There are no hints, no Djinn and no free Time element. The 📖 Journal still works.
+- You can try as often as you like (**Start over** drops the attempt in progress). The board on the
+  home page keeps each player's best finished attempt of the day, and the earlier finisher wins a tie.
+  An attempt is not saved: leave it and it is gone, though a **Continue** button brings back one
+  in progress (it is closed 10 minutes after you leave it, like any game).
+- Once you find the target the attempt is over, and a message shows your score.
+- The home page also shows a **reference**: how many elements a good route unlocks. It comes from a
+  quick greedy search, so it is a number to beat, not a proven minimum.
+- "Today" is the date on the computer running the server. The day's target is picked from the date
+  and stored in `daily.json`, so it does not change if you edit the recipes later. It is chosen
+  among elements that take 3 to 8 steps from the starters and whose reference route unlocks at most
+  18 elements (see the constants at the top of `daily.py`; with a small recipe file any element can
+  be picked).
+
 ### Ending and saving a game
 
 Any player can press **End game**. The creator of the game (the account that
@@ -192,7 +215,7 @@ python3 server.py [--host 0.0.0.0] [--port 8000]
                   [--saves-dir saves] [--accounts-file accounts.json]
                   [--tls-cert cert.pem --tls-key key.pem]
                   [--idle-minutes 10]
-                  [--drafts-file drafts.json]
+                  [--drafts-file drafts.json] [--daily-file daily.json]
                   [--snapshot-file reload_snapshot.json] [--pid-file alchemy.pid]
 ```
 
@@ -206,6 +229,7 @@ python3 server.py [--host 0.0.0.0] [--port 8000]
 | `--tls-cert`, `--tls-key` | off | Serve over HTTPS (see below). |
 | `--idle-minutes` | `10` | How long an empty game stays open. |
 | `--drafts-file` | `drafts.json` next to `server.py` | Players' draft recipes and promotion proposals. |
+| `--daily-file` | `daily.json` next to `server.py` | The daily challenge's targets and best scores (the last 30 days). |
 | `--snapshot-file` | `reload_snapshot.json` next to `server.py` | Where running games are parked during a reload. |
 | `--pid-file` | `alchemy.pid` next to `server.py` | Lets `reload.py` find the running server. |
 
@@ -364,10 +388,11 @@ below, more:
 | Accounts | `accounts.json` | Usernames and password hashes; readable only by you on macOS and Linux. |
 | Saved games | `saves/<game>.json` | One file each; deleted after 3 days. |
 | Draft recipes, promotion proposals | `drafts.json` | Deleted with the account's other data by `accounts_admin.py delete` (proposals stay on record). |
+| Daily challenge target and scores | `daily.json` | The last 30 days. A damaged file is reported, never overwritten. |
 | Running games | memory only | Lost if the server stops; `reload.py` carries them across a restart via `reload_snapshot.json`. |
 
 If you keep the project in git, add `accounts.json`, `saves/`, `*.pem`,
-`drafts.json`, `reload_snapshot.json*`, `alchemy.pid`, `aigen/cache/`, `aigen/model.json` and
+`drafts.json`, `daily.json`, `reload_snapshot.json*`, `alchemy.pid`, `aigen/cache/`, `aigen/model.json` and
 `aigen/runs/` to `.gitignore`.
 
 ## Tests
@@ -393,6 +418,7 @@ skipped if `recipes.json` is missing.
 | `hotreload.py`, `reload.py` | Snapshot and restore for patching without stopping games; the command that triggers it. |
 | `accounts.py`, `accounts_admin.py` | Accounts, passwords, sessions, and the admin tool (admins and bots). |
 | `recipes.py`, `hints.py` | Recipe file loading and checking; hint logic. |
+| `daily.py` | The daily challenge: picking the target, the reference route, the score board. |
 | `validate_recipes.py`, `recipe_report.py`, `recipe_flowchart.py` | Recipe tools. |
 | `static/` | The pages: login, home, game, and the "use a laptop" page. |
 | `static/create.*`, `static/admin.*` | The Create Recipes page and the admin review page. |
@@ -400,7 +426,7 @@ skipped if `recipes.json` is missing.
 | `static/elements/` | Element pictures, one PNG per element. |
 | `aigen/` | The optional AI suggestion tool (see *AI suggestions*); `python3 -m aigen --help`. |
 | `image_check.py` | Lists elements without a picture and pictures that match nothing. |
-| `test_coop.py`, `test_reload.py`, `test_drafts.py`, `test_aigen.py`, `test_recipes.json` | Tests and their fixed recipe set. |
+| `test_coop.py`, `test_reload.py`, `test_drafts.py`, `test_daily.py`, `test_aigen.py`, `test_recipes.json` | Tests and their fixed recipe set. |
 
 ## Troubleshooting
 

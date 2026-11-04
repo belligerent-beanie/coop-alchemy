@@ -19,9 +19,14 @@ HTTP API
     GET  /me                                 -> {"username"}
     GET  /lan                                -> {"base"}   the address other players use (for invite links)
     GET  /games                         -> {"games": [...], "max_games"}   (a game has "recent": true if the
-                                           caller left it within the last 30 minutes and it is still running)
+                                           caller left it within the last 30 minutes and it is still running;
+                                           the caller's own daily attempt is listed with "private": true)
     POST /games         {"name"}        -> {"id", "name", "url"}      (409 if 3 games are running)
     GET  /saved                         -> {"games": [...]}  saved games this account played in
+    GET  /daily                         -> today's challenge: {"date", "target", "reference", "board", "best",
+                                           "running"}   (see daily.py)
+    POST /daily/start   {"fresh"?}      -> {"id", "url"}   the caller's attempt at today's challenge: the one in
+                                           progress, or a new one (always a new one with "fresh": true)
     POST /games/resume  {"id"}          -> {"id", "name", "url"}      (works even with 3 games running)
     GET  /laptop                        the page every phone is sent to; phones get nothing else
 
@@ -71,6 +76,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from accounts import AccountStore
+from daily import DailyStore
 from drafts import DraftStore
 from games import IDLE_CLOSE_SECONDS, GameRegistry
 from hints import find_element
@@ -213,6 +219,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, self._game_list())
             elif path == "/saved":
                 self._json(200, {"games": self.server.registry.find_saved(self._user())})
+            elif path == "/daily":
+                self._json(200, self.server.registry.daily_status(self._user()))
             elif path == "/version":
                 self._json(200, {"version": self._static_version()})
             elif path == "/images":
@@ -250,6 +258,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/games":
                 game = self.server.registry.create(self._read_json().get("name"), self._user())
                 self._json(200, {"id": game.slug, "name": game.name, "url": f"/g/{game.slug}"})
+                return
+            if path == "/daily/start":
+                game = self.server.registry.start_daily(self._user(), self._read_json().get("fresh") is True)
+                self._json(200, {"id": game.slug, "url": f"/g/{game.slug}"})
                 return
             if path == "/games/resume":
                 game = self.server.registry.resume(self._read_json().get("id"), self._user())
@@ -492,6 +504,8 @@ def main() -> int:
     parser.add_argument("--tls-key", help="private key file (PEM) for --tls-cert")
     parser.add_argument("--drafts-file", default=str(BASE_DIR / "drafts.json"),
                         help="where draft recipes and promotion requests are kept (default: ./drafts.json)")
+    parser.add_argument("--daily-file", default=str(BASE_DIR / "daily.json"),
+                        help="where the daily challenge's targets and scores are kept (default: ./daily.json)")
     parser.add_argument("--snapshot-file", default=str(BASE_DIR / "reload_snapshot.json"),
                         help="where running games are parked during a reload (default: ./reload_snapshot.json)")
     parser.add_argument("--pid-file", default=str(BASE_DIR / "alchemy.pid"),
@@ -507,7 +521,8 @@ def main() -> int:
         return 1
 
     saves = SaveStore(args.saves_dir)
-    registry = GameRegistry(book, idle_seconds=args.idle_minutes * 60, saves=saves)
+    registry = GameRegistry(book, idle_seconds=args.idle_minutes * 60, saves=saves,
+                            daily=DailyStore(args.daily_file, book))
     accounts = AccountStore(args.accounts_file)
     listen_fd = int(os.environ.pop("ALCHEMY_LISTEN_FD")) if "ALCHEMY_LISTEN_FD" in os.environ else None
     try:

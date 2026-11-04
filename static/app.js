@@ -198,9 +198,60 @@ function upsertElement(raw) {
   return el;
 }
 
+let challenge = null;   // {date, target, reference, starters, done} when this game is a daily challenge attempt
+
 function updateCounter() {
+  if (challenge) {
+    const unlocked = elements.size - challenge.starters;
+    $("count").textContent = `Unlocked ${unlocked}`;
+    $("challenge-count").textContent = `${unlocked} unlocked so far`;
+    return;
+  }
   $("count").textContent = `Found ${elements.size} / ${total}`;
 }
+
+function setChallenge(c) {
+  challenge = c;
+  $("challenge").hidden = !c;
+  if (!c) return;
+  $("count").title = "Elements you have unlocked, not counting the starting ones";
+  $("challenge-target").textContent = `${c.target.emoji} ${c.target.label}`.trim();
+  $("challenge-ref").textContent = c.reference ? `(a good route unlocks ${c.reference})` : "";
+  $("invite").hidden = true;   // a private attempt: nobody else can join it
+  $("hints").hidden = true;    // no hints in the challenge (the server refuses them too)
+  $("end").textContent = "Leave";
+  $("end-title").textContent = "Leave this attempt?";
+  $("end-text").textContent = "Attempts are not saved. You can start a new one from the home page.";
+  $("end-save").hidden = true;
+  $("end-nosave").textContent = "Leave";
+  $("end-cancel").textContent = "Keep trying";
+}
+
+function showChallengeDone(score, reference) {
+  const target = challenge.target;
+  const beat = reference ? (score < reference ? " That beats the reference route!"
+    : score === reference ? " That matches the reference route." : ` The reference route unlocks ${reference}.`) : "";
+  $("challenge-done-text").textContent =
+    `You found ${`${target.emoji} ${target.label}`.trim()} after unlocking ${score} element${score === 1 ? "" : "s"}.${beat}`;
+  challenge.done = score;
+  $("challenge-count").textContent = `found it with ${score} unlocked`;
+  if (!$("challenge-done").open) $("challenge-done").showModal();
+}
+
+$("challenge-again").addEventListener("click", async () => {
+  $("challenge-again").disabled = true;
+  try {
+    const res = await fetch("/daily/start", {
+      method: "POST", headers: Auth.headers({ "Content-Type": "application/json" }), body: JSON.stringify({ fresh: true }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "could not start a new attempt");
+    location.href = data.url;
+  } catch (err) {
+    $("challenge-done-error").textContent = err.message;
+    $("challenge-again").disabled = false;
+  }
+});
 
 $("filter").addEventListener("input", () => {
   for (const node of itemEls.values()) node.hidden = !matchesFilter(node);
@@ -891,6 +942,7 @@ const handlers = {
     $("game-name").textContent = s.game.name;
     document.title = `${s.game.name} · Co-op Alchemy`;
     setGenie(s.genie);
+    setChallenge(s.challenge);
     clearAllTiles();
     elements.clear();
     itemEls.clear();
@@ -901,6 +953,7 @@ const handlers = {
     setPlayers(s.players);
     s.tiles.forEach((t) => addTile(t));
     updateCounter();
+    if (challenge && challenge.done !== null) showChallengeDone(challenge.done, challenge.reference);
     if (typeof refreshJournal === "function") refreshJournal();
   },
 
@@ -979,6 +1032,10 @@ const handlers = {
     } else if (d.status.total > before.total) {
       toast("🧞 The Djinn earned another wish");
     }
+  },
+
+  challenge_done(d) {
+    if (challenge) showChallengeDone(d.score, d.reference);
   },
 
   tiles_cleared(d) {

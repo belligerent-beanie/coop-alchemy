@@ -727,3 +727,13 @@ body.admin { overflow: auto; }
 .journal-chip:hover { border-color: var(--accent); }
 .journal-foot { margin: 10px 0 0; }
 @media (max-width: 700px) { .journal-body { grid-template-columns: 1fr; height: 70vh; } #journal-list { max-height: 9rem; flex: none; } }
+
+/* ---- daily challenge ---- */
+
+.daily-target { font-size: 1.15rem; }
+.daily-board-title { margin: 12px 0 4px; font-size: 0.95rem; }
+.daily-board { margin: 0; padding-left: 1.4rem; line-height: 1.7; }
+.daily-board .me { font-weight: 600; }
+.challenge-bar { padding: 6px 14px; background: var(--accent); color: #fff; font-size: 0.95rem; }
+.challenge-bar .muted { color: inherit; opacity: 0.85; }
+#challenge-done { max-width: 26rem; }

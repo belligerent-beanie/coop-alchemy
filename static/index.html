@@ -46,6 +46,10 @@
       <button id="cat" class="cat" type="button" title="Let the cat tidy up (clears the workspace for everyone)"
               aria-label="Clear the shared workspace">🐈</button>
     </header>
+    <div id="challenge" class="challenge-bar" role="status" hidden>
+      🎯 Find <strong id="challenge-target"></strong> by unlocking as few elements as you can ·
+      <span id="challenge-count"></span> <span id="challenge-ref" class="muted"></span>
+    </div>
     <main>
       <div id="workspace" aria-label="Shared workspace">
         <div id="cursor-layer"></div>
@@ -77,8 +81,8 @@
 
   <dialog id="end-dialog">
     <form method="dialog">
-      <h2>End this game?</h2>
-      <p>This closes the game for everyone in it. Saving keeps what you have discovered for 3 days, and the players can
+      <h2 id="end-title">End this game?</h2>
+      <p id="end-text">This closes the game for everyone in it. Saving keeps what you have discovered for 3 days, and the players can
         resume it from the home page. The workspace itself is not saved.</p>
       <p id="end-note" class="muted"></p>
       <div class="dialog-buttons">
@@ -87,6 +91,15 @@
         <button type="button" id="end-cancel">Keep playing</button>
       </div>
     </form>
+  </dialog>
+  <dialog id="challenge-done" class="dialog">
+    <h2>🎉 You found it!</h2>
+    <p id="challenge-done-text"></p>
+    <div class="dialog-buttons">
+      <button type="button" id="challenge-again">Try again</button>
+      <a class="btn" href="/">Back to home</a>
+    </div>
+    <p id="challenge-done-error" class="error" role="alert"></p>
   </dialog>
   <div id="ended" hidden><div><h2 id="ended-title"></h2><p id="ended-text"></p><a class="btn" href="/">Back to all games</a></div></div>
 

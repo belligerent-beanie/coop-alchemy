@@ -43,11 +43,12 @@ async function refresh() {
   try {
     const data = await Auth.fetch("/games");
     maxGames = data.max_games;
-    running = data.games.length;
-    const recent = data.games.filter((g) => g.recent);
+    const games = data.games.filter((g) => !g.private);  // your daily challenge attempt is not a game to join
+    running = games.length;
+    const recent = games.filter((g) => g.recent);
     $("recent").replaceChildren(...recent.map((g) => card(g, "Rejoin")));
     $("recent-section").hidden = recent.length === 0;
-    $("games").replaceChildren(...data.games.filter((g) => !g.recent).map((g) => card(g)));
+    $("games").replaceChildren(...games.filter((g) => !g.recent).map((g) => card(g)));
     $("no-games").hidden = running > 0;
     $("game-count").textContent = `(${running} of ${maxGames})`;
     const full = running >= maxGames;
@@ -111,6 +112,45 @@ async function loadSaved() {
     $("no-saved").hidden = data.games.length > 0;
   } catch (_) { /* shown again on the next refresh */ }
 }
+
+// ---- the daily challenge ----
+
+async function loadDaily() {
+  try {
+    const d = await Auth.fetch("/daily");
+    $("daily").hidden = false;
+    $("daily-date").textContent = d.date;
+    $("daily-target").textContent = `${d.target.emoji} ${d.target.label}`.trim();
+    const parts = [];
+    if (d.reference) parts.push(`A good route unlocks ${d.reference} elements. Can you beat it?`);
+    parts.push(d.best === null ? "You haven't finished it today." : `Your best today: ${d.best}.`);
+    $("daily-meta").textContent = parts.join(" ");
+    $("daily-play").textContent = d.running ? "Continue" : d.best === null ? "Play" : "Play again";
+    $("daily-restart").hidden = !d.running;
+    $("daily-board").replaceChildren(...d.board.map((row) => {
+      const li = document.createElement("li");
+      li.textContent = `${row.name}: ${row.score} elements`;
+      if (row.name.toLowerCase() === Auth.user().toLowerCase()) li.className = "me";
+      return li;
+    }));
+    $("daily-empty").hidden = d.board.length > 0;
+    $("daily-error").textContent = "";
+  } catch (_) { /* the section stays as it was; the next refresh tries again */ }
+}
+
+async function startDaily(fresh) {
+  $("daily-error").textContent = "";
+  try {
+    location.href = (await Auth.fetch("/daily/start", { fresh })).url;
+  } catch (err) {
+    $("daily-error").textContent = err.message;
+  }
+}
+$("daily-play").addEventListener("click", () => startDaily(false));
+$("daily-restart").addEventListener("click", () => startDaily(true));
+loadDaily();
+setInterval(loadDaily, 15000);
+window.addEventListener("pageshow", loadDaily);  // coming back with the browser's back button
 
 refresh();
 loadSaved();

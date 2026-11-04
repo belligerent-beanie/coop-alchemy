@@ -18,6 +18,21 @@
     <h1>⚗️ Co-op Alchemy</h1>
     <p class="who">Logged in as <strong id="who"></strong> · <button type="button" id="logout" class="link">Log out</button></p>
 
+    <section id="daily" hidden>
+      <h2>Daily challenge <span id="daily-date" class="muted"></span></h2>
+      <p>Today's target: <strong id="daily-target" class="daily-target"></strong>. Start with the basic elements and
+        discover it while unlocking as few elements as you can.</p>
+      <p class="muted" id="daily-meta"></p>
+      <p class="home-links">
+        <button type="button" id="daily-play" class="btn">Play</button>
+        <button type="button" id="daily-restart" class="btn" hidden>Start over</button>
+      </p>
+      <p id="daily-error" class="error" role="alert"></p>
+      <h3 class="daily-board-title">Today's best</h3>
+      <ol id="daily-board" class="daily-board"></ol>
+      <p id="daily-empty" class="muted" hidden>Nobody has finished today's challenge yet.</p>
+    </section>
+
     <section>
       <h2>Create recipes</h2>
       <p class="muted">A solo playground with every element unlocked. Invent new combinations and, if you like one,

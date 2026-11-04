@@ -17,6 +17,7 @@ import math
 import queue
 import random
 import secrets
+import sys
 import threading
 import time
 import unicodedata
@@ -82,6 +83,20 @@ class Subscriber:
     dead: bool = False
 
 
+@dataclass(frozen=True)
+class Challenge:
+    """Marks a game as one player's attempt at the daily challenge (see daily.py).
+
+    The game then has one player, no hints, Djinn or free Time element, and cannot be saved. The first
+    time `target` is discovered the attempt is over: its score is the number of elements discovered
+    (starters excluded, the target included), and `on_finish(username, score)` is called once.
+    """
+    date: str
+    target: str                    # element id
+    reference: int | None = None   # elements unlocked by the game's own route, to show as a number to beat
+    on_finish: Callable[[str, int], None] | None = None
+
+
 @dataclass
 class Tile:
     id: str
@@ -120,8 +135,11 @@ class GameState:
     def __init__(self, book: RecipeBook, *, name: str = "game", slug: str = "game", creator: str = "",
                  clock: Callable[[], float] = time.monotonic,
                  grace: float = JOIN_GRACE_SECONDS,
-                 rng: random.Random | None = None) -> None:
+                 rng: random.Random | None = None,
+                 challenge: Challenge | None = None) -> None:
         self.book = book
+        self.challenge = challenge
+        self._result: int | None = None  # a challenge attempt's score once the target has been found
         self.name = name
         self.slug = slug
         self.creator = creator  # username of the account that started the game; only they can save it
@@ -137,6 +155,8 @@ class GameState:
         self._discovered: dict[str, str | None] = {s: None for s in book.starters}  # id -> discoverer
         self._time = find_element(book, TIME)  # id of the element that unlocks at TIME_UNLOCK_AT, if any
         self._djinn = find_element(book, DJINN)  # id of the element that unlocks the genie, if any
+        if challenge is not None:  # a challenge is a plain puzzle: no free elements, no wishes
+            self._time = self._djinn = None
         self._genie_unlocked_at: int | None = None  # number of discoveries when the genie unlocked
         self._genie_used = 0
         self._players: dict[str, Player] = {}         # token -> player
@@ -175,8 +195,19 @@ class GameState:
                 out.append({"pid": pid, "name": sub.player.name, "color": self._colors[pid]})
         return out
 
+    def _score(self) -> int:
+        """Elements discovered so far, not counting the starting ones."""
+        return len(self._discovered) - len(self.book.starters)
+
+    def _challenge_json(self) -> dict[str, Any] | None:
+        if self.challenge is None:
+            return None
+        return {"date": self.challenge.date, "target": self._element_json(self.challenge.target),
+                "reference": self.challenge.reference, "starters": len(self.book.starters), "done": self._result}
+
     def _snapshot(self, player: Player) -> dict[str, Any]:
         return {
+            "challenge": self._challenge_json(),
             "you": player.pid,
             "game": {"id": self.slug, "name": self.name, "creator": self.creator},
             "genie": self._genie_status(),
@@ -264,6 +295,13 @@ class GameState:
             self._discovered[r] = player.name
         if self._djinn in new and self._genie_unlocked_at is None:
             self._genie_unlocked_at = len(self._discovered)
+        if self.challenge is not None and self._result is None and self.challenge.target in new:
+            self._result = self._score()
+            if self.challenge.on_finish is not None:
+                try:
+                    self.challenge.on_finish(player.name, self._result)
+                except Exception as exc:  # a score that cannot be stored must not break the game
+                    print(f"warning: could not record the challenge score: {exc}", file=sys.stderr)
         return new
 
     def _announce(self, player: Player, new: list[str], base: int) -> None:
@@ -275,6 +313,9 @@ class GameState:
                 "total": self.total,
             })
         self._unlock_time()
+        if self.challenge is not None and self._result is not None and self.challenge.target in new:
+            self._publish("challenge_done", {"score": self._result, "reference": self.challenge.reference,
+                                             "target": self._element_json(self.challenge.target)})
 
     def _unlock_time(self) -> None:
         """Add Time to the book once the room has found TIME_UNLOCK_AT elements, if nobody has made it yet."""
@@ -315,6 +356,8 @@ class GameState:
     def join(self, raw_name: object) -> Player:
         name = clean_name(raw_name)
         with self._lock:
+            if self.challenge is not None and name.casefold() != clean_name(self.creator).casefold():
+                raise GameError(403, "this is someone else's daily challenge attempt")
             self._prune()
             seated = self._seated()
             if len(seated) >= MAX_PLAYERS:
@@ -563,6 +606,9 @@ class GameState:
         with self._lock:
             now = self._clock()
             data = self.export()
+            if self.challenge is not None:
+                data["challenge"] = {"date": self.challenge.date, "target": self.challenge.target,
+                                     "reference": self.challenge.reference, "result": self._result}
             data["live"] = {
                 "tile_seq": self._tile_seq,
                 "tiles": [{"id": t.id, "element": t.element, "x": t.x, "y": t.y} for t in self._tiles.values()],
@@ -580,6 +626,10 @@ class GameState:
         self.restore(data)
         live = data.get("live") if isinstance(data.get("live"), dict) else {}
         with self._lock:
+            saved = data.get("challenge")
+            result = saved.get("result") if isinstance(saved, dict) else None
+            if self.challenge is not None and isinstance(result, int) and not isinstance(result, bool):
+                self._result = result
             now = self._clock()
             seq = live.get("tile_seq")
             self._tile_seq = seq if isinstance(seq, int) and not isinstance(seq, bool) and seq >= 0 else 0
@@ -607,6 +657,12 @@ class GameState:
                     if isinstance(name, str) and isinstance(age, (int, float)) and not isinstance(age, bool):
                         self._last_seen[name] = now - max(0.0, float(age))
             self._touched = now
+
+    @property
+    def finished(self) -> bool:
+        """True once a challenge attempt has found its target."""
+        with self._lock:
+            return self._result is not None
 
     def has_progress(self) -> bool:
         with self._lock:
@@ -707,6 +763,8 @@ class GameState:
         """
         with self._lock:
             self._require_player(token)
+            if self.challenge is not None:
+                raise GameError(403, "hints are switched off in the daily challenge")
             have = self._discovered
             if kind == "can_make":
                 result = hint_can_make(self.book, have, self._rng)
@@ -741,6 +799,8 @@ class GameState:
         """
         with self._lock:
             player = self._require_player(token)
+            if self._result is not None:
+                raise GameError(409, "you have found the target: start a new attempt from the home page to try again")
             if (tile is None) == (element is None):
                 raise GameError(400, "give exactly one of 'a' (a tile) or 'element'")
             b = self._get_tile(target_tile)
