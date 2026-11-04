@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from daily import KEEP_DAYS, DailyStore, pick_target, reference_sizes
+from daily import KEEP_DAYS, MAX_ATTEMPTS, DailyStore, pick_target, reference_sizes
 from games import GameRegistry
 from recipes import depths, load_recipes
 from state import GameError, GameState
@@ -87,6 +87,22 @@ class DailyStoreTests(unittest.TestCase):
         self.assertEqual(len(store.board(DAY, limit=2)), 2)
         self.assertEqual(store.board("2000-01-01"), [])
         self.assertFalse(store.submit("2000-01-01", "Ann", 1))  # a day that was never opened
+
+    def test_attempts_are_counted_per_account_and_day_and_survive_a_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "daily.json"
+            store = seeded_store(path)
+            self.assertEqual(store.attempts(DAY, "Ann"), 0)
+            self.assertEqual([store.use_attempt(DAY, "Ann"), store.use_attempt(DAY, "ann")], [1, 2])
+            self.assertEqual((store.attempts(DAY, "Bob"), store.attempts("2000-01-01", "Ann")), (0, 0))
+            self.assertEqual(store.use_attempt("2000-01-01", "Ann"), 0)   # a day that was never opened
+            self.assertEqual(DailyStore(path, BOOK, today=lambda: DAY).attempts(DAY, "Ann"), 2)
+            data = json.loads(path.read_text())
+            data["days"][DAY]["target"] = "gone"                          # a replaced target keeps the attempts
+            path.write_text(json.dumps(data))
+            fresh = DailyStore(path, BOOK, today=lambda: DAY)
+            self.assertNotEqual(fresh.today()["target"], "gone")
+            self.assertEqual(fresh.attempts(DAY, "Ann"), 2)
 
     def test_scores_survive_a_restart_and_old_days_are_dropped(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -202,6 +218,45 @@ class ChallengeGameTests(unittest.TestCase):
         self.make(fresh, player, "air", "steam")
         self.assertIsNot(self.registry.start_daily("Ann"), fresh)        # a finished attempt is not reused
 
+    def test_three_attempts_a_day(self) -> None:
+        self.assertEqual(MAX_ATTEMPTS, 3)
+        self.assertEqual(self.registry.daily_status("Ann")["attempts_used"], 1)   # setUp started the first
+        self.assertIs(self.registry.start_daily("Ann"), self.game)                 # carrying on is free
+        self.assertEqual(self.registry.daily_status("Ann")["attempts_used"], 1)
+        second = self.registry.start_daily("Ann", fresh=True)                      # starting over uses one
+        third = self.registry.start_daily("ann", fresh=True)
+        self.assertEqual(self.registry.daily_status("Ann")["attempts_used"], 3)
+        with self.assertRaises(GameError) as err:
+            self.registry.start_daily("Ann", fresh=True)
+        self.assertEqual(err.exception.status, 409)
+        self.assertIn("come back tomorrow", err.exception.message)
+        self.assertIs(self.registry.get(third.slug), third)                        # a refusal drops nothing
+        self.assertIs(self.registry.start_daily("Ann"), third)                     # and the attempt in progress stays open
+        self.assertIsNone(self.registry.get(second.slug))
+        player = third.join("Ann")                                                 # finish the last one...
+        self.make(third, player, "water", "fire")
+        self.make(third, player, "air", "steam")
+        status = self.registry.daily_status("Ann")
+        self.assertEqual((status["attempts_used"], status["attempts_max"], status["running"]), (3, 3, None))
+        with self.assertRaises(GameError):                                         # ...nothing is left to start
+            self.registry.start_daily("Ann")
+        self.assertEqual(self.registry.daily_status("Bob")["attempts_used"], 0)    # other accounts have their own
+        self.registry.start_daily("Bob")
+
+    def test_a_new_day_gives_new_attempts(self) -> None:
+        day = {"value": DAY}
+        store = seeded_store()
+        store._today = lambda: day["value"]
+        registry = GameRegistry(BOOK, daily=store)
+        for _ in range(MAX_ATTEMPTS):
+            registry.start_daily("Ann", fresh=True)
+        with self.assertRaises(GameError):
+            registry.start_daily("Ann", fresh=True)
+        day["value"] = "2026-11-05"
+        game = registry.start_daily("Ann", fresh=True)
+        assert game.challenge is not None
+        self.assertEqual((game.challenge.date, registry.daily_status("Ann")["attempts_used"]), ("2026-11-05", 1))
+
     def test_status_for_the_home_page(self) -> None:
         status = self.registry.daily_status("Ann")
         self.assertEqual((status["date"], status["target"]["id"], status["reference"]), (DAY, "cloud", 2))
@@ -263,6 +318,7 @@ class DailyEndpointTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual((data["date"], data["target"]["id"], data["reference"], data["best"], data["running"]),
                          (DAY, "cloud", 2, None, None))
+        self.assertEqual((data["attempts_used"], data["attempts_max"]), (0, 3))
 
         status, started = call(self.port, "POST", "/daily/start", {}, headers=ann)
         self.assertEqual(status, 200)
@@ -272,6 +328,7 @@ class DailyEndpointTests(unittest.TestCase):
         self.assertEqual(call(self.port, "GET", "/daily", headers=ann)[1]["running"], f"/g/{slug}")
         self.assertNotEqual(call(self.port, "POST", "/daily/start", {"fresh": True}, headers=ann)[1]["id"], slug)
         slug = call(self.port, "GET", "/daily", headers=ann)[1]["running"].split("/")[-1]
+        self.assertEqual(call(self.port, "GET", "/daily", headers=ann)[1]["attempts_used"], 2)
 
         listing = call(self.port, "GET", "/games", headers=ann)[1]["games"]
         self.assertEqual([g["id"] for g in listing if g.get("private")], [slug])   # only its owner sees it
@@ -300,6 +357,16 @@ class DailyEndpointTests(unittest.TestCase):
         # Everybody sees the same board.
         self.assertEqual(call(self.port, "GET", "/daily", headers=bob)[1]["board"], data["board"])
         self.assertEqual(call(self.port, "GET", "/daily", headers=bob)[1]["best"], None)
+
+    def test_the_fourth_attempt_is_refused(self) -> None:
+        cy = self.as_user("DailyCy")
+        for _ in range(3):
+            self.assertEqual(call(self.port, "POST", "/daily/start", {"fresh": True}, headers=cy)[0], 200)
+        status, data = call(self.port, "POST", "/daily/start", {"fresh": True}, headers=cy)
+        self.assertEqual(status, 409)
+        self.assertIn("all 3", data["error"])
+        self.assertEqual(call(self.port, "POST", "/daily/start", {}, headers=cy)[0], 200)  # carrying on is still fine
+        self.assertEqual(call(self.port, "GET", "/daily", headers=cy)[1]["attempts_used"], 3)
 
     def test_login_is_required(self) -> None:
         self.assertEqual(call(self.port, "GET", "/daily", headers={"X-Session": ""})[0], 401)

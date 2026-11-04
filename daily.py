@@ -2,8 +2,9 @@
 
 Everyone gets the same target on a given day. They start from the starting elements alone
 and try to discover the target while unlocking as few elements as possible (every element
-discovered on the way counts, the target included, the starters do not). A player may try as
-often as they like; the board keeps each player's best finished attempt of the day.
+discovered on the way counts, the target included, the starters do not). A player gets
+MAX_ATTEMPTS attempts a day (starting one uses it up, finished or not; carrying on with one that is
+still in progress is free); the board keeps each player's best finished attempt of the day.
 
 The day's target is chosen once, from the date, and stored in daily.json so that it does not
 change if the recipe file is edited later. It is picked from elements that are neither trivial
@@ -34,6 +35,7 @@ MAX_REFERENCE = 18   # skip targets whose reference route unlocks more elements 
 SEARCH_PASSES = 40   # randomised greedy passes used to improve the reference route sizes
 KEEP_DAYS = 30       # older days are dropped from the file
 BOARD_SIZE = 10      # scores shown on the home page
+MAX_ATTEMPTS = 3     # attempts per player per day
 
 
 def reference_sizes(book: RecipeBook, depth: dict[str, int], passes: int = SEARCH_PASSES) -> dict[str, int]:
@@ -143,8 +145,10 @@ class DailyStore:
             changed = False
             if not isinstance(entry, dict) or not self._target_is_usable(entry.get("target")):
                 target, reference = pick_target(self.book, day)
-                scores = entry.get("scores") if isinstance(entry, dict) and isinstance(entry.get("scores"), dict) else {}
-                entry = days[day] = {"target": target, "reference": reference, "scores": scores}
+                kept = entry if isinstance(entry, dict) else {}   # a replaced target keeps the day's scores and attempts
+                entry = days[day] = {"target": target, "reference": reference,
+                                     "scores": kept.get("scores") if isinstance(kept.get("scores"), dict) else {},
+                                     "attempts": kept.get("attempts") if isinstance(kept.get("attempts"), dict) else {}}
                 changed = True
             for old in sorted(days)[:-KEEP_DAYS]:
                 del days[old]
@@ -169,6 +173,30 @@ class DailyStore:
             entry["scores"][key] = {"name": username, "score": score, "at": self._clock()}
             self._save(data)
             return True
+
+    def attempts(self, day: str, username: str) -> int:
+        """How many attempts this account has started on `day`."""
+        with self._lock:
+            entry = self._load()["days"].get(day)
+            used = entry.get("attempts") if isinstance(entry, dict) else None
+            count = used.get(key_of(username)) if isinstance(used, dict) else None
+            return count if isinstance(count, int) and not isinstance(count, bool) and count > 0 else 0
+
+    def use_attempt(self, day: str, username: str) -> int:
+        """Count one more started attempt for this account; returns how many it has used on `day` now."""
+        with self._lock:
+            data = self._load()
+            entry = data["days"].get(day)
+            if not isinstance(entry, dict):
+                return 0
+            used = entry.get("attempts")
+            if not isinstance(used, dict):
+                used = entry["attempts"] = {}
+            key = key_of(username)
+            count = self.attempts(day, username) + 1
+            used[key] = count
+            self._save(data)
+            return count
 
     def best(self, day: str, username: str) -> int | None:
         with self._lock:

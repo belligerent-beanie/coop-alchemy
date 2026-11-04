@@ -121,12 +121,20 @@ async function loadDaily() {
     $("daily").hidden = false;
     $("daily-date").textContent = d.date;
     $("daily-target").textContent = `${d.target.emoji} ${d.target.label}`.trim();
+    const left = d.attempts_max - d.attempts_used;
     const parts = [];
     if (d.reference) parts.push(`A good route unlocks ${d.reference} elements. Can you beat it?`);
     parts.push(d.best === null ? "You haven't finished it today." : `Your best today: ${d.best}.`);
+    parts.push(left > 0
+      ? `Starting a new attempt uses one of your ${d.attempts_max} a day (${left} left).`
+      : `You have used all ${d.attempts_max} of today's attempts.`);
     $("daily-meta").textContent = parts.join(" ");
-    $("daily-play").textContent = d.running ? "Continue" : d.best === null ? "Play" : "Play again";
+    const play = $("daily-play");
+    play.disabled = !d.running && left <= 0;
+    play.textContent = d.running ? "Continue" : left <= 0 ? "No attempts left" : d.best === null ? "Play" : "Play again";
     $("daily-restart").hidden = !d.running;
+    $("daily-restart").disabled = left <= 0;
+    $("daily-restart").title = left > 0 ? "Drop this attempt and start a new one (uses an attempt)" : "No attempts left today";
     $("daily-board").replaceChildren(...d.board.map((row) => {
       const li = document.createElement("li");
       li.textContent = `${row.name}: ${row.score} elements`;

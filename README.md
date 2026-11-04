@@ -180,10 +180,12 @@ and elements a recipe makes as a side effect. Lower is better.
 
 - It is solo: nobody else can join your attempt, and it does not use one of the 3 game slots.
 - There are no hints, no Djinn and no free Time element. The 📖 Journal still works.
-- You can try as often as you like (**Start over** drops the attempt in progress). The board on the
-  home page keeps each player's best finished attempt of the day, and the earlier finisher wins a tie.
-  An attempt is not saved: leave it and it is gone, though a **Continue** button brings back one
-  in progress (it is closed 10 minutes after you leave it, like any game).
+- You get **3 attempts a day**. Starting an attempt uses one up, whether or not you finish it, and so does
+  **Start over** or **Try again**. **Continue** (picking up an attempt in progress) is free. The count is
+  kept in `daily.json`, so restarting the server does not reset it. The board on the home page keeps each
+  player's best finished attempt of the day, and the earlier finisher wins a tie. An attempt is not
+  saved: leave it and it is gone, though **Continue** brings back one in progress (it is closed
+  10 minutes after you leave it, like any game).
 - Once you find the target the attempt is over, and a message shows your score.
 - The home page also shows a **reference**: how many elements a good route unlocks. It comes from a
   quick greedy search, so it is a number to beat, not a proven minimum.
@@ -229,7 +231,7 @@ python3 server.py [--host 0.0.0.0] [--port 8000]
 | `--tls-cert`, `--tls-key` | off | Serve over HTTPS (see below). |
 | `--idle-minutes` | `10` | How long an empty game stays open. |
 | `--drafts-file` | `drafts.json` next to `server.py` | Players' draft recipes and promotion proposals. |
-| `--daily-file` | `daily.json` next to `server.py` | The daily challenge's targets and best scores (the last 30 days). |
+| `--daily-file` | `daily.json` next to `server.py` | The daily challenge's targets, attempts used and best scores (the last 30 days). |
 | `--snapshot-file` | `reload_snapshot.json` next to `server.py` | Where running games are parked during a reload. |
 | `--pid-file` | `alchemy.pid` next to `server.py` | Lets `reload.py` find the running server. |
 
@@ -388,7 +390,7 @@ below, more:
 | Accounts | `accounts.json` | Usernames and password hashes; readable only by you on macOS and Linux. |
 | Saved games | `saves/<game>.json` | One file each; deleted after 3 days. |
 | Draft recipes, promotion proposals | `drafts.json` | Deleted with the account's other data by `accounts_admin.py delete` (proposals stay on record). |
-| Daily challenge target and scores | `daily.json` | The last 30 days. A damaged file is reported, never overwritten. |
+| Daily challenge target, attempts and scores | `daily.json` | The last 30 days. A damaged file is reported, never overwritten. |
 | Running games | memory only | Lost if the server stops; `reload.py` carries them across a restart via `reload_snapshot.json`. |
 
 If you keep the project in git, add `accounts.json`, `saves/`, `*.pem`,

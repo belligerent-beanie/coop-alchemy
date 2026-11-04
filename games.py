@@ -19,7 +19,7 @@ import unicodedata
 from typing import Any, Callable
 
 from accounts import key_of
-from daily import DailyStore
+from daily import MAX_ATTEMPTS, DailyStore
 from recipes import RecipeBook
 from saves import SaveStore
 from state import Challenge, GameError, GameState
@@ -125,6 +125,8 @@ class GameRegistry:
                             and not g.finished), None)
         return {
             "date": info["date"],
+            "attempts_used": self.daily.attempts(info["date"], username),
+            "attempts_max": MAX_ATTEMPTS,
             "target": {"id": info["target"], "label": element.label, "emoji": element.emoji},
             "reference": info["reference"],
             "board": self.daily.board(info["date"]),
@@ -133,7 +135,11 @@ class GameRegistry:
         }
 
     def start_daily(self, username: str, fresh: bool = False) -> GameState:
-        """Today's attempt for this account: the one in progress, or a new one (always new if `fresh`)."""
+        """Today's attempt for this account: the one in progress, or a new one (always new if `fresh`).
+
+        Carrying on with an attempt in progress is free. A new one uses up one of the account's MAX_ATTEMPTS
+        for the day, and is refused (409) when none are left.
+        """
         info = self._today()
         with self._lock:
             self._expire()
@@ -141,8 +147,11 @@ class GameRegistry:
             for game in mine:
                 if not fresh and game.challenge.date == info["date"] and not game.finished:
                     return game
+            if self.daily.attempts(info["date"], username) >= MAX_ATTEMPTS:
+                raise GameError(409, f"you have used all {MAX_ATTEMPTS} of today's attempts: come back tomorrow")
             for game in mine:
                 del self._games[game.slug]
+            self.daily.use_attempt(info["date"], username)
             slug = next(s for s in (f"daily-{secrets.token_hex(4)}" for _ in range(100)) if s not in self._games)
             game = GameState(self.book, name=f"Daily challenge {info['date']}", slug=slug, creator=username,
                              clock=self._clock,

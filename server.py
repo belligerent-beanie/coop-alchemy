@@ -24,9 +24,10 @@ HTTP API
     POST /games         {"name"}        -> {"id", "name", "url"}      (409 if 3 games are running)
     GET  /saved                         -> {"games": [...]}  saved games this account played in
     GET  /daily                         -> today's challenge: {"date", "target", "reference", "board", "best",
-                                           "running"}   (see daily.py)
+                                           "running", "attempts_used", "attempts_max"}   (see daily.py)
     POST /daily/start   {"fresh"?}      -> {"id", "url"}   the caller's attempt at today's challenge: the one in
-                                           progress, or a new one (always a new one with "fresh": true)
+                                           progress (free), or a new one that uses up one of the 3 attempts a day
+                                           (always a new one with "fresh": true; 409 when none are left)
     POST /games/resume  {"id"}          -> {"id", "name", "url"}      (works even with 3 games running)
     GET  /laptop                        the page every phone is sent to; phones get nothing else
 

@@ -236,6 +236,17 @@ function showChallengeDone(score, reference) {
   challenge.done = score;
   $("challenge-count").textContent = `found it with ${score} unlocked`;
   if (!$("challenge-done").open) $("challenge-done").showModal();
+  showAttemptsLeft();
+}
+
+/** Shows on the "Try again" button how many attempts are left today (none: it is disabled). */
+async function showAttemptsLeft() {
+  try {
+    const d = await Auth.fetch("/daily");
+    const left = d.attempts_max - d.attempts_used;
+    $("challenge-again").disabled = left <= 0;
+    $("challenge-again").textContent = left > 0 ? `Try again (${left} left)` : "No attempts left today";
+  } catch (_) { /* the button still works; the server refuses it if none are left */ }
 }
 
 $("challenge-again").addEventListener("click", async () => {
