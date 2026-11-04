@@ -95,6 +95,7 @@ class Challenge:
     target: str                    # element id
     reference: int | None = None   # elements unlocked by the game's own route, to show as a number to beat
     on_finish: Callable[[str, int], None] | None = None
+    tier: str = "medium"           # easy, medium or hard
 
 
 @dataclass
@@ -202,7 +203,8 @@ class GameState:
     def _challenge_json(self) -> dict[str, Any] | None:
         if self.challenge is None:
             return None
-        return {"date": self.challenge.date, "target": self._element_json(self.challenge.target),
+        return {"date": self.challenge.date, "tier": self.challenge.tier,
+                "target": self._element_json(self.challenge.target),
                 "reference": self.challenge.reference, "starters": len(self.book.starters), "done": self._result}
 
     def _snapshot(self, player: Player) -> dict[str, Any]:
@@ -607,7 +609,8 @@ class GameState:
             now = self._clock()
             data = self.export()
             if self.challenge is not None:
-                data["challenge"] = {"date": self.challenge.date, "target": self.challenge.target,
+                data["challenge"] = {"date": self.challenge.date, "tier": self.challenge.tier,
+                                     "target": self.challenge.target,
                                      "reference": self.challenge.reference, "result": self._result}
             data["live"] = {
                 "tile_seq": self._tile_seq,

@@ -47,7 +47,7 @@
               aria-label="Clear the shared workspace">🐈</button>
     </header>
     <div id="challenge" class="challenge-bar" role="status" hidden>
-      🎯 Find <strong id="challenge-target"></strong> by unlocking as few elements as you can ·
+      🎯 <span id="challenge-tier"></span> · Find <strong id="challenge-target"></strong> by unlocking as few elements as you can ·
       <span id="challenge-count"></span> <span id="challenge-ref" class="muted"></span>
     </div>
     <main>
@@ -96,6 +96,7 @@
     <h2>🎉 You found it!</h2>
     <p id="challenge-done-text"></p>
     <div class="dialog-buttons">
+      <button type="button" id="challenge-copy">Copy result</button>
       <button type="button" id="challenge-again">Try again</button>
       <a class="btn" href="/">Back to home</a>
     </div>
@@ -121,6 +122,7 @@
   <div id="tooltip" hidden></div>
   <div id="toasts" aria-live="polite"></div>
   <script src="/static/auth.js"></script>
+  <script src="/static/daily-common.js"></script>
   <script src="/static/pictures.js"></script>
   <script src="/static/app.js"></script>
   <script src="/static/journal.js"></script>

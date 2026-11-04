@@ -215,6 +215,8 @@ function setChallenge(c) {
   $("challenge").hidden = !c;
   if (!c) return;
   $("count").title = "Elements you have unlocked, not counting the starting ones";
+  const info = TIER_INFO[c.tier] || TIER_INFO.medium;
+  $("challenge-tier").textContent = `${info.icon} ${info.label}`;
   $("challenge-target").textContent = `${c.target.emoji} ${c.target.label}`.trim();
   $("challenge-ref").textContent = c.reference ? `(a good route unlocks ${c.reference})` : "";
   $("invite").hidden = true;   // a private attempt: nobody else can join it
@@ -226,6 +228,8 @@ function setChallenge(c) {
   $("end-nosave").textContent = "Leave";
   $("end-cancel").textContent = "Keep trying";
 }
+
+let shareStreak = 0;   // the player's streak, for the "Copy result" text
 
 function showChallengeDone(score, reference) {
   const target = challenge.target;
@@ -239,29 +243,34 @@ function showChallengeDone(score, reference) {
   showAttemptsLeft();
 }
 
-/** Shows on the "Try again" button how many attempts are left today (none: it is disabled). */
+/** Shows on the "Try again" button how many attempts are left in this tier today (none: it is disabled). */
 async function showAttemptsLeft() {
   try {
     const d = await Auth.fetch("/daily");
-    const left = d.attempts_max - d.attempts_used;
+    const mine = d.tiers.find((t) => t.tier === challenge.tier);
+    const left = d.attempts_max - (mine ? mine.attempts_used : 0);
+    shareStreak = d.streak.current;
     $("challenge-again").disabled = left <= 0;
-    $("challenge-again").textContent = left > 0 ? `Try again (${left} left)` : "No attempts left today";
+    $("challenge-again").textContent = left > 0 ? `Try again (${left} left)` : "No attempts left in this tier";
   } catch (_) { /* the button still works; the server refuses it if none are left */ }
 }
 
 $("challenge-again").addEventListener("click", async () => {
   $("challenge-again").disabled = true;
   try {
-    const res = await fetch("/daily/start", {
-      method: "POST", headers: Auth.headers({ "Content-Type": "application/json" }), body: JSON.stringify({ fresh: true }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "could not start a new attempt");
+    const data = await Auth.fetch("/daily/start", { tier: challenge.tier, fresh: true });
     location.href = data.url;
   } catch (err) {
     $("challenge-done-error").textContent = err.message;
     $("challenge-again").disabled = false;
   }
+});
+
+$("challenge-copy").addEventListener("click", async () => {
+  const line = resultLine(challenge.tier, challenge.done, challenge.reference);
+  const ok = await copyText(shareText(challenge.date, [line], shareStreak));
+  $("challenge-done-error").textContent = ok ? "" : "Could not copy. Select the result and copy it by hand.";
+  $("challenge-copy").textContent = ok ? "Copied!" : "Copy result";
 });
 
 $("filter").addEventListener("input", () => {
@@ -1146,24 +1155,6 @@ $("join-form").addEventListener("submit", async (e) => {
     $("join-error").textContent = err.message;
   }
 });
-
-/** Copies text; browsers only allow the clipboard API on secure pages, so fall back to the old way. */
-async function copyText(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch (_) { /* not allowed here: try the fallback */ }
-  const box = document.createElement("textarea");
-  box.value = text;
-  box.setAttribute("readonly", "");
-  box.style.cssText = "position:fixed;left:-1000px;top:0";
-  document.body.appendChild(box);
-  box.select();
-  let ok = false;
-  try { ok = document.execCommand("copy"); } catch (_) { /* ignore */ }
-  box.remove();
-  return ok;
-}
 
 $("invite").addEventListener("click", async () => {
   let base = location.origin;

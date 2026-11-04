@@ -172,28 +172,36 @@ or dropped) is saved in `aigen/runs/`.
 
 ### Daily challenge
 
-Every day has one random **target element**, the same for everyone. On the home page press
-**Play** and you get a private workspace with only the starting elements. Discover the target
-while unlocking as **few elements** as you can. Your score is the number of elements you have
-discovered when you find it: the target counts, the starting elements do not, and so do detours
-and elements a recipe makes as a side effect. Lower is better.
+Every day has three **target elements**, one per difficulty (🟢 Easy, 🟡 Medium, 🔴 Hard), the same for
+everyone. On the home page press **Play** on a tier and you get a private workspace with only the
+starting elements. Discover the target while unlocking as **few elements** as you can. Your score is the
+number of elements you have discovered when you find it: the target counts, the starting elements do not,
+and so do detours and elements a recipe makes as a side effect. Lower is better.
 
-- It is solo: nobody else can join your attempt, and it does not use one of the 3 game slots.
+- It is solo: nobody else can join your attempt, and it does not use one of the game slots.
 - There are no hints, no Djinn and no free Time element. The 📖 Journal still works.
-- You get **3 attempts a day**. Starting an attempt uses one up, whether or not you finish it, and so does
-  **Start over** or **Try again**. **Continue** (picking up an attempt in progress) is free. The count is
-  kept in `daily.json`, so restarting the server does not reset it. The board on the home page keeps each
-  player's best finished attempt of the day, and the earlier finisher wins a tie. An attempt is not
+- You get **3 attempts a day in each tier**. Starting an attempt uses one up, whether or not you finish it,
+  and so does **Start over** or **Try again**. **Continue** (picking up an attempt in progress) is free.
+  The count is kept in `daily.json`, so restarting the server does not reset it. Each tier has its own
+  board of every player's best finished attempt (the earlier finisher wins a tie). An attempt is not
   saved: leave it and it is gone, though **Continue** brings back one in progress (it is closed
   10 minutes after you leave it, like any game).
 - Once you find the target the attempt is over, and a message shows your score.
-- The home page also shows a **reference**: how many elements a good route unlocks. It comes from a
-  quick greedy search, so it is a number to beat, not a proven minimum.
-- "Today" is the date on the computer running the server. The day's target is picked from the date
-  and stored in `daily.json`, so it does not change if you edit the recipes later. It is chosen
-  among elements that take 3 to 8 steps from the starters and whose reference route unlocks at most
-  18 elements (see the constants at the top of `daily.py`; with a small recipe file any element can
-  be picked).
+- The **reference** is how many elements a good route unlocks. It comes from a greedy search with some
+  randomised passes, so it is a number to beat, not a proven minimum.
+- **Reference route:** the steps of that route are shown once you have used all 3 attempts in a tier, or
+  when you press **Give up and show the route** (which uses up your remaining attempts for that tier).
+  Past days in the history always show theirs.
+- **Streak:** the number of days in a row (ending today or yesterday) on which you finished at least one
+  tier, and your best ever.
+- **History:** your results and each day's winner for the last 30 days, under "History" on the home page.
+- **Share:** copies a spoiler-free summary (scores against the reference, per tier, plus your streak).
+- **Weekly board:** each finished tier-day earns `round(100 x reference / score)` points (100 for matching
+  the reference, more for beating it). The board adds them up per ISO week (Monday to Sunday).
+- "Today" is the date on the computer running the server. The three targets are picked from the date
+  and stored in `daily.json` with their routes, so they do not change if you edit the recipes later.
+  Easy, medium and hard use different depth bands and reference sizes (the constants at the top of
+  `daily.py`; with a small recipe file any element can be picked).
 
 ### Ending and saving a game
 
@@ -231,7 +239,7 @@ python3 server.py [--host 0.0.0.0] [--port 8000]
 | `--tls-cert`, `--tls-key` | off | Serve over HTTPS (see below). |
 | `--idle-minutes` | `10` | How long an empty game stays open. |
 | `--drafts-file` | `drafts.json` next to `server.py` | Players' draft recipes and promotion proposals. |
-| `--daily-file` | `daily.json` next to `server.py` | The daily challenge's targets, attempts used and best scores (the last 30 days). |
+| `--daily-file` | `daily.json` next to `server.py` | The daily challenge's targets, routes, attempts used and scores (the last 400 days). |
 | `--snapshot-file` | `reload_snapshot.json` next to `server.py` | Where running games are parked during a reload. |
 | `--pid-file` | `alchemy.pid` next to `server.py` | Lets `reload.py` find the running server. |
 
@@ -390,7 +398,7 @@ below, more:
 | Accounts | `accounts.json` | Usernames and password hashes; readable only by you on macOS and Linux. |
 | Saved games | `saves/<game>.json` | One file each; deleted after 3 days. |
 | Draft recipes, promotion proposals | `drafts.json` | Deleted with the account's other data by `accounts_admin.py delete` (proposals stay on record). |
-| Daily challenge target, attempts and scores | `daily.json` | The last 30 days. A damaged file is reported, never overwritten. |
+| Daily challenge targets, attempts and scores | `daily.json` | The last 400 days. A damaged file is reported, never overwritten. |
 | Running games | memory only | Lost if the server stops; `reload.py` carries them across a restart via `reload_snapshot.json`. |
 
 If you keep the project in git, add `accounts.json`, `saves/`, `*.pem`,
@@ -420,7 +428,7 @@ skipped if `recipes.json` is missing.
 | `hotreload.py`, `reload.py` | Snapshot and restore for patching without stopping games; the command that triggers it. |
 | `accounts.py`, `accounts_admin.py` | Accounts, passwords, sessions, and the admin tool (admins and bots). |
 | `recipes.py`, `hints.py` | Recipe file loading and checking; hint logic. |
-| `daily.py` | The daily challenge: picking the target, the reference route, the score board. |
+| `daily.py` | The daily challenge: picking the targets, reference routes, score boards, streaks and the weekly board. |
 | `validate_recipes.py`, `recipe_report.py`, `recipe_flowchart.py` | Recipe tools. |
 | `static/` | The pages: login, home, game, and the "use a laptop" page. |
 | `static/create.*`, `static/admin.*` | The Create Recipes page and the admin review page. |

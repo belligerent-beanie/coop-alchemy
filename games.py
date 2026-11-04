@@ -19,7 +19,7 @@ import unicodedata
 from typing import Any, Callable
 
 from accounts import key_of
-from daily import MAX_ATTEMPTS, DailyStore
+from daily import MAX_ATTEMPTS, TIERS, DailyStore
 from recipes import RecipeBook
 from saves import SaveStore
 from state import Challenge, GameError, GameState
@@ -101,13 +101,21 @@ class GameRegistry:
 
     # ---- the daily challenge ----------------------------------------------------
 
-    def _challenge(self, date: str, target: str, reference: int | None) -> Challenge:
-        return Challenge(date, target, reference, lambda name, score: self.daily.submit(date, name, score))
+    def _challenge(self, date: str, tier: str, target: str, reference: int | None) -> Challenge:
+        return Challenge(date, target, reference, lambda name, score: self.daily.submit(date, tier, name, score), tier)
 
     def _attempts(self, username: str) -> list[GameState]:
         """This account's daily challenge attempts that are still running (call with the lock held)."""
         return [g for g in self._games.values()
                 if g.challenge is not None and key_of(g.creator) == key_of(username)]
+
+    def _element(self, eid: str) -> dict[str, str]:
+        element = self.book.elements.get(eid)
+        return {"id": eid, "label": element.label if element else eid, "emoji": element.emoji if element else ""}
+
+    def _route_json(self, steps: list[tuple[str, str, tuple[str, ...]]]) -> list[dict[str, Any]]:
+        return [{"a": self._element(a), "b": self._element(b), "makes": [self._element(r) for r in results]}
+                for a, b, results in steps]
 
     def _today(self) -> dict[str, Any]:
         try:
@@ -115,51 +123,95 @@ class GameRegistry:
         except ValueError as exc:  # a damaged daily.json, or no element that could be a target
             raise GameError(500, str(exc)) from exc
 
+    @staticmethod
+    def _tier(raw: object) -> str:
+        if raw not in TIERS:
+            raise GameError(400, "the difficulty must be easy, medium or hard")
+        return str(raw)
+
     def daily_status(self, username: str) -> dict[str, Any]:
-        """Today's challenge for the home page: target, reference, the board, the caller's best and attempt."""
+        """Today's challenges for the home page: per tier the target, reference, board, the caller's best,
+        attempts and attempt in progress (and the reference route once the caller can no longer play that tier),
+        plus the caller's streak and the weekly board."""
         info = self._today()
-        element = self.book.elements[info["target"]]
-        with self._lock:
-            self._expire()
-            running = next((g for g in self._attempts(username) if g.challenge.date == info["date"]
-                            and not g.finished), None)
-        return {
-            "date": info["date"],
-            "attempts_used": self.daily.attempts(info["date"], username),
-            "attempts_max": MAX_ATTEMPTS,
-            "target": {"id": info["target"], "label": element.label, "emoji": element.emoji},
-            "reference": info["reference"],
-            "board": self.daily.board(info["date"]),
-            "best": self.daily.best(info["date"], username),
-            "running": f"/g/{running.slug}" if running else None,
-        }
-
-    def start_daily(self, username: str, fresh: bool = False) -> GameState:
-        """Today's attempt for this account: the one in progress, or a new one (always new if `fresh`).
-
-        Carrying on with an attempt in progress is free. A new one uses up one of the account's MAX_ATTEMPTS
-        for the day, and is refused (409) when none are left.
-        """
-        info = self._today()
+        day = info["date"]
         with self._lock:
             self._expire()
             mine = self._attempts(username)
-            for game in mine:
-                if not fresh and game.challenge.date == info["date"] and not game.finished:
+        tiers = []
+        for tier in TIERS:
+            running = next((g for g in mine if g.challenge.tier == tier and g.challenge.date == day
+                            and not g.finished), None)
+            used = self.daily.attempts(day, tier, username)
+            tiers.append({
+                "tier": tier,
+                "target": self._element(info["tiers"][tier]["target"]),
+                "reference": info["tiers"][tier]["reference"],
+                "best": self.daily.best(day, tier, username),
+                "board": self.daily.board(day, tier),
+                "attempts_used": used,
+                "running": f"/g/{running.slug}" if running else None,
+                "route": self._route_json(self.daily.route(day, tier)) if used >= MAX_ATTEMPTS and running is None
+                else None,
+            })
+        return {"date": day, "attempts_max": MAX_ATTEMPTS, "streak": self.daily.streak(username),
+                "tiers": tiers, "week": self.daily.week()}
+
+    def daily_history(self, username: str) -> dict[str, Any]:
+        """The latest days with each tier's target, the caller's best and the winner; routes of finished days."""
+        self._today()  # also reports a damaged file
+        days = self.daily.history(username)
+        for day in days:
+            for entry in day["tiers"].values():
+                entry["target"] = self._element(entry["target"])
+                entry["route"] = self._route_json(entry["route"])
+        return {"days": days}
+
+    def start_daily(self, username: str, tier: object, fresh: bool = False) -> GameState:
+        """Today's attempt in `tier` for this account: the one in progress, or a new one (always new if `fresh`).
+
+        Carrying on with an attempt in progress is free. A new one uses up one of the account's MAX_ATTEMPTS
+        for that tier today, and is refused (409) when none are left.
+        """
+        tier = self._tier(tier)
+        info = self._today()
+        day = info["date"]
+        with self._lock:
+            self._expire()
+            same = [g for g in self._attempts(username) if g.challenge.tier == tier]
+            for game in same:
+                if not fresh and game.challenge.date == day and not game.finished:
                     return game
-            if self.daily.attempts(info["date"], username) >= MAX_ATTEMPTS:
-                raise GameError(409, f"you have used all {MAX_ATTEMPTS} of today's attempts: come back tomorrow")
-            for game in mine:
+            if self.daily.attempts(day, tier, username) >= MAX_ATTEMPTS:
+                raise GameError(409, f"you have used all {MAX_ATTEMPTS} of today's {tier} attempts: "
+                                     f"come back tomorrow")
+            for game in same:
                 del self._games[game.slug]
-            self.daily.use_attempt(info["date"], username)
+            self.daily.use_attempt(day, tier, username)
             slug = next(s for s in (f"daily-{secrets.token_hex(4)}" for _ in range(100)) if s not in self._games)
-            game = GameState(self.book, name=f"Daily challenge {info['date']}", slug=slug, creator=username,
-                             clock=self._clock,
-                             challenge=self._challenge(info["date"], info["target"], info["reference"]))
+            data = info["tiers"][tier]
+            game = GameState(self.book, name=f"Daily challenge: {tier} {day}", slug=slug, creator=username,
+                             clock=self._clock, challenge=self._challenge(day, tier, data["target"], data["reference"]))
             self._games[slug] = game
-        for old in mine:  # tell any open page of the replaced attempt that it has ended
+        for old in same:  # tell any open page of the replaced attempt that it has ended
             old.close(username, False)
         return game
+
+    def reveal_daily(self, username: str, tier: object) -> dict[str, Any]:
+        """Give up the rest of today's attempts in `tier` (closing one in progress) and show its reference route."""
+        tier = self._tier(tier)
+        info = self._today()
+        day = info["date"]
+        with self._lock:
+            self._expire()
+            running = [g for g in self._attempts(username)
+                       if g.challenge.tier == tier and g.challenge.date == day and not g.finished]
+            for game in running:
+                del self._games[game.slug]
+        self.daily.forfeit(day, tier, username)
+        for game in running:
+            game.close(username, False)
+        return {"tier": tier, "route": self._route_json(self.daily.route(day, tier))}
 
     def find_saved(self, username: str) -> list[dict[str, Any]]:
         """Saved games this account played in that are not running right now."""
@@ -212,9 +264,10 @@ class GameRegistry:
                 saved = data.get("challenge")
                 if isinstance(saved, dict):
                     day, target, reference = saved.get("date"), saved.get("target"), saved.get("reference")
+                    tier = saved.get("tier") if saved.get("tier") in TIERS else "medium"
                     if not isinstance(day, str) or target not in self.book.elements:
                         continue
-                    challenge = self._challenge(day, target, reference if isinstance(reference, int)
+                    challenge = self._challenge(day, tier, target, reference if isinstance(reference, int)
                                                 and not isinstance(reference, bool) else None)
                 game = GameState(self.book, name=name, slug=slug, creator=creator, clock=self._clock,
                                  challenge=challenge)

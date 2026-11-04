@@ -23,11 +23,15 @@ HTTP API
                                            the caller's own daily attempt is listed with "private": true)
     POST /games         {"name"}        -> {"id", "name", "url"}      (409 if 3 games are running)
     GET  /saved                         -> {"games": [...]}  saved games this account played in
-    GET  /daily                         -> today's challenge: {"date", "target", "reference", "board", "best",
-                                           "running", "attempts_used", "attempts_max"}   (see daily.py)
-    POST /daily/start   {"fresh"?}      -> {"id", "url"}   the caller's attempt at today's challenge: the one in
-                                           progress (free), or a new one that uses up one of the 3 attempts a day
-                                           (always a new one with "fresh": true; 409 when none are left)
+    GET  /daily                         -> today's three challenges (easy, medium, hard) with the caller's results,
+                                           their streak and the weekly board   (see daily.py)
+    GET  /daily/history                 -> {"days": [...]}   the latest days: targets, the caller's best, the winner
+    POST /daily/start   {"tier", "fresh"?} -> {"id", "url"}   the caller's attempt at today's challenge in that tier:
+                                           the one in progress (free), or a new one that uses up one of the 3
+                                           attempts a day in that tier (always a new one with "fresh": true; 409
+                                           when none are left)
+    POST /daily/reveal  {"tier"}        -> {"tier", "route"}   gives up the rest of today's attempts in that tier
+                                           and shows the reference route
     POST /games/resume  {"id"}          -> {"id", "name", "url"}      (works even with 3 games running)
     GET  /laptop                        the page every phone is sent to; phones get nothing else
 
@@ -222,6 +226,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"games": self.server.registry.find_saved(self._user())})
             elif path == "/daily":
                 self._json(200, self.server.registry.daily_status(self._user()))
+            elif path == "/daily/history":
+                self._json(200, self.server.registry.daily_history(self._user()))
             elif path == "/version":
                 self._json(200, {"version": self._static_version()})
             elif path == "/images":
@@ -261,8 +267,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"id": game.slug, "name": game.name, "url": f"/g/{game.slug}"})
                 return
             if path == "/daily/start":
-                game = self.server.registry.start_daily(self._user(), self._read_json().get("fresh") is True)
+                body = self._read_json()
+                game = self.server.registry.start_daily(self._user(), body.get("tier"), body.get("fresh") is True)
                 self._json(200, {"id": game.slug, "url": f"/g/{game.slug}"})
+                return
+            if path == "/daily/reveal":
+                self._json(200, self.server.registry.reveal_daily(self._user(), self._read_json().get("tier")))
                 return
             if path == "/games/resume":
                 game = self.server.registry.resume(self._read_json().get("id"), self._user())

@@ -19,18 +19,24 @@
     <p class="who">Logged in as <strong id="who"></strong> · <button type="button" id="logout" class="link">Log out</button></p>
 
     <section id="daily" hidden>
-      <h2>Daily challenge <span id="daily-date" class="muted"></span></h2>
-      <p>Today's target: <strong id="daily-target" class="daily-target"></strong>. Start with the basic elements and
-        discover it while unlocking as few elements as you can.</p>
-      <p class="muted" id="daily-meta"></p>
+      <h2>Daily challenge <span id="daily-date" class="muted"></span> <span id="daily-streak" class="streak" hidden></span></h2>
+      <p class="muted">Start with the basic elements and discover a target while unlocking as few elements as you
+        can. There are three difficulties, with 3 attempts each per day.</p>
+      <div id="daily-tiers"></div>
       <p class="home-links">
-        <button type="button" id="daily-play" class="btn">Play</button>
-        <button type="button" id="daily-restart" class="btn" hidden>Start over</button>
+        <button type="button" id="daily-share" class="btn">Copy today's result</button>
+        <span id="daily-share-msg" class="muted"></span>
       </p>
       <p id="daily-error" class="error" role="alert"></p>
-      <h3 class="daily-board-title">Today's best</h3>
-      <ol id="daily-board" class="daily-board"></ol>
-      <p id="daily-empty" class="muted" hidden>Nobody has finished today's challenge yet.</p>
+      <h3 class="daily-sub">This week <span id="week-label" class="muted"></span></h3>
+      <ol id="week-board" class="daily-board"></ol>
+      <p id="week-empty" class="muted" hidden>Nobody has finished a challenge this week yet.</p>
+      <p class="muted daily-note">Weekly points: a finished challenge is worth 100 × reference ÷ your score, and your
+        best of each difficulty each day counts.</p>
+      <details id="daily-history">
+        <summary>Past days</summary>
+        <div id="history-body" class="muted">Loading…</div>
+      </details>
     </section>
 
     <section>
@@ -74,6 +80,7 @@
     </section>
   </main>
   <script src="/static/auth.js"></script>
+  <script src="/static/daily-common.js"></script>
   <script src="/static/home.js"></script>
 </body>
 </html>

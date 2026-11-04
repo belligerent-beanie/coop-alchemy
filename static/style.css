@@ -737,3 +737,20 @@ body.admin { overflow: auto; }
 .challenge-bar { padding: 6px 14px; background: var(--accent); color: #fff; font-size: 0.95rem; }
 .challenge-bar .muted { color: inherit; opacity: 0.85; }
 #challenge-done { max-width: 26rem; }
+
+/* ---- daily challenge, tiers ---- */
+
+.streak { font-size: 0.85rem; font-weight: 600; color: #d9731a; margin-left: 6px; }
+.tier { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--tile); }
+.tier-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.tier-target { font-size: 1.05rem; }
+.tier p { margin: 4px 0; }
+.tier-board summary, #daily-history summary, .hist-route summary { cursor: pointer; color: var(--muted); }
+.route h4 { margin: 8px 0 2px; font-size: 0.9rem; }
+.route ol, .hist-route ol { margin: 2px 0 0; padding-left: 1.4rem; line-height: 1.6; }
+.daily-sub { margin: 16px 0 4px; font-size: 0.95rem; }
+.daily-note { font-size: 0.8rem; margin-top: 6px; }
+#daily-history { margin-top: 12px; }
+.hist-day { margin: 6px 0; }
+.hist-line { margin: 4px 0 4px 1rem; font-size: 0.9rem; }
+.hist-route { margin-left: 1rem; }
