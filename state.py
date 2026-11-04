@@ -98,6 +98,22 @@ class Challenge:
     tier: str = "medium"           # easy, medium or hard
 
 
+@dataclass(frozen=True)
+class Race:
+    """Marks a game as one racer's private world in a race (see race.py).
+
+    After every discovery the game calls `report(count, reached)` (count = elements discovered, starters
+    included; reached = the goal is met) and `is_open()` says whether the race is running: nothing can be
+    combined before the go or after somebody has won.
+    """
+    id: str
+    goal: str                      # "target" or "count"
+    target: str | None             # element id of a "target" race
+    goal_count: int
+    report: Callable[[int, bool], bool]
+    is_open: Callable[[], bool]
+
+
 @dataclass
 class Tile:
     id: str
@@ -137,9 +153,11 @@ class GameState:
                  clock: Callable[[], float] = time.monotonic,
                  grace: float = JOIN_GRACE_SECONDS,
                  rng: random.Random | None = None,
-                 challenge: Challenge | None = None) -> None:
+                 challenge: Challenge | None = None, race: Race | None = None) -> None:
         self.book = book
         self.challenge = challenge
+        self.race = race
+        self._won = False                # this racer has just won the race
         self._result: int | None = None  # a challenge attempt's score once the target has been found
         self.name = name
         self.slug = slug
@@ -156,7 +174,7 @@ class GameState:
         self._discovered: dict[str, str | None] = {s: None for s in book.starters}  # id -> discoverer
         self._time = find_element(book, TIME)  # id of the element that unlocks at TIME_UNLOCK_AT, if any
         self._djinn = find_element(book, DJINN)  # id of the element that unlocks the genie, if any
-        if challenge is not None:  # a challenge is a plain puzzle: no free elements, no wishes
+        if challenge is not None or race is not None:  # a challenge or a race is a plain puzzle: no free elements, no wishes
             self._time = self._djinn = None
         self._genie_unlocked_at: int | None = None  # number of discoveries when the genie unlocked
         self._genie_used = 0
@@ -207,9 +225,21 @@ class GameState:
                 "target": self._element_json(self.challenge.target),
                 "reference": self.challenge.reference, "starters": len(self.book.starters), "done": self._result}
 
+    def _race_json(self) -> dict[str, Any] | None:
+        if self.race is None:
+            return None
+        return {"id": self.race.id, "goal": self.race.goal, "goal_count": self.race.goal_count,
+                "target": self._element_json(self.race.target) if self.race.target else None}
+
+    @property
+    def private(self) -> bool:
+        """A private game belongs to one account: a daily challenge attempt or a racer's world."""
+        return self.challenge is not None or self.race is not None
+
     def _snapshot(self, player: Player) -> dict[str, Any]:
         return {
             "challenge": self._challenge_json(),
+            "race": self._race_json(),
             "you": player.pid,
             "game": {"id": self.slug, "name": self.name, "creator": self.creator},
             "genie": self._genie_status(),
@@ -304,6 +334,15 @@ class GameState:
                     self.challenge.on_finish(player.name, self._result)
                 except Exception as exc:  # a score that cannot be stored must not break the game
                     print(f"warning: could not record the challenge score: {exc}", file=sys.stderr)
+        if self.race is not None and new:
+            count = len(self._discovered)
+            reached = (self.race.target in self._discovered) if self.race.goal == "target" \
+                else count >= self.race.goal_count
+            try:
+                if self.race.report(count, reached):
+                    self._won = True
+            except Exception as exc:  # the race must not break the game
+                print(f"warning: could not report race progress: {exc}", file=sys.stderr)
         return new
 
     def _announce(self, player: Player, new: list[str], base: int) -> None:
@@ -315,6 +354,9 @@ class GameState:
                 "total": self.total,
             })
         self._unlock_time()
+        if self._won:
+            self._won = False
+            self._publish("race_won", {"name": player.name})
         if self.challenge is not None and self._result is not None and self.challenge.target in new:
             self._publish("challenge_done", {"score": self._result, "reference": self.challenge.reference,
                                              "target": self._element_json(self.challenge.target)})
@@ -358,8 +400,8 @@ class GameState:
     def join(self, raw_name: object) -> Player:
         name = clean_name(raw_name)
         with self._lock:
-            if self.challenge is not None and name.casefold() != clean_name(self.creator).casefold():
-                raise GameError(403, "this is someone else's daily challenge attempt")
+            if self.private and name.casefold() != clean_name(self.creator).casefold():
+                raise GameError(403, "this is someone else's private game")
             self._prune()
             seated = self._seated()
             if len(seated) >= MAX_PLAYERS:
@@ -766,8 +808,8 @@ class GameState:
         """
         with self._lock:
             self._require_player(token)
-            if self.challenge is not None:
-                raise GameError(403, "hints are switched off in the daily challenge")
+            if self.private:
+                raise GameError(403, "hints are switched off in the daily challenge and in races")
             have = self._discovered
             if kind == "can_make":
                 result = hint_can_make(self.book, have, self._rng)
@@ -802,6 +844,8 @@ class GameState:
         """
         with self._lock:
             player = self._require_player(token)
+            if self.race is not None and not self.race.is_open():
+                raise GameError(409, "the race is not running")
             if self._result is not None:
                 raise GameError(409, "you have found the target: start a new attempt from the home page to try again")
             if (tile is None) == (element is None):

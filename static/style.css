@@ -754,3 +754,8 @@ body.admin { overflow: auto; }
 .hist-day { margin: 6px 0; }
 .hist-line { margin: 4px 0 4px 1rem; font-size: 0.9rem; }
 .hist-route { margin-left: 1rem; }
+
+/* ---- races ---- */
+.race-bar { background: #2d6a4f; }
+.race-bar .link { color: inherit; margin-left: 10px; text-decoration: underline; }
+.race-count { font-size: 4rem; font-weight: 700; text-align: center; margin: 12px 0; }

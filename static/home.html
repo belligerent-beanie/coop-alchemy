@@ -39,6 +39,24 @@
       </details>
     </section>
 
+    <section id="races">
+      <h2>Race</h2>
+      <p class="muted">Everyone gets their own world with only the starting elements. The first to reach the goal
+        wins. Up to 6 racers.</p>
+      <p id="race-mine" hidden>You are in a race: <a id="race-mine-link" class="btn" href="#">Go to your race</a></p>
+      <form id="race-form" class="home-links">
+        <label for="race-goal" class="muted">Goal</label>
+        <select id="race-goal">
+          <option value="target">First to discover a target element</option>
+          <option value="count">First to reach 100 elements</option>
+        </select>
+        <button type="submit" class="btn">Create a race</button>
+      </form>
+      <p id="race-error" class="error" role="alert"></p>
+      <ul id="race-lobbies"></ul>
+      <p id="race-empty" class="muted">No races are waiting for racers.</p>
+    </section>
+
     <section>
       <h2>Create recipes</h2>
       <p class="muted">A solo playground with every element unlocked. Invent new combinations and, if you like one,

@@ -32,6 +32,13 @@ HTTP API
                                            when none are left)
     POST /daily/reveal  {"tier"}        -> {"tier", "route"}   gives up the rest of today's attempts in that tier
                                            and shows the reference route
+    GET  /races                         -> {"races": [open lobbies], "mine": id or null, "max_races"}
+    POST /races         {"goal"}        -> a new race room (goal "target": first to discover a named element;
+                                           goal "count": first to have 100 elements); the caller is its host
+    GET  /races/<id>                    -> the room: state (lobby, countdown, running, finished), racers and their
+                                           counts, the target, winner, and "game" (the caller's own world)
+    POST /races/<id>/join | /leave | /start     (only the host can start, with at least 2 racers)
+    GET  /race/<id>                     -> the lobby / results page
     POST /games/resume  {"id"}          -> {"id", "name", "url"}      (works even with 3 games running)
     GET  /laptop                        the page every phone is sent to; phones get nothing else
 
@@ -99,6 +106,7 @@ ACTIONS = ("/end", "/combine", "/cursor", "/genie", "/hint", "/journal", "/tile/
 # Phones are not supported: they are sent to /laptop and get nothing else.
 PHONE_RE = re.compile(r"iPhone|iPod|Windows Phone|Android.+Mobile|Mobile.+Android|\bMobi", re.I)
 GAME_PATH = re.compile(r"^/g/([a-z0-9-]+)(/[a-z/]*)?$")
+RACE_PATH = re.compile(r"^/races/([a-z0-9-]+)(/(?:join|leave|start))?$")
 
 # Some systems (notably Windows registries) map .js to text/plain; be explicit.
 mimetypes.add_type("text/javascript", ".js")
@@ -228,6 +236,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, self.server.registry.daily_status(self._user()))
             elif path == "/daily/history":
                 self._json(200, self.server.registry.daily_history(self._user()))
+            elif path == "/races":
+                self._json(200, self.server.registry.list_races(self._user()))
+            elif path.startswith("/races/"):
+                match = RACE_PATH.match(path)
+                if not match or match.group(2):
+                    raise GameError(404, "not found")
+                self._json(200, self.server.registry.race_status(match.group(1), self._user()))
+            elif path.startswith("/race/") and re.fullmatch(r"/race/[a-z0-9-]+", path):
+                self._static("race.html")
             elif path == "/version":
                 self._json(200, {"version": self._static_version()})
             elif path == "/images":
@@ -273,6 +290,18 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/daily/reveal":
                 self._json(200, self.server.registry.reveal_daily(self._user(), self._read_json().get("tier")))
+                return
+            if path == "/races":
+                body = self._read_json()
+                self._json(200, self.server.registry.create_race(self._user(), body.get("goal")))
+                return
+            race = RACE_PATH.match(path)
+            if race and race.group(2):
+                registry, user = self.server.registry, self._user()
+                self._read_json()
+                action = {"/join": registry.join_race, "/leave": registry.leave_race,
+                          "/start": registry.start_race}[race.group(2)]
+                self._json(200, action(race.group(1), user))
                 return
             if path == "/games/resume":
                 game = self.server.registry.resume(self._read_json().get("id"), self._user())

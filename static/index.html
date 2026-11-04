@@ -50,6 +50,10 @@
       🎯 <span id="challenge-tier"></span> · Find <strong id="challenge-target"></strong> by unlocking as few elements as you can ·
       <span id="challenge-count"></span> <span id="challenge-ref" class="muted"></span>
     </div>
+    <div id="race" class="challenge-bar race-bar" role="status" hidden>
+      🏁 <span id="race-goal"></span> · <span id="race-standings"></span>
+      <button type="button" id="race-leave" class="link">Leave race</button>
+    </div>
     <main>
       <div id="workspace" aria-label="Shared workspace">
         <div id="cursor-layer"></div>
@@ -101,6 +105,14 @@
       <a class="btn" href="/">Back to home</a>
     </div>
     <p id="challenge-done-error" class="error" role="alert"></p>
+  </dialog>
+  <dialog id="race-done" class="dialog">
+    <h2 id="race-done-title"></h2>
+    <p id="race-done-text"></p>
+    <div class="dialog-buttons">
+      <a class="btn" id="race-done-results" href="#">See the results</a>
+      <a class="btn" href="/">Back to home</a>
+    </div>
   </dialog>
   <div id="ended" hidden><div><h2 id="ended-title"></h2><p id="ended-text"></p><a class="btn" href="/">Back to all games</a></div></div>
 

@@ -7,10 +7,12 @@ A game can also be ended by a player, optionally saving it; a saved game can be
 resumed later (for three days) even when all the slots are taken.
 
 A daily challenge attempt (see daily.py) is also a game, but a private one: it does not appear in the
-list of running games, does not use one of the slots, and cannot be saved.
+list of running games, does not use one of the slots, and cannot be saved. So is each racer's world in a race
+(see race.py).
 """
 from __future__ import annotations
 
+import random
 import re
 import secrets
 import threading
@@ -19,12 +21,14 @@ import unicodedata
 from typing import Any, Callable
 
 from accounts import key_of
-from daily import MAX_ATTEMPTS, TIERS, DailyStore
-from recipes import RecipeBook
+from daily import MAX_ATTEMPTS, TIERS, DailyStore, reference_sizes, target_pools
+from race import GOALS, RaceRoom
+from recipes import RecipeBook, depths
 from saves import SaveStore
 from state import Challenge, GameError, GameState
 
 MAX_GAMES = 3
+MAX_RACES = 4
 IDLE_CLOSE_SECONDS = 600.0
 MAX_GAME_NAME_LEN = 30
 
@@ -58,17 +62,30 @@ class GameRegistry:
         self.idle_seconds = idle_seconds
         self._clock = clock
         self._games: dict[str, GameState] = {}
+        self._rooms: dict[str, RaceRoom] = {}
+        self._race_targets: list[str] | None = None   # elements a target race may use, worked out on first use
         self._lock = threading.Lock()
 
     def _expire(self) -> None:
         for slug in [s for s, g in self._games.items() if g.is_expired(self.idle_seconds)]:
             del self._games[slug]
+        for room in list(self._rooms.values()):
+            room.prune()
+            if room.expired():
+                self._drop_room(room.id)
+
+    def _drop_room(self, rid: str) -> None:
+        """Remove a race room and its racers' games (call with the lock held)."""
+        self._rooms.pop(rid, None)
+        for slug in [s for s, g in self._games.items() if g.race is not None and g.race.id == rid]:
+            game = self._games.pop(slug)
+            game.close("", False)
 
     def create(self, raw_name: object, creator: str = "") -> GameState:
         name = clean_game_name(raw_name)
         with self._lock:
             self._expire()
-            if sum(1 for g in self._games.values() if g.challenge is None) >= self.max_games:
+            if sum(1 for g in self._games.values() if not g.private) >= self.max_games:
                 raise GameError(409, f"{self.max_games} games are already running: join one, or wait for one "
                                      f"to end (a game closes {round(self.idle_seconds / 60)} minutes after "
                                      f"the last player leaves)")
@@ -243,8 +260,8 @@ class GameRegistry:
     def live_export(self) -> list[dict[str, Any]]:
         """Every running game with its workspace and players, to carry across a server restart."""
         with self._lock:
-            self._expire()
-            return [game.live_export() for game in self._games.values()]
+            self._expire()   # races are not carried across a restart: they end with it
+            return [game.live_export() for game in self._games.values() if game.race is None]
 
     def live_restore(self, items: object) -> int:
         """Bring back games from live_export(); returns how many came back. Bad entries are skipped."""
@@ -284,12 +301,126 @@ class GameRegistry:
     def list(self, username: str = "") -> list[dict[str, Any]]:
         """Every running game; with a username, each is marked `recent` if that account just left it.
 
-        A daily challenge attempt is listed only to its owner, marked `"private": true`, so that its own
+        A daily challenge attempt or a racer's world is listed only to its owner, marked `"private": true`, so that its own
         page can look it up. The home page leaves such entries out.
         """
         with self._lock:
             self._expire()
             return [{**game.summary(), "recent": bool(username) and game.recently_left(username),
-                     **({"private": True} if game.challenge is not None else {})}
+                     **({"private": True} if game.private else {})}
                     for game in self._games.values()
-                    if game.challenge is None or (username and key_of(game.creator) == key_of(username))]
+                    if not game.private or (username and key_of(game.creator) == key_of(username))]
+
+    # ---- races ----------------------------------------------------------------------
+
+    def _race_target(self) -> str:
+        """A random element of medium difficulty (computed once: the search takes about half a second)."""
+        if self._race_targets is None:
+            depth = depths(self.book)
+            self._race_targets = target_pools(self.book, depth, reference_sizes(self.book, depth))["medium"]
+        if not self._race_targets:
+            raise GameError(500, "there is no element that could be a race target")
+        return random.choice(self._race_targets)
+
+    def _room(self, rid: object) -> RaceRoom:
+        room = self._rooms.get(rid) if isinstance(rid, str) else None
+        if room is None:
+            raise GameError(404, "that race does not exist (it may have ended)")
+        return room
+
+    def _room_of(self, username: str) -> RaceRoom | None:
+        """The race this account is in and that has not finished (call with the lock held)."""
+        for room in self._rooms.values():
+            if room.state != "finished" and room.has(username):
+                return room
+        return None
+
+    def _race_json(self, room: RaceRoom, username: str) -> dict[str, Any]:
+        status = room.status()
+        status["target"] = self._element(room._target_id()) if room.goal == "target" else None
+        status["you"] = room.has(username)
+        status["game"] = f"/g/{room.slug_of(username)}" if status["you"] and room.slug_of(username) else None
+        status["is_host"] = key_of(status["host"]) == key_of(username)
+        return status
+
+    def create_race(self, username: str, goal: object, count: int | None = None) -> dict[str, Any]:
+        if goal not in GOALS:
+            raise GameError(400, "the goal must be 'target' or 'count'")
+        target = self._race_target() if goal == "target" else None
+        with self._lock:
+            self._expire()
+            current = self._room_of(username)
+            if current is not None:
+                raise GameError(409, "you are already in a race: leave it first")
+            if sum(1 for r in self._rooms.values() if r.state != "finished") >= MAX_RACES:
+                raise GameError(409, f"{MAX_RACES} races are already open or running: join one, or wait")
+            rid = next(r for r in (f"r{secrets.token_hex(3)}" for _ in range(100)) if r not in self._rooms)
+            kwargs: dict[str, Any] = {"target": target, "clock": self._clock}
+            if count is not None:
+                kwargs["count"] = count
+            room = RaceRoom(rid, username, str(goal), **kwargs)
+            self._rooms[rid] = room
+            return self._race_json(room, username)
+
+    def list_races(self, username: str) -> dict[str, Any]:
+        """Races waiting for racers, and the one this account is in."""
+        with self._lock:
+            self._expire()
+            mine = self._room_of(username)
+            lobbies = []
+            for room in self._rooms.values():
+                status = room.status()
+                if status["state"] != "lobby":
+                    continue
+                lobbies.append({"id": room.id, "host": status["host"], "goal": room.goal,
+                                "goal_count": room.goal_count, "racers": len(status["racers"]),
+                                "max_racers": status["max_racers"],
+                                "target": self._element(room._target_id()) if room.goal == "target" else None})
+            return {"races": lobbies, "mine": mine.id if mine else None, "max_races": MAX_RACES}
+
+    def race_status(self, rid: object, username: str) -> dict[str, Any]:
+        with self._lock:
+            self._expire()
+            room = self._room(rid)
+            room.touch(username)
+            return self._race_json(room, username)
+
+    def join_race(self, rid: object, username: str) -> dict[str, Any]:
+        with self._lock:
+            self._expire()
+            room = self._room(rid)
+            if not room.has(username):
+                other = self._room_of(username)
+                if other is not None:
+                    raise GameError(409, "you are already in a race: leave it first")
+                room.join(username)
+            return self._race_json(room, username)
+
+    def leave_race(self, rid: object, username: str) -> dict[str, Any]:
+        with self._lock:
+            self._expire()
+            room = self._room(rid)
+            games = [g for g in self._games.values() if g.race is not None and g.race.id == room.id
+                     and key_of(g.creator) == key_of(username)]
+            if room.leave(username):
+                self._drop_room(room.id)
+            else:
+                for game in games:
+                    self._games.pop(game.slug, None)
+        for game in games:
+            game.close(username, False)
+        return {"left": True}
+
+    def start_race(self, rid: object, username: str) -> dict[str, Any]:
+        """The host starts the countdown; every racer gets a private world with only the starting elements."""
+        with self._lock:
+            self._expire()
+            room = self._room(rid)
+            names = room.start(username)
+            for name in names:
+                slug = next(s for s in (f"race-{secrets.token_hex(4)}" for _ in range(100)) if s not in self._games)
+                game = GameState(self.book, name=f"Race {room.id}", slug=slug, creator=name, clock=self._clock,
+                                 race=room.hook(name))
+                self._games[slug] = game
+                room.attach(name, slug, len(game.discovered()))
+            return self._race_json(room, username)

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Race · Co-op Alchemy</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script>
+    // Phones are not supported (the server also redirects them; this catches desktop-mode browsers).
+    if (/iPhone|iPod|Android.+Mobile|Mobi/i.test(navigator.userAgent) ||
+        (matchMedia("(pointer: coarse)").matches && Math.min(screen.width, screen.height) < 600)) {
+      location.replace("/laptop");
+    }
+  </script>
+</head>
+<body class="home">
+  <main id="home">
+    <h1>🏁 Race</h1>
+    <p><a href="/">← Home</a></p>
+    <h2 id="race-goal"></h2>
+    <p id="race-status" class="muted"></p>
+    <div id="race-count" class="race-count" hidden></div>
+    <ol id="race-racers" class="daily-board"></ol>
+    <p id="race-error" class="error" role="alert"></p>
+    <p class="home-links">
+      <button type="button" id="race-start" class="btn" hidden>Start the race</button>
+      <button type="button" id="race-leave" class="btn">Leave</button>
+      <a id="race-play" class="btn" href="#" hidden>Go to your world</a>
+    </p>
+  </main>
+  <script src="/static/auth.js"></script>
+  <script src="/static/race.js"></script>
+</body>
+</html>

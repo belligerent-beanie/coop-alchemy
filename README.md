@@ -203,6 +203,26 @@ and so do detours and elements a recipe makes as a side effect. Lower is better.
   Easy, medium and hard use different depth bands and reference sizes (the constants at the top of
   `daily.py`; with a small recipe file any element can be picked).
 
+### Race mode
+
+On the home page, **Race** lets you create a room with one of two goals, and others join it from the same
+list (up to 6 racers, and the host starts it once at least 2 are in):
+
+- **First to discover a target element** (picked at random from the medium difficulty).
+- **First to reach 100 elements** (the starting elements count).
+
+Every racer gets their **own private world** with only the starting elements, so nobody can help or hold
+anyone back, and "100 elements" means something (in a shared game the book fills up for everyone at once).
+There are no hints, no Djinn and no free Time element, and the 📖 Journal still works. After a 3-second
+countdown everyone is sent into their world. The bar at the top shows everyone's element count, and the
+first to reach the goal wins: the others are stopped and everyone sees the results.
+
+- A racer can leave at any time; if everyone else leaves, the one remaining wins.
+- Up to 4 races can be open or running at once. A race does not use one of the game slots.
+- A lobby whose host stops checking in closes after 30 seconds; results are kept for 10 minutes and a race
+  is closed after an hour.
+- Races are **not** carried across a hot reload (`reload.py`): they end with the restart.
+
 ### Ending and saving a game
 
 Any player can press **End game**. The creator of the game (the account that
@@ -428,6 +448,7 @@ skipped if `recipes.json` is missing.
 | `hotreload.py`, `reload.py` | Snapshot and restore for patching without stopping games; the command that triggers it. |
 | `accounts.py`, `accounts_admin.py` | Accounts, passwords, sessions, and the admin tool (admins and bots). |
 | `recipes.py`, `hints.py` | Recipe file loading and checking; hint logic. |
+| `race.py` | Race rooms: lobby, countdown, standings and the winner. |
 | `daily.py` | The daily challenge: picking the targets, reference routes, score boards, streaks and the weekly board. |
 | `validate_recipes.py`, `recipe_report.py`, `recipe_flowchart.py` | Recipe tools. |
 | `static/` | The pages: login, home, game, and the "use a laptop" page. |
@@ -436,7 +457,7 @@ skipped if `recipes.json` is missing.
 | `static/elements/` | Element pictures, one PNG per element. |
 | `aigen/` | The optional AI suggestion tool (see *AI suggestions*); `python3 -m aigen --help`. |
 | `image_check.py` | Lists elements without a picture and pictures that match nothing. |
-| `test_coop.py`, `test_reload.py`, `test_drafts.py`, `test_daily.py`, `test_aigen.py`, `test_recipes.json` | Tests and their fixed recipe set. |
+| `test_coop.py`, `test_reload.py`, `test_drafts.py`, `test_daily.py`, `test_race.py`, `test_aigen.py`, `test_recipes.json` | Tests and their fixed recipe set. |
 
 ## Troubleshooting
 

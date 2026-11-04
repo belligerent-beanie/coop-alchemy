@@ -198,6 +198,8 @@ function upsertElement(raw) {
   return el;
 }
 
+let race = null;        // {id, goal, goal_count, target} when this game is a racer's world
+let raceTimer = null;
 let challenge = null;   // {date, target, reference, starters, done} when this game is a daily challenge attempt
 
 function updateCounter() {
@@ -209,6 +211,44 @@ function updateCounter() {
   }
   $("count").textContent = `Found ${elements.size} / ${total}`;
 }
+
+function setRace(r) {
+  race = r;
+  $("race").hidden = !r;
+  clearInterval(raceTimer);
+  if (!r) return;
+  $("race-goal").textContent = r.goal === "target"
+    ? `First to discover ${r.target.emoji} ${r.target.label}` : `First to reach ${r.goal_count} elements`;
+  $("invite").hidden = true;   // a private world
+  $("hints").hidden = true;    // no hints in a race (the server refuses them too)
+  $("end").hidden = true;      // leaving goes through "Leave race"
+  pollRace();
+  raceTimer = setInterval(pollRace, 1500);
+}
+
+async function pollRace() {
+  if (!race) return;
+  try {
+    const room = await Auth.fetch(`/races/${race.id}`);
+    const me = Auth.user().toLowerCase();
+    $("race-standings").textContent = room.state === "countdown" ? "Get ready…"
+      : room.racers.map((r) => `${r.name.toLowerCase() === me ? "you" : r.name} ${r.count}`).join(" · ");
+    if (room.state === "finished" && !$("race-done").open) {
+      clearInterval(raceTimer);
+      const won = room.winner && room.winner.toLowerCase() === me;
+      $("race-done-title").textContent = won ? "🏆 You won the race!" : `🏁 ${room.winner || "Nobody"} won the race`;
+      $("race-done-text").textContent = room.racers.map((r) => `${r.name}: ${r.count}`).join(" · ");
+      $("race-done-results").href = `/race/${race.id}`;
+      $("race-done").showModal();
+    }
+  } catch (_) { /* the race ended or the network blipped; the next poll tries again */ }
+}
+
+$("race-leave").addEventListener("click", async () => {
+  if (!window.confirm("Leave the race? You will be out of it.")) return;
+  try { await Auth.fetch(`/races/${race.id}/leave`, {}); } catch (_) { /* already gone */ }
+  location.href = "/";
+});
 
 function setChallenge(c) {
   challenge = c;
@@ -963,6 +1003,7 @@ const handlers = {
     document.title = `${s.game.name} · Co-op Alchemy`;
     setGenie(s.genie);
     setChallenge(s.challenge);
+    setRace(s.race);
     clearAllTiles();
     elements.clear();
     itemEls.clear();
@@ -1052,6 +1093,10 @@ const handlers = {
     } else if (d.status.total > before.total) {
       toast("🧞 The Djinn earned another wish");
     }
+  },
+
+  race_won() {
+    pollRace();
   },
 
   challenge_done(d) {
@@ -1214,12 +1259,15 @@ $("cat").addEventListener("click", () => {
     token = sessionStorage.getItem(STORE_PREFIX + "token");
     name = sessionStorage.getItem(STORE_PREFIX + "name");
   } catch (_) { /* ignore */ }
-  loadGameInfo();
+  const loaded = loadGameInfo();
   if (token && name === Auth.user()) { // page refresh: keep the same identity if the server still knows us
     me.token = token;
     me.name = name;
     showApp();
     connect();
+  } else if (GAME_ID.startsWith("race-")) {
+    // A racer's world is theirs alone and the race is already on: no "Join" step.
+    loaded.then(() => $("join-form").requestSubmit());
   }
 })();
 

@@ -271,6 +271,56 @@ $("daily-history").addEventListener("toggle", async () => {
   }
 });
 
+// ---- races ----------------------------------------------------------------------
+
+function raceGoalText(r) {
+  return r.goal === "target" ? `reach ${nameOf(r.target)}` : `reach ${r.goal_count} elements`;
+}
+
+async function loadRaces() {
+  try {
+    const d = await Auth.fetch("/races");
+    $("race-mine").hidden = !d.mine;
+    if (d.mine) $("race-mine-link").href = `/race/${d.mine}`;
+    $("race-form").hidden = !!d.mine;
+    $("race-empty").hidden = d.races.length > 0;
+    $("race-lobbies").replaceChildren(...d.races.map((r) => {
+      const item = el("li", "game");
+      item.append(el("span", "", `${r.host}'s race: first to ${raceGoalText(r)} (${r.racers}/${r.max_racers})`));
+      if (!d.mine && r.racers < r.max_racers) {
+        const join = el("button", "btn", "Join");
+        join.type = "button";
+        join.addEventListener("click", async () => {
+          try {
+            await Auth.fetch(`/races/${r.id}/join`, {});
+            location.href = `/race/${r.id}`;
+          } catch (err) {
+            $("race-error").textContent = err.message;
+            loadRaces();
+          }
+        });
+        item.append(" ", join);
+      }
+      return item;
+    }));
+  } catch (_) { /* try again on the next poll */ }
+}
+
+$("race-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  $("race-error").textContent = "";
+  try {
+    const room = await Auth.fetch("/races", { goal: $("race-goal").value });
+    location.href = `/race/${room.id}`;
+  } catch (err) {
+    $("race-error").textContent = err.message;
+  }
+});
+
+loadRaces();
+setInterval(loadRaces, POLL_MS);
+window.addEventListener("pageshow", loadRaces);
+
 loadDaily();
 setInterval(loadDaily, 15000);
 window.addEventListener("pageshow", loadDaily);  // coming back with the browser's back button
