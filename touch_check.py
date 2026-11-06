@@ -29,6 +29,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -37,6 +38,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
+from accounts import AccountStore  # noqa: E402
 from bench_cursor import free_port, server_command, wait_up  # noqa: E402
 from recipes import load_recipes  # noqa: E402
 
@@ -337,6 +339,12 @@ def run(out: Path, chrome_path: str) -> int:
         slug = game["id"]
         status, joined = api.call("POST", f"/g/{slug}/join", {}, sessions["phoneb"])
         token_b = joined["token"]
+        # phoneb stays connected (an open event stream), so the phone shows them in the player list
+        status, ticket = api.call("POST", f"/g/{slug}/ticket", {"player": token_b}, sessions["phoneb"])
+        stream_b = http.client.HTTPConnection("127.0.0.1", port, timeout=600)
+        stream_b.request("GET", f"/g/{slug}/events?ticket={ticket['ticket']}")
+        response_b = stream_b.getresponse()
+        threading.Thread(target=lambda: [None for _ in response_b], daemon=True).start()
         book = load_recipes(ROOT / "recipes.json")
         starters = [getattr(s, "id", s) for s in book.starters]
         known = discover_elements(api, slug, token_b, starters, 36)
@@ -401,6 +409,35 @@ def run(out: Path, chrome_path: str) -> int:
         report.check(layout(browser)["tiles"] == tiles_before, "...and does not add an element by accident",
                      f"{tiles_before} -> {layout(browser)['tiles']} tiles")
 
+        # ---- reporting another player with a finger ----
+        button = browser.evaluate("(() => { const b = document.querySelector('#key .report'); if (!b) return null;"
+                                  " const r = b.getBoundingClientRect(); return {w: r.width, h: r.height}; })()")
+        if report.check(button is not None, "the other player in the list has a report button"):
+            report.check(button["w"] >= 36 and button["h"] >= 36, "the report button is big enough for a finger", f"{button['w']:.0f} x {button['h']:.0f}")
+            x, y = center_of(browser, "#key .report")
+            browser.tap(x, y)
+            time.sleep(0.6)
+            dialog = browser.evaluate("""(() => { const d = document.getElementById('report-dialog'); const r = d.getBoundingClientRect();
+              return {open: d.open, left: r.left, right: r.right, bottom: r.bottom, w: innerWidth, h: innerHeight,
+                      font: parseFloat(getComputedStyle(document.getElementById('report-reason')).fontSize)}; })()""")
+            report.check(dialog["open"], "tapping it opens the report dialog")
+            report.check(dialog["left"] >= 0 and dialog["right"] <= dialog["w"] and dialog["bottom"] <= dialog["h"],
+                         "the dialog fits the screen", json.dumps(dialog))
+            report.check(dialog["font"] >= 16, "its fields are big enough that iOS will not zoom in", f"{dialog['font']}px")
+            small = browser.evaluate("[...document.querySelectorAll('input:not([type=checkbox]):not([type=radio]), select, textarea')]"
+                                     ".filter(e => parseFloat(getComputedStyle(e).fontSize) < 16 && e.id).map(e => e.id)")
+            report.check(not small, "no text field on the game page is small enough to make iOS zoom", str(small))
+            browser.screenshot(out / "phone-report-dialog.png")
+            x, y = center_of(browser, "#report-form button[type=submit]")
+            browser.tap(x, y)
+            time.sleep(1.0)
+            report.check(not browser.evaluate("document.getElementById('report-dialog').open"), "sending closes the dialog")
+            AccountStore(Path(tmp.name) / "a.json", iterations=1000).set_admin("phoneb", True)
+            status, listing = api.call("GET", "/ops/reports", None, sessions["phoneb"])
+            mine = [r for r in listing.get("reports", []) if r["user"] == "phoneb"] if status == 200 else []
+            report.check(len(mine) == 1 and mine[0]["count"] == 1, "the administrator sees the report", f"{status} {json.dumps(listing)}")
+            report.check("phonea" not in json.dumps(listing), "...and nothing in it says who sent it")
+
         # drag one tile onto another with a finger: water + fire should make steam
         api.call("POST", f"/g/{slug}/tiles/clear", {"player": token_b})
         for _ in range(60):  # the cat sweeps the board for a couple of seconds; tiles added during that would be swept too
@@ -458,6 +495,7 @@ def run(out: Path, chrome_path: str) -> int:
         report.check(info["header"] <= 70, "the header is a single row", f"{info['header']:.0f}px")
         report.check(info["overflowX"] <= 1, "nothing makes the page wider than the screen", f"{info['overflowX']}px too wide")
         report.check("Drag" in info["hint"], "the board still says drag, not tap", info["hint"][:50])
+        report.check(browser.evaluate("!!document.querySelector('#key .report')"), "the report button is there on a desktop too")
         browser.screenshot(out / "desktop-game.png")
 
         # ---- the other pages, on a phone ----
@@ -490,6 +528,10 @@ def run(out: Path, chrome_path: str) -> int:
                      "...without adding an element by accident")
         report.check("Tap" in browser.evaluate("document.getElementById('hint').textContent"), "the Create page explains tapping")
     finally:
+        try:
+            stream_b.close()
+        except Exception:
+            pass
         if browser is not None:
             browser.close()
         server.terminate()

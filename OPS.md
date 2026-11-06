@@ -72,6 +72,7 @@ codes. Buttons that change things ask for a second click.
 | A player forgot their password | **New password**: give them the temporary one shown once; they must pick their own at next login |
 | Lock someone out without deleting anything | **Disable** (and **Enable** to let them back). Their logins stop at once; a game they are in goes on until you **End game** |
 | Remove an account | **Delete**: also removes its drafts, daily scores and unshared saved games, and the name from shared ones |
+| See what players have reported (no reporter is shown) | **Reports** section: **Dismiss** it, or **Disable account** for the player |
 | Stop an abusive or stuck game | **End game** in the games list (it is not saved) |
 | Hand out invite codes (needs `--require-invite`) | **Make codes**; copy them from the notice, they are shown only once |
 

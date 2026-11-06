@@ -105,7 +105,7 @@ class RealServerOptionTests(unittest.TestCase):
              "--recipes", str(ROOT / "test_recipes.json"), "--accounts-file", str(folder / "a.json"),
              "--saves-dir", str(folder / "saves"), "--drafts-file", str(folder / "d.json"),
              "--daily-file", str(folder / "daily.json"), "--snapshot-file", str(folder / "s.json"),
-             "--pid-file", str(folder / "p.pid"), *extra],
+             "--pid-file", str(folder / "p.pid"), "--reports-file", str(folder / "r.json"), *extra],
             cwd=str(ROOT), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.addCleanup(self.stop, server)
         wait_up(port)

@@ -54,22 +54,22 @@ this file in the same commit (and add a line to the [change log](#change-log)).
 
 | Endpoint | Auth | Description |
 |---|---|---|
-| `POST /register` | none | `{"username", "password"}` plus, when the server asks for them (see `/auth-config`), `"invite"` (a single-use invite code), `"captcha"` (the Turnstile answer) and `"email"`. Returns `{"session", "username"}`, or `{"verify_email": true, "username"}` when the account must first confirm its email (no session yet). Errors: `400` invalid username, password or email; `403` invalid invite code; `409` name or email taken; `429`; `503` human check unavailable. |
+| `POST /register` | none | `{"username", "password"}` plus, when the server asks for them (see `/auth-config`), `"invite"` (a single-use invite code), `"captcha"` (the Turnstile answer) and `"email"`. Returns `{"session", "username"}`, or `{"verify_email": true, "username"}` when the account must first confirm its email (no session yet). Errors: `400` invalid username, password or email; `400` also when the username contains a blocked word ("that username is not allowed", which never says which word); `403` invalid invite code; `409` name or email taken; `429`; `503` human check unavailable. |
 | `POST /login` | none | `{"username", "password"}` → `{"session", "username"}`, plus `"must_change_password": true` when an administrator gave the account a temporary password (the page then asks for a new one). Errors: `401` wrong username or password; `403` the email is not confirmed yet, or the account was disabled by an administrator (said only once the password is right); `429` too many attempts or locked. |
 | `POST /logout` | session | `{}` → `{}`. Ends that session. |
 | `GET /me` | session | `{"username", "admin", "must_change_password"}`. |
 | `POST /verify-email` | none | `{"token"}` → `{"username"}`: confirms the email address the link was sent to. `400` if the token is wrong, used or older than 24 hours. |
 | `POST /resend-verification` | none | `{"email"}` → `{"ok": true}`, always the same answer whether or not such an account exists. `404` ("email verification is not switched on") when the server does not use email verification. |
 | `POST /account/change-password` | session | `{"current", "new"}` → `{"session"}`. Checks the current password (`403` if it is wrong, never `401`, which only ever means "no valid login"; wrong ones count toward the lockout and the login limit), then sets the new one and ends every other login of the account; the returned session replaces the caller's. Also clears a temporary-password flag. `400` for a weak new password. |
-| `POST /account/delete` | session | `{"password"}` → `{"deleted": {"saves_deleted", "saves_kept_anonymised", "drafts", "daily_entries", "invite_codes"}}`. Deletes the caller's account and what it left behind: drafts, daily scores, saved games nobody else played, and the name in shared saved games (replaced by "deleted player"). Cannot be undone. `403` if the password is wrong. |
+| `POST /account/delete` | session | `{"password"}` → `{"deleted": {"saves_deleted", "saves_kept_anonymised", "drafts", "daily_entries", "invite_codes", "reports"}}`. Deletes the caller's account and what it left behind: drafts, daily scores, saved games nobody else played, and the name in shared saved games (replaced by "deleted player"). Cannot be undone. `403` if the password is wrong. |
 
 ## Games
 
 | Endpoint | Auth | Description |
 |---|---|---|
 | `GET /games` | session | `{"games": [...], "max_games"}`. A game has `"recent": true` if the caller left it within 30 minutes and it is still running; the caller's own daily attempt appears with `"private": true`. |
-| `POST /games` | session | `{"name"?}` → `{"id", "name", "url"}`. An empty or missing name becomes a random 6-character one. `409` when the maximum number of games is already running. |
-| `POST /games/resume` | session | `{"id"}` → `{"id", "name", "url"}`: brings back a saved game (works even at the maximum). |
+| `POST /games` | session | `{"name"?}` → `{"id", "name", "url"}`. An empty or missing name becomes a random 6-character one. `400` if the name contains a blocked word. `409` when the maximum number of games is already running, or when this account already has a game running (`--max-games-per-account`, default 1: "you already have a game running ..."). `429` after 10 games an hour from one account. |
+| `POST /games/resume` | session | `{"id"}` → `{"id", "name", "url"}`: brings back a saved game (works even at the maximum, but counts toward the per-account limit). |
 | `GET /saved` | session | `{"games": [...]}`: saved games this account played in (kept 3 days). |
 
 ## Daily challenge
@@ -112,6 +112,7 @@ Every request below carries `{"player": "<token>"}` except `/join` (which needs 
 | `POST /g/<id>/hint` | player token | `{"kind": "can_make" \| "try" \| "find", "target"}` → a private hint. |
 | `POST /g/<id>/journal` | player token | `{}` → `{"elements": [...]}`: every fully discovered element with the recipes that make it and use it. |
 | `POST /g/<id>/genie` | player token | `{"element"}` → `{"results", "new", "tiles", "genie"}`. |
+| `POST /g/<id>/report` | player token | `{"target": pid, "reason": "name", "behaviour" or "other", "note"?}` → `{}`: tells the administrators about another player in the game (`target` is a `pid` from `players`). The note is at most 140 characters. **Nothing records who sent it.** The same reporter reporting the same player again within a day is ignored without an error. `404` if the player is not in the game, `400` for yourself or a bad reason, `429` after 5 reports an hour from one account. |
 | `POST /g/<id>/end` | player token | `{"save": true \| false}` → `{"saved"}`: ends the game for everyone. Saving: `403` unless the caller created the game. |
 
 ### Events
@@ -145,7 +146,7 @@ A ticket works once, so after a dropped connection a page asks for a fresh ticke
 |---|---|---|
 | `GET /create/data` | session | `{"username", "elements": [...], "drafts": [...]}`: what the Create Recipes page needs. |
 | `POST /create/combine` | session | `{"a", "b"}` → `{"results": [...]}`: what two elements make, counting this account's drafts. |
-| `POST /create/recipe` | session | `{"a", "b", "name"}` → the new draft. |
+| `POST /create/recipe` | session | `{"a", "b", "name"}` → the new draft (`400` if the name contains a blocked word). |
 | `POST /create/delete` | session | `{"id"}` → the removed draft. |
 | `POST /create/promote` | session | `{"id", "note"?}` → the proposal for an admin to review. |
 | `GET /admin/queue` | session + admin | `{"proposals": [...]}` waiting for review. |
@@ -161,9 +162,11 @@ and names, never password hashes, email addresses, login tokens or client addres
 
 | Endpoint | Auth | Description |
 |---|---|---|
-| `GET /ops/status` | session + admin | `{"uptime_seconds", "accounts": {"total", "pending", "disabled", "admins"}, "sessions", "games": {"running", "max", "private", "players"}, "since_start": {"logins", "login_failures", "registrations", "throttled", "accounts_deleted", "server_errors"}, "signup": {"invite_required", "email_required", "human_check", "behind_proxy"}}`. Counters are in memory and reset when the server restarts. |
+| `GET /ops/status` | session + admin | `{"uptime_seconds", "accounts": {"total", "pending", "disabled", "admins"}, "sessions", "games": {"running", "max", "private", "players"}, "since_start": {"logins", "login_failures", "registrations", "throttled", "accounts_deleted", "server_errors", "reports"}, "reports": {"open"}, "signup": {"invite_required", "email_required", "human_check", "behind_proxy"}}`. Counters are in memory and reset when the server restarts. |
 | `GET /ops/accounts` | session + admin | `{"accounts": [{"name", "admin", "bot", "pending", "disabled", "created"}]}`, by name. |
 | `GET /ops/games` | session + admin | `{"games": [{"id", "name", "players", "max_players", "found", "total", "genie", "kind", "private"}], "max_games"}`; `kind` is `game`, `daily` or `race`. |
+| `GET /ops/reports` | session + admin | `{"reports": [{"id", "user", "reason", "note", "game", "count", "first", "at"}]}`, most reported first. Reports are merged per player and reason; there is no reporter in them. They are deleted after 14 days. |
+| `POST /ops/reports/dismiss` | session + admin | `{"id"}` → `{"dismissed": true or false}`. |
 | `GET /ops/invites` | session + admin | `{"enabled", "codes": [{"id", "note", "created", "used_by", "used_at"}]}`. Codes are stored hashed, so they cannot be shown again. |
 | `POST /ops/invites/create` | session + admin | `{"count"?, "note"?}` → `{"codes": [...]}`, shown only now. `409` if invite codes are not switched on (`--require-invite`). |
 | `POST /ops/invites/revoke` | session + admin | `{"id"}` → `{"revoked": n}`: deletes an unused code. |
@@ -183,6 +186,7 @@ checks that every option the server accepts appears in the README.
 
 Newest first. Add a line whenever an endpoint, event, status code or option is added, changed or removed.
 
+- **2026-11 (strangers' safety)**: `POST /g/<id>/report`; `GET /ops/reports` and `POST /ops/reports/dismiss`; `reports` in the `/ops/status` response and in the account-deletion summary; blocked-word checks (`400`) on usernames, game names and recipe names; one running game per account and 10 games an hour (`409`, `429`); options `--blocklist-file`, `--reports-file`, `--max-games-per-account`.
 - **2026-11 (phones)**: phones are no longer redirected to `/laptop` or refused with `403`; they get the same pages and API as every other browser. `GET /laptop` is gone.
 - **2026-11 (options)**: `--client-ip-header`, `--max-games`, `--log-file`, `--log-days` (README options table).
 - **2026-11 (accounts and operations)**: `POST /account/change-password` and `POST /account/delete`; `GET /ops` and the `/ops/...`

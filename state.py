@@ -713,6 +713,11 @@ class GameState:
         with self._lock:
             return len(self._discovered) > len(self.book.starters)
 
+    def name_of(self, pid: object) -> str | None:
+        """The account name of the player with this pid in the game, or None."""
+        with self._lock:
+            return next((player.name for player in self._players.values() if player.pid == pid), None)
+
     def authorize(self, token: object) -> Player:
         """The player behind `token`, or a 403 GameError."""
         with self._lock:

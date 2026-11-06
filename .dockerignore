@@ -16,6 +16,7 @@ accounts.json
 drafts.json
 daily.json
 invites.json
+reports.json
 reload_snapshot.json*
 *.pem
 *.md

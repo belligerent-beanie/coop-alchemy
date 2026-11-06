@@ -95,6 +95,7 @@ function renderStatus(s) {
     stat("sign-ups", since.registrations || 0),
     stat("rate-limited", since.throttled || 0),
     stat("server errors", since.server_errors || 0),
+    stat("open reports", s.reports.open),
   );
   const gates = [];
   if (s.signup.invite_required) gates.push("invite code");
@@ -103,6 +104,26 @@ function renderStatus(s) {
   $("signup-line").textContent = "Sign-up needs: " + (gates.length ? gates.join(", ") : "nothing (open)") +
     (s.signup.behind_proxy ? ". Behind a reverse proxy." : ". Not behind a reverse proxy.") +
     " Counters restart with the server.";
+}
+
+// ---- reports ------------------------------------------------------------------------------------
+
+const REPORT_ABOUT = { name: "name", behaviour: "behaviour", other: "something else" };
+
+function renderReports(data) {
+  const body = $("reports-table").querySelector("tbody");
+  body.replaceChildren();
+  for (const report of data.reports) {
+    const row = el("tr");
+    const actions = el("td", "", "actions");
+    actions.append(plainButton("Dismiss", () => Auth.fetch("/ops/reports/dismiss", { id: report.id })));
+    actions.append(riskyButton("Disable account", () => Auth.fetch("/ops/accounts/disable", { username: report.user })));
+    row.append(el("td", report.user), el("td", REPORT_ABOUT[report.reason] || report.reason), el("td", String(report.count)),
+      el("td", report.note || ""), el("td", report.game || ""), el("td", new Date(report.at * 1000).toLocaleString()), actions);
+    body.append(row);
+  }
+  $("reports-table").hidden = data.reports.length === 0;
+  $("no-reports").hidden = data.reports.length !== 0;
 }
 
 // ---- games --------------------------------------------------------------------------------------
@@ -208,10 +229,12 @@ $("codes-done").addEventListener("click", () => {
 async function refresh() {
   if (confirming > 0) return; // a confirmation is pending: the next refresh will catch up
   try {
-    const [status, games, list, invites] = await Promise.all([
+    const [status, games, list, invites, reports] = await Promise.all([
       Auth.fetch("/ops/status"), Auth.fetch("/ops/games"), Auth.fetch("/ops/accounts"), Auth.fetch("/ops/invites"),
+      Auth.fetch("/ops/reports"),
     ]);
     renderStatus(status);
+    renderReports(reports);
     renderGames(games);
     accounts = list.accounts;
     renderAccounts();

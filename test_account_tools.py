@@ -215,7 +215,7 @@ class AccountEndpointTests(unittest.TestCase):
         self.assertEqual(self.as_user(session, "GET", "/me")[0], 200)  # still here
         status, data = self.as_user(session, "POST", "/account/delete", {"password": f"password-{name}"})
         self.assertEqual(status, 200)
-        self.assertEqual(set(data["deleted"]), {"saves_deleted", "saves_kept_anonymised", "drafts", "daily_entries", "invite_codes"})
+        self.assertEqual(set(data["deleted"]), {"saves_deleted", "saves_kept_anonymised", "drafts", "daily_entries", "invite_codes", "reports"})
         self.assertEqual(self.as_user(session, "GET", "/me")[0], 401)
         self.assertEqual(call(self.port, "POST", "/login", {"username": name, "password": f"password-{name}"},
                               headers={"X-Session": ""})[0], 401)
@@ -239,7 +239,7 @@ class AccountEndpointTests(unittest.TestCase):
         self.user()
         status, data = call(self.port, "GET", "/ops/status")
         self.assertEqual(status, 200)
-        self.assertEqual(set(data), {"uptime_seconds", "accounts", "sessions", "games", "since_start", "signup"})
+        self.assertEqual(set(data), {"uptime_seconds", "accounts", "sessions", "games", "since_start", "reports", "signup"})
         self.assertGreaterEqual(data["accounts"]["total"], 2)
         self.assertGreaterEqual(data["since_start"].get("logins", 0), 1)
         text = json.dumps(data) + json.dumps(call(self.port, "GET", "/ops/accounts")[1])

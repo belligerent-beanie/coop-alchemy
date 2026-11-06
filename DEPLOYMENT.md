@@ -288,6 +288,23 @@ python3 server.py --host 127.0.0.1 --trusted-proxy 127.0.0.1 \
   other changes still rewrite the whole file, which is fine at hundreds to low thousands of accounts.
 - Email verification stays available but is off by default: it means storing an email address per player. Recovery works without it (above).
 
+### Strangers' safety (built)
+Everything here stores nothing new about the people who use it, and each piece is listed on `/privacy`.
+- **Name filter.** Usernames, game names and the names of recipes players create are checked against `blocklist.txt` (a starting list) plus
+  your own file (`--blocklist-file`, one term per line). It ignores spacing, capitals, accents, look-alike digits and stretched letters
+  (`f.u.c.k`, `sh1t`), blocks some short words only as whole words so `Classic` and `Assassin` pass, and has an allow list for innocent words
+  that contain a blocked term (`Scunthorpe`). The error never says which word. It is a speed bump, not a judge: expect to add terms.
+  See `namefilter.py` for the rules; existing accounts are not re-checked.
+- **One running game per account** (`--max-games-per-account`, default 1; `0` removes the limit) and 10 games an hour per account, so one
+  person cannot hold every game slot. Daily challenges and races do not count.
+- **Reports.** Each other player in a game has a flag button: the reporter picks name, behaviour or other, and may add up to 140
+  characters. **Nothing records who sent it**; the reporter's account is used only in memory to ignore the same person reporting the same
+  player twice in a day, and is never written down. Reports about one player for one reason are merged into one entry with a count. They show
+  on `/ops` (most reported first), disappear after 14 days, when you dismiss them, or when the reported account is deleted, and are kept
+  in `reports.json` (not in backups). From `/ops` you can then disable the account, end its game, or delete it.
+- **What this does not do:** no automatic bans, no scanning of anything beyond those names, and no chat (the game has none). Anything
+  reaching you through reports is a person's word, so look before you act.
+
 ### Account recovery and deletion (built, with no email needed)
 The server collects only a username and a password hash, and keeps it that way, so recovery does not use email:
 - **Forgot the password:** an administrator opens the operations page (`/ops`), clicks "New password" beside the account, and

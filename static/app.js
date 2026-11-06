@@ -405,6 +405,15 @@ function setPlayers(list) {
       you.className = "you";
       you.textContent = "(you)";
       li.append(you);
+    } else {
+      const flag = document.createElement("button");
+      flag.type = "button";
+      flag.className = "report";
+      flag.textContent = "\u2691";
+      flag.title = `Report ${p.name}`;
+      flag.setAttribute("aria-label", `Report ${p.name}`);
+      flag.addEventListener("click", () => openReport(p));
+      li.append(flag);
     }
     key.appendChild(li);
   }
@@ -859,6 +868,33 @@ document.addEventListener("pointermove", (e) => {
   } else if (cursorShown) {
     shareCursor({ x: null, y: null });
     cursorShown = false;
+  }
+});
+
+// ---- reporting another player ----------------------------------------------------------------------
+
+let reporting = null; // the player the dialog is about
+
+function openReport(player) {
+  reporting = player;
+  $("report-who").textContent = player.name;
+  $("report-note").value = "";
+  $("report-error").textContent = "";
+  $("report-dialog").showModal();
+}
+
+$("report-cancel").addEventListener("click", () => $("report-dialog").close());
+
+$("report-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!reporting) return;
+  $("report-error").textContent = "";
+  try {
+    await api("/report", { target: reporting.pid, reason: $("report-reason").value, note: $("report-note").value });
+    $("report-dialog").close();
+    toast("Thanks: the administrators have been told.");
+  } catch (err) {
+    $("report-error").textContent = err.message;
   }
 });
 

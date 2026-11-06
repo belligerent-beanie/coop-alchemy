@@ -78,7 +78,7 @@ class ContainerFileTests(unittest.TestCase):
 
     def test_the_data_stays_out_of_the_image(self) -> None:
         ignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
-        for private in ("accounts.json", ".env", "data", "backups", "*.pem"):
+        for private in ("accounts.json", "reports.json", ".env", "data", "backups", "*.pem"):
             self.assertIn(private, ignore)
         for flag in ("--accounts-file", "--saves-dir", "--log-file"):
             self.assertRegex(DOCKERFILE, rf'"{flag}", "/data')  # pointed at the volume
@@ -95,7 +95,7 @@ class ContainerFileTests(unittest.TestCase):
             self.assertEqual(imports.returncode, 0, imports.stderr)
             port = free_port()
             args = [sys.executable, "server.py", "--host", "127.0.0.1", "--port", str(port)]
-            for flag in ("accounts-file", "daily-file", "drafts-file", "invites-file"):
+            for flag in ("accounts-file", "daily-file", "drafts-file", "invites-file", "reports-file"):
                 args += [f"--{flag}", str(data / f"{flag}.json")]
             args += ["--saves-dir", str(data / "saves"), "--snapshot-file", str(data / "snap.json"),
                      "--pid-file", str(data / "pid"), "--log-file", str(data / "live.log"), "--log-days", "14",

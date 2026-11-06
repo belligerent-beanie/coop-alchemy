@@ -1447,6 +1447,7 @@ def serve(registry: GameRegistry) -> tuple[AlchemyServer, int]:
     accounts = AccountStore(Path(tmp.name) / "accounts.json", iterations=1000)  # few iterations: fast tests
     server = AlchemyServer(("127.0.0.1", 0), registry, BASE_DIR / "static", accounts)
     server.register_throttle = Throttle(10_000, 1.0)  # the tests make many accounts from one address
+    server.games_throttle = Throttle(10_000, 1.0)     # ... and many games from one account
     close = server.server_close
 
     def close_and_clean() -> None:

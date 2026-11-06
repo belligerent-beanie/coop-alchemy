@@ -9,6 +9,7 @@ they can never disagree about what deletion means:
   - saved games: ones nobody else played are deleted; in shared ones the name is replaced by "deleted player" and the game
     stays for the others
   - its name on the invite code it used (replaced by a placeholder)
+  - any reports about it
 
 Not touched: the server's own log file, which records addresses and usernames and is deleted by age (see DEPLOYMENT.md), and
 games running right now, which end on their own and are not saved under the name. Running games and race rooms keep the
@@ -22,6 +23,7 @@ from accounts import AccountStore
 from daily import DailyStore
 from drafts import DraftStore
 from invites import InviteStore
+from reports import ReportStore
 from saves import SaveStore
 
 
@@ -32,13 +34,14 @@ class ErasureSummary:
     drafts: int
     daily_entries: int
     invite_codes: int
+    reports: int = 0
 
     def as_json(self) -> dict[str, int]:
         return asdict(self)
 
 
 def erase_account(username: str, *, accounts: AccountStore, saves: SaveStore, drafts: DraftStore, daily: DailyStore,
-                  invites: InviteStore | None = None) -> ErasureSummary:
+                  invites: InviteStore | None = None, reports: ReportStore | None = None) -> ErasureSummary:
     """Delete `username` everywhere. Raises GameError(404) first, touching nothing, if there is no such account."""
     accounts.delete(username)  # the 404 for an unknown account happens here, before anything else is changed
     deleted, rewritten = saves.anonymize_player(username)
@@ -48,4 +51,5 @@ def erase_account(username: str, *, accounts: AccountStore, saves: SaveStore, dr
         drafts=drafts.delete_user(username),
         daily_entries=daily.delete_user(username),
         invite_codes=invites.forget_user(username) if invites is not None else 0,
+        reports=reports.delete_user(username) if reports is not None else 0,
     )

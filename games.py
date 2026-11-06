@@ -60,8 +60,10 @@ class GameRegistry:
                  idle_seconds: float = IDLE_CLOSE_SECONDS,
                  clock: Callable[[], float] = time.monotonic,
                  saves: SaveStore | None = None,
-                 daily: DailyStore | None = None) -> None:
+                 daily: DailyStore | None = None,
+                 max_per_account: int = 0) -> None:
         self.book = book
+        self.max_per_account = max_per_account  # running public games one account may have started (0 = no limit)
         self.saves = saves or SaveStore(None)
         self.daily = daily or DailyStore(None, book)
         self.max_games = max_games
@@ -87,6 +89,14 @@ class GameRegistry:
             game = self._games.pop(slug)
             game.close("", False)
 
+    def _check_per_account(self, creator: str) -> None:
+        """Refuse a new game from an account that already has one running, so one person cannot hold every slot (lock held)."""
+        if self.max_per_account <= 0 or not creator:
+            return
+        mine = [g for g in self._games.values() if not g.private and key_of(g.creator) == key_of(creator)]
+        if len(mine) >= self.max_per_account:
+            raise GameError(409, f"you already have a game running ({mine[0].name}): join it, or end it first")
+
     def create(self, raw_name: object, creator: str = "") -> GameState:
         name = clean_game_name(raw_name)
         with self._lock:
@@ -95,6 +105,7 @@ class GameRegistry:
                 raise GameError(409, f"{self.max_games} games are already running: join one, or wait for one "
                                      f"to end (a game closes {round(self.idle_seconds / 60)} minutes after "
                                      f"the last player leaves)")
+            self._check_per_account(creator)
             if not name:
                 name = next(n for n in (random_room_name() for _ in range(100)) if slugify(n) not in self._games)
             slug = slugify(name) or secrets.token_hex(3)
@@ -271,6 +282,7 @@ class GameRegistry:
                 raise GameError(403, "only players who were in that game can resume it")
             name = clean_game_name(data.get("name")) or slug
             creator = data.get("creator") if isinstance(data.get("creator"), str) else ""
+            self._check_per_account(creator or username)
             # Saves from before games had a creator belong to whoever brings them back first.
             game = GameState(self.book, name=name, slug=slug, creator=creator or username, clock=self._clock)
             game.restore(data)

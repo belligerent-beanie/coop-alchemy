@@ -76,6 +76,26 @@
     </main>
   </div>
 
+  <dialog id="report-dialog" class="dialog">
+    <form id="report-form" autocomplete="off">
+      <h2>Report <span id="report-who"></span></h2>
+      <p class="muted">The administrators will look at it. They are not told who sent it.</p>
+      <label for="report-reason">What is wrong?</label>
+      <select id="report-reason">
+        <option value="name">Their name is inappropriate</option>
+        <option value="behaviour">They are behaving badly</option>
+        <option value="other">Something else</option>
+      </select>
+      <label for="report-note">Anything the administrators should know? (optional)</label>
+      <input id="report-note" maxlength="140">
+      <p id="report-error" class="error" role="alert"></p>
+      <div class="dialog-buttons">
+        <button type="submit">Send report</button>
+        <button type="button" id="report-cancel">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="end-dialog">
     <form method="dialog">
       <h2 id="end-title">End this game?</h2>

@@ -91,7 +91,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from accounts import AccountStore, clean_email
+from accounts import AccountStore, clean_email, key_of
 from captcha import ORIGIN as TURNSTILE_ORIGIN
 from captcha import Turnstile
 from daily import DailyStore
@@ -101,8 +101,10 @@ from games import IDLE_CLOSE_SECONDS, MAX_GAMES, GameRegistry
 from hints import find_element
 from hotreload import restore_snapshot, write_snapshot
 from invites import InviteStore
+from namefilter import NameFilter
 from mailer import MailConfigError, Mailer, verification_message
 from recipes import RecipeError, load_recipes
+from reports import REASONS, ReportStore, clean_note
 from saves import SaveStore
 from state import GameError, GameState
 from throttle import Throttle, TicketStore, client_ip, parse_networks
@@ -235,6 +237,10 @@ class AlchemyServer(ThreadingHTTPServer):
         self.started = time.time()
         self.stats: Counter[str] = Counter()  # things that happened since the server started, for the operations page
         self._stats_lock = threading.Lock()
+        self.names = NameFilter.load()               # blocked words in usernames, game names and recipe names (--blocklist-file adds more)
+        self.reports = ReportStore(None)             # player reports for the administrators (--reports-file keeps them on disk)
+        self.games_throttle = Throttle(10, 3600.0)   # games one account may start per hour
+        self.reports_throttle = Throttle(5, 3600.0)  # reports one account may send per hour
         self.tickets = TicketStore()                 # one-time passes for event streams
         self.trusted_proxies: list = []              # addresses whose X-Forwarded-* headers are believed (--trusted-proxy)
         self.client_ip_header = ""                   # a header holding the client's address, set by the proxy (--client-ip-header)
@@ -346,6 +352,9 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/ops/games":
                 self._admin()
                 self._json(200, {"games": self.server.registry.overview(), "max_games": self.server.registry.max_games})
+            elif path == "/ops/reports":
+                self._admin()
+                self._json(200, {"reports": self.server.reports.listing()})
             elif path == "/ops/invites":
                 self._admin()
                 invites = self.server.invites
@@ -457,7 +466,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._account_action(path, self._read_json())
                 return
             if path == "/games":
-                game = self.server.registry.create(self._read_json().get("name"), self._user())
+                raw_name = self._read_json().get("name")
+                user = self._user()
+                if isinstance(raw_name, str) and raw_name.strip():
+                    self.server.names.check(raw_name, "game name")
+                self._limit_game_starts(user)
+                game = self.server.registry.create(raw_name, user)
                 self._json(200, {"id": game.slug, "name": game.name, "url": f"/g/{game.slug}"})
                 return
             if path == "/daily/start":
@@ -481,7 +495,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, action(race.group(1), user))
                 return
             if path == "/games/resume":
-                game = self.server.registry.resume(self._read_json().get("id"), self._user())
+                saved_id, user = self._read_json().get("id"), self._user()
+                self._limit_game_starts(user)
+                game = self.server.registry.resume(saved_id, user)
                 self._json(200, {"id": game.slug, "name": game.name, "url": f"/g/{game.slug}"})
                 return
             if path.startswith("/ops/"):
@@ -495,11 +511,15 @@ class Handler(BaseHTTPRequestHandler):
                 return
             match = GAME_PATH.match(path)
             rest = match.group(2) if match else None
-            if not match or (rest not in ("/join", "/ticket") and rest not in ACTIONS):
+            if not match or (rest not in ("/join", "/ticket", "/report") and rest not in ACTIONS):
                 raise GameError(404, "not found")
             body = self._read_json()
             if rest == "/ticket":
                 self._json(200, {"ticket": self._event_ticket(match.group(1), body.get("player"))})
+                return
+            if rest == "/report":
+                self._report_player(match.group(1), body)
+                self._json(200, {})
                 return
             username = self._user() if rest == "/join" else ""
             if rest == "/end":
@@ -524,6 +544,36 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- helpers ------------------------------------------------------
 
+    def _limit_game_starts(self, user: str) -> None:
+        wait = self.server.games_throttle.allow(key_of(user))
+        if wait:
+            raise GameError(429, f"you have started a lot of games: try again in {int(wait) // 60 + 1} minutes")
+
+    def _report_player(self, slug: str, body: dict[str, Any]) -> None:
+        """A player tells the administrators about another player in the same game. Nothing records who sent it."""
+        game = self.server.registry.get(slug)
+        if game is None:
+            raise GameError(404, "that game does not exist (it may have ended)")
+        token = body.get("player")
+        if not isinstance(token, str):
+            raise GameError(400, "missing player token")
+        reporter = game.authorize(token)
+        target = game.name_of(body.get("target"))
+        if target is None:
+            raise GameError(404, "that player is not in this game")
+        if key_of(target) == key_of(reporter.name):
+            raise GameError(400, "you cannot report yourself")
+        reason = body.get("reason")
+        if reason not in REASONS:
+            raise GameError(400, "say what is wrong: name, behaviour or other")
+        note = clean_note(body.get("note"))
+        wait = self.server.reports_throttle.allow(key_of(reporter.name))
+        if wait:
+            raise GameError(429, "you have sent several reports already: the administrators will look at them")
+        if self.server.reports.add(target, reason, note, game.name, reporter.name):
+            self.server.bump("reports")
+            log.info("report: %s about a player (%s)", reason, "with a note" if note else "no note")  # no names in the log
+
     def _event_ticket(self, slug: str, token: object) -> str:
         """A one-time pass for GET /g/<id>/events, so the player token itself never appears in a URL."""
         game = self.server.registry.get(slug)
@@ -535,6 +585,7 @@ class Handler(BaseHTTPRequestHandler):
     def _register(self, body: dict[str, Any]) -> str:
         """Create an account, spending an invite code first if signup requires one."""
         accounts, invites = self.server.accounts, self.server.invites
+        self.server.names.check(body.get("username"), "username")
         email = None
         if self.server.mailer is not None:
             if body.get("email") is None:
@@ -614,6 +665,7 @@ class Handler(BaseHTTPRequestHandler):
             "games": {"running": len(public), "max": server.registry.max_games, "private": len(games) - len(public),
                       "players": sum(int(g["players"]) for g in games)},
             "since_start": dict(server.stats),
+            "reports": {"open": server.reports.count()},
             "signup": {"invite_required": server.invites is not None, "email_required": server.mailer is not None,
                        "human_check": server.captcha is not None, "behind_proxy": bool(server.trusted_proxies)},
         }
@@ -635,6 +687,11 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(handle, str):
                 raise GameError(400, "missing invite id")
             return {"revoked": server.invites.revoke(handle)}
+        if path == "/ops/reports/dismiss":
+            report_id = body.get("id")
+            if not isinstance(report_id, str):
+                raise GameError(400, "missing report id")
+            return {"dismissed": server.reports.dismiss(report_id)}
         if path == "/ops/games/end":
             slug = body.get("id")
             if not isinstance(slug, str):
@@ -664,7 +721,7 @@ class Handler(BaseHTTPRequestHandler):
             return {"temporary_password": temporary}
         registry = server.registry
         summary = erase_account(username, accounts=accounts, saves=registry.saves, drafts=server.drafts,
-                                daily=registry.daily, invites=server.invites)
+                                daily=registry.daily, invites=server.invites, reports=server.reports)
         server.bump("accounts_deleted")
         return {"deleted": summary.as_json()}
 
@@ -691,7 +748,7 @@ class Handler(BaseHTTPRequestHandler):
             raise
         registry = self.server.registry
         summary = erase_account(username, accounts=accounts, saves=registry.saves, drafts=self.server.drafts,
-                                daily=registry.daily, invites=self.server.invites)
+                                daily=registry.daily, invites=self.server.invites, reports=self.server.reports)
         self.server.bump("accounts_deleted")
         log.info("account deleted client=%s user=%s", client, username)
         self._json(200, {"deleted": summary.as_json()})
@@ -752,6 +809,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/create/combine":
             return {"results": drafts.combine(username, book, body.get("a"), body.get("b"))}
         if path == "/create/recipe":
+            self.server.names.check(body.get("name"), "recipe name")
             return drafts.create(username, book, body.get("a"), body.get("b"), body.get("name"))
         if path == "/create/delete":
             return drafts.delete(username, book, body.get("id"))
@@ -957,6 +1015,12 @@ def main() -> int:
                         help="where running games are parked during a reload (default: ./reload_snapshot.json)")
     parser.add_argument("--pid-file", default=str(BASE_DIR / "alchemy.pid"),
                         help="records this server's process id so reload.py can find it (default: ./alchemy.pid)")
+    parser.add_argument("--blocklist-file", metavar="FILE",
+                        help="extra blocked words for usernames, game names and recipe names (one per line; see blocklist.txt)")
+    parser.add_argument("--reports-file", default=str(BASE_DIR / "reports.json"),
+                        help="where player reports wait for the administrators, for 14 days at most (default: ./reports.json)")
+    parser.add_argument("--max-games-per-account", type=int, default=1,
+                        help="running games one account may have started at once (default 1; 0 for no limit)")
     parser.add_argument("--max-games", type=int, default=MAX_GAMES,
                         help=f"how many games may run at once (default {MAX_GAMES}); daily challenges and races do not count")
     parser.add_argument("--log-file", help="write the server's messages (logins, failures, admin actions) to this file, "
@@ -974,7 +1038,7 @@ def main() -> int:
 
     saves = SaveStore(args.saves_dir)
     registry = GameRegistry(book, max_games=max(1, args.max_games), idle_seconds=args.idle_minutes * 60, saves=saves,
-                            daily=DailyStore(args.daily_file, book))
+                            daily=DailyStore(args.daily_file, book), max_per_account=max(0, args.max_games_per_account))
     accounts = AccountStore(args.accounts_file)
     listen_fd = int(os.environ.pop("ALCHEMY_LISTEN_FD")) if "ALCHEMY_LISTEN_FD" in os.environ else None
     try:
@@ -1010,6 +1074,12 @@ def main() -> int:
         print(f"--trusted-proxy: {exc}", file=sys.stderr)
         return 1
     configure_logging(args.log_file, args.log_days)
+    try:
+        server.names = NameFilter.load(args.blocklist_file)
+    except OSError as exc:
+        print(f"--blocklist-file: {exc}", file=sys.stderr)
+        return 1
+    server.reports = ReportStore(args.reports_file)
     scheme = "http"
     if bool(args.tls_cert) != bool(args.tls_key):
         print("--tls-cert and --tls-key must be given together", file=sys.stderr)

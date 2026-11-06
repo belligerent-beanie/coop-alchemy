@@ -51,7 +51,7 @@ New-Item -ItemType Directory -Force data | Out-Null
 $serverArgs = @(
     "server.py", "--port", "$Port",
     "--accounts-file", "data\accounts.json", "--daily-file", "data\daily.json", "--drafts-file", "data\drafts.json",
-    "--invites-file", "data\invites.json",
+    "--invites-file", "data\invites.json", "--reports-file", "data\reports.json",
     "--saves-dir", "data\saves", "--snapshot-file", "data\reload_snapshot.json", "--pid-file", "data\alchemy.pid",
     "--log-file", "data\live.log", "--log-days", "14"
 )

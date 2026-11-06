@@ -1,0 +1,72 @@
+# Words that may not appear in usernames, game names or recipe names. See namefilter.py for how they are matched.
+#   term   blocked anywhere inside a name (spacing, capitals, accents, look-alike digits and stretched letters are ignored)
+#   =term  blocked only as a whole word (for short words that sit inside innocent ones)
+# This is a starting list: add your own terms with --blocklist-file (one per line) rather than editing this file.
+
+# ---- blocked anywhere ----
+fuck
+shit
+cunt
+bitch
+whore
+asshole
+dumbass
+dickhead
+cocksuck
+wanker
+bollock
+blowjob
+handjob
+porn
+nigger
+nigga
+faggot
+wetback
+rapist
+pedophil
+paedophil
+hitler
+kkk
+
+# ---- innocent words that contain a blocked term (these are never blocked) ----
+-scunthorpe
+-therapist
+-therapists
+-shiitake
+
+# ---- blocked as whole words ----
+=ass
+=arse
+=dick
+=cock
+=pussy
+=penis
+=vagina
+=boob
+=boobs
+=tits
+=slut
+=cum
+=anal
+=anus
+=sex
+=sexy
+=nude
+=nudes
+=rape
+=raped
+=nazi
+=heil
+=fag
+=dyke
+=tranny
+=retard
+=retarded
+=negro
+=coon
+=gook
+=kike
+=spic
+=chink
+=twat
+=kys

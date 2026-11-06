@@ -30,6 +30,7 @@ from daily import DailyStore
 from drafts import DraftStore
 from erasure import erase_account
 from invites import InviteStore
+from reports import ReportStore
 from saves import SaveStore
 from state import GameError
 
@@ -63,6 +64,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--drafts-file", default=str(BASE_DIR / "drafts.json"))
     parser.add_argument("--invites-file", default=str(BASE_DIR / "invites.json"))
     parser.add_argument("--daily-file", default=str(BASE_DIR / "daily.json"))
+    parser.add_argument("--reports-file", default=str(BASE_DIR / "reports.json"))
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("list")
     sub.add_parser("reset").add_argument("username")
@@ -134,7 +136,7 @@ def main(argv: list[str]) -> int:
             # the daily store only needs its file here, not the recipes
             summary = erase_account(args.username, accounts=store, saves=saves, drafts=DraftStore(args.drafts_file),
                                     daily=DailyStore(args.daily_file, None),  # type: ignore[arg-type]
-                                    invites=InviteStore(args.invites_file))
+                                    invites=InviteStore(args.invites_file), reports=ReportStore(args.reports_file))
             print(f"Deleted {args.username!r}: {summary.saves_deleted} saved game(s) deleted, "
                   f"{summary.saves_kept_anonymised} kept for the others, {summary.drafts} draft recipe(s), "
                   f"{summary.daily_entries} daily-challenge entries.")

@@ -101,7 +101,7 @@ def run_scenario(spec: str, seconds: float, server_dir: Path = BASE_DIR) -> dict
         [sys.executable, "-c", code, "--host", "127.0.0.1", "--port", str(port), "--recipes", str(server_dir / "recipes.json"),
          "--accounts-file", str(folder / "a.json"), "--saves-dir", str(folder / "saves"), "--drafts-file", str(folder / "d.json"),
          "--daily-file", str(folder / "daily.json"), "--snapshot-file", str(folder / "s.json"), "--pid-file", str(folder / "p.pid"),
-         "--max-games", str(max(rooms, 1))],
+         "--reports-file", str(folder / "r.json"), "--max-games", str(max(rooms, 1))],
         cwd=str(server_dir), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         wait_up(port)
