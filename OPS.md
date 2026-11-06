@@ -77,7 +77,7 @@ codes. Buttons that change things ask for a second click.
 | Hand out invite codes (needs `--require-invite`) | **Make codes**; copy them from the notice, they are shown only once |
 
 Administrators cannot be disabled, deleted or reset on the page. Make someone an administrator (or remove the role) with
-`python accounts_admin.py make-admin <name>` / `remove-admin <name>` on the live data
+`python accounts_admin.py create-admin` (first time) or `make-admin <name>` / `remove-admin <name>` on the live data
 (`--file ..\coop-alchemy-live\data\accounts.json`). `accounts_admin.py` also has `list`, `verify`, `disable`, `enable`, `delete`
 and `reset` for when you are at the machine.
 

@@ -20,3 +20,4 @@ reports.json
 reload_snapshot.json*
 *.pem
 *.md
+*-first-password.txt

@@ -34,6 +34,26 @@ class AccountToolTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
+    def test_create_admin_saves_a_temporary_password_to_a_file_and_never_prints_it(self) -> None:
+        import contextlib
+        import io
+        import accounts_admin
+        path = Path(self.tmp.name) / "accounts.json"
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(accounts_admin.main(["x", "--file", str(path), "create-admin"]), 0)
+        password_file = Path(self.tmp.name) / "admin-first-password.txt"
+        temporary = password_file.read_text(encoding="utf-8").strip()
+        self.assertGreaterEqual(len(temporary), 20)
+        self.assertNotIn(temporary, out.getvalue() + err.getvalue())
+        fresh = AccountStore(path, iterations=1000)
+        self.assertTrue(fresh.is_admin("admin"))
+        self.assertTrue(fresh.must_change_password("admin"))
+        fresh.login("admin", temporary)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            self.assertEqual(accounts_admin.main(["x", "--file", str(path), "create-admin"]), 1)  # no second one on top
+        self.assertEqual(password_file.read_text(encoding="utf-8").strip(), temporary)
+
     def test_a_disabled_account_cannot_log_in_and_its_sessions_stop(self) -> None:
         token = self.store.login("ann", PASSWORD)[0]
         self.store.set_disabled("ann", True)

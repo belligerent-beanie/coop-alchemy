@@ -106,7 +106,7 @@ undoes it; `list` shows them). They are meant for automated proposers such as `p
 200-draft and 40-proposal limits do not apply to them, and nothing else changes (a bot is not an admin).
 The account must exist first, so sign up for it on the site, then mark it.
 
-**Admins** are accounts marked with `python3 accounts_admin.py make-admin <username>`
+A first administrator can be made with `python3 accounts_admin.py create-admin` (an account called `admin`, with a random temporary password saved to `admin-first-password.txt` beside the accounts file and never printed; it must be changed at first login), and **admins** are accounts marked with `python3 accounts_admin.py make-admin <username>`
 (`remove-admin` undoes it; `list` shows them). Admins see **Review proposals** on the home
 page, with the number waiting. The review page works like a swipe deck: one proposal at a
 time, shown as **A + B = C** with pictures, the author's credit and note. On a PC press

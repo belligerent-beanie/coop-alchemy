@@ -6,6 +6,8 @@ Usage:
     python3 accounts_admin.py delete <username>    removes the account and what it left behind (see erasure.py)
     python3 accounts_admin.py disable <username>   locks the account out without deleting anything
     python3 accounts_admin.py enable <username>
+    python3 accounts_admin.py create-admin [username]  a new administrator (default "admin") with a random temporary password,
+                                                       written to a file beside the accounts file (never printed); it must be changed at first login
     python3 accounts_admin.py make-admin <username>    lets the account review recipe promotion requests
     python3 accounts_admin.py remove-admin <username>
     python3 accounts_admin.py make-bot <username>      an automated proposer: no limit on drafts or waiting proposals
@@ -22,6 +24,8 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import os
+import secrets
 import sys
 from pathlib import Path
 
@@ -57,6 +61,28 @@ def invite_command(invites: InviteStore, args: argparse.Namespace) -> int:
     return 0
 
 
+def create_admin(store: AccountStore, username: str) -> int:
+    """Make a new administrator with a random temporary password that is saved to a file, not shown: whoever can read that
+    file can sign in once, and the account must choose its own password straight away."""
+    path = Path(store.path).with_name(f"{username}-first-password.txt")
+    if path.exists():
+        print(f"{path} already exists: delete it once the password has been changed, then run this again.", file=sys.stderr)
+        return 1
+    temporary = secrets.token_urlsafe(18)
+    store.register(username, temporary)
+    store.set_password(username, temporary, must_change=True)
+    store.set_admin(username, True)
+    with open(path, "x", encoding="utf-8") as handle:
+        handle.write(temporary + "\n")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    print(f"{username!r} is now an administrator. Its temporary password is in {path}")
+    print("Sign in with it, choose your own password when asked, then delete that file.")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Manage Co-op Alchemy accounts")
     parser.add_argument("--file", default=str(BASE_DIR / "accounts.json"))
@@ -69,6 +95,7 @@ def main(argv: list[str]) -> int:
     sub.add_parser("list")
     sub.add_parser("reset").add_argument("username")
     sub.add_parser("delete").add_argument("username")
+    sub.add_parser("create-admin").add_argument("username", nargs="?", default="admin")
     sub.add_parser("make-admin").add_argument("username")
     sub.add_parser("remove-admin").add_argument("username")
     sub.add_parser("make-bot").add_argument("username")
@@ -87,6 +114,8 @@ def main(argv: list[str]) -> int:
     try:
         if args.command == "invite":
             return invite_command(InviteStore(args.invites_file), args)
+        if args.command == "create-admin":
+            return create_admin(store, args.username)
         if args.command == "verify":
             store.set_verified(args.username)
             print(f"{args.username!r} can now log in.")
