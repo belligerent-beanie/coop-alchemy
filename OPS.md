@@ -54,7 +54,9 @@ Limits, because the host is a Windows PC:
 - If the PC is off, the site is off. A power cut or Windows update reboot is the likeliest outage.
 
 Where to look when something seems wrong (all in `coop-alchemy-live`):
-`data\live.err.log` (server messages), `data\watchdog.log` (restarts), `deploys.log` (what was deployed when), `backups\`.
+`data\live.log` (the activity log, 14 days: sign-ups, logins, failures, admin actions), `data\live.err.log` (anything the server
+printed instead, such as a crash on start-up), `data\watchdog.log` (restarts), `deploys.log` (what was deployed when),
+`summaries\` (one small counts-only file per day) and `backups\`.
 
 ## Day-to-day moderation: the operations page
 Log in as an administrator and open `/ops` (the home page shows an "Operations" button). It shows counts since the server started

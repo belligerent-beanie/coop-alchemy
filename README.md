@@ -262,6 +262,8 @@ python3 server.py [--host 0.0.0.0] [--port 8000]
 | `--turnstile-site-key` | off | Cloudflare Turnstile human check on signup (secret key in the `TURNSTILE_SECRET_KEY` environment variable). |
 | `--require-email-verification`, `--public-url` | off | Signup asks for an email and the account works only after its link is opened; links use the public URL. SMTP settings come from `SMTP_*` environment variables. See DEPLOYMENT.md. |
 | `--tls-cert`, `--tls-key` | off | Serve over HTTPS (see below). |
+| `--max-games` | `3` | How many games may run at once (daily challenges and races do not count). |
+| `--log-file`, `--log-days` | console, 14 | Write the server's messages (logins, failures, admin actions) to a file that starts afresh each midnight, keeping this many days. |
 | `--idle-minutes` | `10` | How long an empty game stays open. |
 | `--drafts-file` | `drafts.json` next to `server.py` | Players' draft recipes and promotion proposals. |
 | `--daily-file` | `daily.json` next to `server.py` | The daily challenge's targets, routes, attempts used and scores (the last 400 days). |
@@ -461,7 +463,8 @@ skipped if `recipes.json` is missing.
 | `throttle.py`, `invites.py`, `captcha.py`, `mailer.py` | Rate limits and one-time event tickets, single-use invite codes, the Turnstile check, and verification email (see DEPLOYMENT.md). |
 | `erasure.py` | Deleting an account and everything kept under its name (used by the player, the admin page and the admin tool). |
 | `API.md` | The HTTP API: every endpoint, the event stream, errors and limits, plus a change log. `test_api_docs.py` fails if it drifts from the code. |
-| `ops/` , `OPS.md` | Running the live server: safe deploys with automatic rollback, backups, a watchdog, scheduled tasks, smoke test. See OPS.md. |
+| `ops/` , `OPS.md` | Running the live server: safe deploys with automatic rollback, backups, a watchdog, a daily summary, scheduled tasks, smoke test. See OPS.md. |
+| `bench_load.py` | Load test: rooms of players and solo players against a real server; CPU, memory, threads, delay, errors. |
 | `bench_cursor.py` | Measures what shared cursors cost the server (`python3 bench_cursor.py`): connections, latency, delivery, CPU. |
 | `recipes.py`, `hints.py` | Recipe file loading and checking; hint logic. |
 | `race.py` | Race rooms: lobby, countdown, standings and the winner. |
@@ -474,7 +477,7 @@ skipped if `recipes.json` is missing.
 | `static/elements/` | Element pictures, one PNG per element. |
 | `aigen/` | The optional AI suggestion tool (see *AI suggestions*); `python3 -m aigen --help`. |
 | `image_check.py` | Lists elements without a picture and pictures that match nothing. |
-| `test_coop.py`, `test_reload.py`, `test_drafts.py`, `test_daily.py`, `test_race.py`, `test_aigen.py`, `test_security.py`, `test_invites.py`, `test_signup_checks.py`, `test_keepalive.py`, `test_accounts_cache.py`, `test_cursors.py`, `test_ops.py`, `test_api_docs.py`, `test_account_tools.py`, `test_recipes.json` | Tests and their fixed recipe set. |
+| `test_coop.py`, `test_reload.py`, `test_drafts.py`, `test_daily.py`, `test_race.py`, `test_aigen.py`, `test_security.py`, `test_invites.py`, `test_signup_checks.py`, `test_keepalive.py`, `test_accounts_cache.py`, `test_cursors.py`, `test_ops.py`, `test_api_docs.py`, `test_account_tools.py`, `test_logging.py`, `test_recipes.json` | Tests and their fixed recipe set. |
 
 ## Troubleshooting
 

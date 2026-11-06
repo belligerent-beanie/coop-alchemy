@@ -74,6 +74,7 @@ import html
 import ipaddress
 import json
 import logging
+import logging.handlers
 import mimetypes
 import os
 import queue
@@ -97,7 +98,7 @@ from captcha import Turnstile
 from daily import DailyStore
 from drafts import DraftStore
 from erasure import erase_account
-from games import IDLE_CLOSE_SECONDS, GameRegistry
+from games import IDLE_CLOSE_SECONDS, MAX_GAMES, GameRegistry
 from hints import find_element
 from hotreload import restore_snapshot, write_snapshot
 from invites import InviteStore
@@ -177,6 +178,27 @@ def coalesce_cursors(messages: list[str]) -> list[str]:
     return [message for i, (message, pid) in enumerate(zip(messages, pids)) if pid is None or newest[pid] == i]
 
 
+def configure_logging(log_file: str | None, days: int = 14) -> logging.Handler:
+    """Send the server's messages to a file that starts afresh each midnight and keeps `days` old files (default: stderr).
+
+    The messages include client addresses and usernames (logins, sign-ups, failures), so they are not kept for long: see /privacy.
+    Returns the handler that was installed.
+    """
+    handler: logging.Handler
+    if log_file:
+        handler = logging.handlers.TimedRotatingFileHandler(log_file, when="midnight", backupCount=max(1, days),
+                                                            encoding="utf-8", delay=True)
+    else:
+        handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(message)s"))
+    root = logging.getLogger()
+    for old in list(root.handlers):
+        root.removeHandler(old)
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+    return handler
+
+
 def build_csp(turnstile: bool) -> str:
     """The Content-Security-Policy: our own files only, plus Cloudflare's origin when the Turnstile widget is on."""
     extra = f" {TURNSTILE_ORIGIN}" if turnstile else ""
@@ -227,9 +249,9 @@ class AlchemyServer(ThreadingHTTPServer):
         if isinstance(sys.exc_info()[1], (ConnectionError, TimeoutError, ssl.SSLError)):
             return  # a browser closing a tab is not worth a traceback
         self.bump("server_errors")
-        failure = sys.exc_info()[1]
-        logging.getLogger("alchemy.server").error("unexpected error: %s: %s", type(failure).__name__, failure)
-        super().handle_error(request, client_address)
+        # Logged with its traceback but not with the client's address (the default handler prints it), so addresses
+        # appear only in the activity log, which is deleted by age.
+        logging.getLogger("alchemy.server").exception("unexpected error while handling a request")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -952,6 +974,11 @@ def main() -> int:
                         help="where running games are parked during a reload (default: ./reload_snapshot.json)")
     parser.add_argument("--pid-file", default=str(BASE_DIR / "alchemy.pid"),
                         help="records this server's process id so reload.py can find it (default: ./alchemy.pid)")
+    parser.add_argument("--max-games", type=int, default=MAX_GAMES,
+                        help=f"how many games may run at once (default {MAX_GAMES}); daily challenges and races do not count")
+    parser.add_argument("--log-file", help="write the server's messages (logins, failures, admin actions) to this file, "
+                                           "starting a new one each midnight, instead of to the console")
+    parser.add_argument("--log-days", type=int, default=14, help="how many days of log files to keep (default 14)")
     parser.add_argument("--idle-minutes", type=float, default=IDLE_CLOSE_SECONDS / 60,
                         help="close a game this long after its last player leaves (default 10)")
     args = parser.parse_args()
@@ -963,7 +990,7 @@ def main() -> int:
         return 1
 
     saves = SaveStore(args.saves_dir)
-    registry = GameRegistry(book, idle_seconds=args.idle_minutes * 60, saves=saves,
+    registry = GameRegistry(book, max_games=max(1, args.max_games), idle_seconds=args.idle_minutes * 60, saves=saves,
                             daily=DailyStore(args.daily_file, book))
     accounts = AccountStore(args.accounts_file)
     listen_fd = int(os.environ.pop("ALCHEMY_LISTEN_FD")) if "ALCHEMY_LISTEN_FD" in os.environ else None
@@ -998,7 +1025,7 @@ def main() -> int:
     except ValueError as exc:
         print(f"--trusted-proxy: {exc}", file=sys.stderr)
         return 1
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s", stream=sys.stderr)
+    configure_logging(args.log_file, args.log_days)
     scheme = "http"
     if bool(args.tls_cert) != bool(args.tls_key):
         print("--tls-cert and --tls-key must be given together", file=sys.stderr)

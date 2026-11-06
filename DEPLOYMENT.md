@@ -246,18 +246,45 @@ The server collects only a username and a password hash, and keeps it that way, 
   after 14 days: keep that true (see Logging below), and add a way to reach you if you want one on that page.
 
 ### Logging, monitoring and alerting
-The access log is silenced (`log_message` is a no-op), so only the new auth lines exist. Decide where stderr
-goes (journald, a file with rotation) and alert on bursts of `login failed` and `throttled`. Add an uptime check
-against `/login`. The proxy's own access log gives you the request side. Make sure it does not log query strings
-if you ever re-add tokens to URLs.
+- **Activity log.** `--log-file data/live.log` (the live restart script passes it) writes sign-ups, logins, failures, rate limiting,
+  password changes, deletions and administrator actions, with client addresses and usernames, to a file that starts afresh each
+  midnight and keeps `--log-days` (14) days. That is what `/privacy` promises, so keep the two in step. Tracebacks are logged without
+  the client's address. There is no access log (every request) on purpose; a reverse proxy has one if you want it, and you should
+  keep it short-lived too and make sure it does not record query strings.
+- **Daily summary.** `ops/daily_summary.py` (a scheduled task, see OPS.md) writes yesterday's counts (sign-ups, failed logins, rate
+  limiting, administrator actions, server errors, and how many different addresses) to `summaries/<date>.txt`. Counts only, no names or
+  addresses, so those files can be kept long after the log is gone. A jump in failed logins or any server error is the thing to look for.
+- **Is it up?** `GET /healthz` answers `{"ok": true}`; the watchdog uses it and restarts the server after three misses. Point an
+  outside uptime service at it too if you want to be told when the whole PC is off, which the watchdog cannot notice.
+- **Live view.** `/ops` shows the same counters since the last restart, plus who is running what right now.
 
-### Capacity
-Defaults assume a living room: 3 concurrent games, 5 players each, 2000 sessions. Python's `ThreadingHTTPServer`
-uses one thread per connection, and each open game page holds a thread for its event stream, plus a thread per
-in-flight request. That's fine for dozens of simultaneous players and unproven beyond that. Before launch, run a
-load test (for example with `locust` or a small script opening N event streams) and pick limits from the results.
-Raise `MAX_GAMES`/`MAX_ACCOUNTS` deliberately rather than by default. If you outgrow one process, the state is in
-memory and JSON files, so scaling out means a redesign, not a flag.
+### Capacity (measured)
+`bench_load.py` runs rooms of five players (cursors 20 times a second while moving, a tile every 2 seconds) and solo
+daily-challenge players against a real server process, on the same PC (so the load generator competes with the server for the
+CPU: the numbers are on the pessimistic side). One run on the Windows PC, 12 seconds each:
+
+| Scenario | Players | Server CPU (of one core) | Threads | Memory | Cursor delay p50 / p95 | Tile request p50 / p95 | Errors |
+|---|---|---|---|---|---|---|---|
+| 1 room | 5 | 14% | 20 | 36 MB | 32 / 35 ms | 1.7 / 3.5 ms | 0 |
+| 3 rooms (today's default limit) | 15 | 33% | 50 | 37 MB | 33 / 36 ms | 2.5 / 6 ms | 0 |
+| 10 rooms | 50 | 133% | 155 | 43 MB | 38 / 70 ms | 15 / 54 ms | 0 |
+| 20 rooms | 100 | 187% | 305 | 52 MB | 98 / 209 ms | 83 / 195 ms | 0 |
+| 50 solo daily players | 50 | 5% | 155 | 45 MB | n/a | 2.1 / 3.2 ms | 0 |
+
+What it says:
+- The default of 3 games (15 players) is far below the limit. **About 10 rooms (50 players) is where this server is still pleasant**;
+  responses slow but nobody would notice. At 20 rooms (100 players) it is saturated, although there the load generator itself
+  fell behind 44% of the time, so treat that row as "too many", not as a precise figure.
+- Solo players (daily challenges) are cheap: 50 of them cost about as much as one room.
+- Memory is not the constraint (about 50 MB at 100 players). The server uses roughly **three threads per connected player**,
+  and Python runs one thread's code at a time, so CPU is what runs out first.
+- **A sensible launch limit for this PC is `--max-games 10`**, which also bounds the worst case to around 50 players in rooms.
+  Raise it only after re-running the load test on the machine you will really use. If you outgrow one process, state is in memory
+  and JSON files, so scaling out means a redesign, not a flag.
+- Bandwidth: each player receives about 5 KB/s of cursor events while others move, so 50 players is roughly 2 megabits a second
+  upstream from your connection; check your upload speed before opening the site wide.
+
+Re-run with `python bench_load.py` (takes a few minutes; `--scenarios 10x5,solo50` for particular ones).
 
 ### Data, backups and storage
 State is in `accounts.json`, `drafts.json`, `daily.json` and `saves/`. Writes are atomic (temp file plus

@@ -185,6 +185,7 @@ checks that every option the server accepts appears in the README.
 
 Newest first. Add a line whenever an endpoint, event, status code or option is added, changed or removed.
 
+- **2026-11 (options)**: `--max-games`, `--log-file`, `--log-days` (README options table).
 - **2026-11 (accounts and operations)**: `POST /account/change-password` and `POST /account/delete`; `GET /ops` and the `/ops/...`
   endpoints for administrators; `GET /privacy`; `must_change_password` on `GET /me` and `POST /login`; `403` from `/login` for a
   disabled account; the old `accounts_admin.py delete` now keeps shared saved games for the other players (name removed) instead of deleting them.
