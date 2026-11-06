@@ -109,6 +109,49 @@ Pointer sharing is the busiest traffic in a game, so it is kept cheap (`bench_cu
 - Benchmark numbers on a laptop vary by 20% or more from run to run; compare configurations by alternating them, as
   done here, not by running one after the other.
 
+### Moving to Cloudflare Tunnel and an external host
+The plan: the game runs in a container on a small rented server that has **no open ports**; a second container, Cloudflare's
+tunnel, makes an outbound connection to Cloudflare, and visitors reach the game through your domain on Cloudflare. Your home
+address is never involved, Cloudflare answers HTTPS, and there is nothing on the host to port-scan.
+
+**Written but not yet run.** `Dockerfile`, `docker-compose.yml`, `.dockerignore` and `.env.example` were written on a machine without
+Docker. `test_deploy_files.py` proves what it can without Docker (every option they pass exists; the files the image would contain
+are enough to start the server and serve its pages; the tunnel token file is git-ignored; no port is published). The first real
+build is still the real test: do it on any machine with Docker and a throwaway tunnel before the actual move.
+
+**What you need to do (these need your accounts):**
+1. A domain whose DNS is on Cloudflare (a free account is enough).
+2. A small server with Docker. The measurements above say 1 CPU and 1 GB hold about 50 players in rooms; 2 GB is comfortable.
+3. In Cloudflare: Zero Trust > Networks > Tunnels > Create a tunnel (type "Cloudflared"). Copy the token. Add a public hostname
+   (for example `alchemy.example.com`) whose service is `http://alchemy:8000`.
+4. On the server: get the project (`git clone`), `cp .env.example .env`, paste the token after `TUNNEL_TOKEN=`, then
+   `docker compose up -d --build`. Open your hostname and `/healthz`.
+5. Move the data (stop the Windows server first so nothing changes): on this PC `python ops\backup.py --label migration`, copy that
+   backup folder to the server, then there:
+   `docker compose cp ./migration/. alchemy:/data`, `docker compose exec -u root alchemy chown -R alchemy /data`,
+   `docker compose restart alchemy`. Players log in again afterwards.
+6. Then run `powershell -File ops\install_tasks.ps1 -Remove` on this PC if you installed its scheduled tasks.
+
+**What the compose file already does:** passes `--trusted-proxy` for Docker's private address ranges (only the tunnel container can
+reach the game, because no port is published) and `--client-ip-header CF-Connecting-IP`, so rate limits and logs see the real visitor,
+plus `--max-games 10`. The server learns it is behind HTTPS from `X-Forwarded-Proto`, which Cloudflare sets, and sends HSTS.
+
+**Add a second lock on the admin pages.** In Cloudflare Zero Trust > Access > Applications, add a self-hosted application for your
+hostname with the paths `/ops*` and `/admin*` and a policy that allows only your email (one-time PIN). Cloudflare then asks you to
+prove who you are before the request reaches the game at all; the game's own administrator check stays as the second lock.
+Also useful if your plan allows: a Cloudflare rate-limiting rule on `POST /login` and `POST /register`.
+
+**Turnstile and email.** You will already have the Cloudflare account, so Turnstile (the human check) is a few clicks: create a widget,
+add `"--turnstile-site-key", "<key>"` to the `alchemy` command in the compose file, and put the secret key in `.env` as
+`TURNSTILE_SECRET_KEY` (and uncomment the `environment` lines). Email confirmation stays off, to keep to the minimal-data rule.
+
+**Day to day on the new host.** Update: `git pull && docker compose up -d --build` (a few seconds of downtime; players log in again).
+Roll back: `git checkout <earlier commit> && docker compose up -d --build`. Backups, since `ops/backup.py` is not in the image: from
+a host cron job, `docker run --rm -v <project>_alchemy-data:/data -v "$PWD/backups":/backups alpine tar czf /backups/data-$(date +%F).tgz -C /data .`
+and delete old ones (`find backups -mtime +14 -delete`). Logs: `docker compose logs alchemy`, and the 14-day activity log is
+`/data/live.log` inside the volume. The Windows-only tools in `ops/` (`deploy.py`, `restart-live.ps1`, `install_tasks.ps1`,
+`watchdog.py`) are for this PC and are not used there: Docker's `restart: unless-stopped` and the health check replace the watchdog.
+
 ### Running it as a service (Linux)
 
 ```

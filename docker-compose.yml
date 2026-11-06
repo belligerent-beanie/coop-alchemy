@@ -1,0 +1,42 @@
+# Co-op Alchemy and its Cloudflare Tunnel as one unit.
+#
+# NOT YET RUN: written without Docker available. See DEPLOYMENT.md, "Moving to Cloudflare Tunnel and an external host".
+#
+#   cp .env.example .env        # then put your tunnel token in .env
+#   docker compose up -d --build
+#
+# The game publishes no port at all: the only way in is the tunnel, which reaches it at http://alchemy:8000 (set that as the
+# public hostname's service in the Cloudflare dashboard). The tunnel's connection arrives from a private Docker address, so those
+# ranges are trusted proxies here, and Cloudflare's CF-Connecting-IP header says who the visitor really is.
+services:
+  alchemy:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - alchemy-data:/data
+    command:
+      - "--trusted-proxy"
+      - "172.16.0.0/12"
+      - "--trusted-proxy"
+      - "10.0.0.0/8"
+      - "--trusted-proxy"
+      - "192.168.0.0/16"
+      - "--client-ip-header"
+      - "CF-Connecting-IP"
+      - "--max-games"
+      - "10"
+    # Optional gates (see DEPLOYMENT.md): add "--turnstile-site-key", "<key>" above and uncomment the secret below.
+    # environment:
+    #   - TURNSTILE_SECRET_KEY=${TURNSTILE_SECRET_KEY}
+
+  tunnel:
+    image: cloudflare/cloudflared:latest   # pin a version once it works, so an update never surprises you
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN:?put TUNNEL_TOKEN in .env}
+    depends_on:
+      - alchemy
+
+volumes:
+  alchemy-data:

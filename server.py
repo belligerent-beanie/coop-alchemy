@@ -240,6 +240,7 @@ class AlchemyServer(ThreadingHTTPServer):
         self._stats_lock = threading.Lock()
         self.tickets = TicketStore()                 # one-time passes for event streams
         self.trusted_proxies: list = []              # addresses whose X-Forwarded-* headers are believed (--trusted-proxy)
+        self.client_ip_header = ""                   # a header holding the client's address, set by the proxy (--client-ip-header)
 
     def bump(self, counter: str) -> None:
         with self._stats_lock:
@@ -304,7 +305,9 @@ class Handler(BaseHTTPRequestHandler):
     def _client(self) -> str:
         """The caller's address, looking through a trusted reverse proxy (see --trusted-proxy)."""
         peer = str(self.client_address[0])
-        return client_ip(peer, self.headers.get("X-Forwarded-For"), self.server.trusted_proxies)
+        header = self.server.client_ip_header
+        return client_ip(peer, self.headers.get("X-Forwarded-For"), self.server.trusted_proxies,
+                         self.headers.get(header) if header else None)
 
     def _https(self) -> bool:
         """True if the browser reached us over HTTPS: directly, or via a trusted proxy that says so."""
@@ -959,6 +962,9 @@ def main() -> int:
     parser.add_argument("--turnstile-site-key", default=os.environ.get("TURNSTILE_SITE_KEY", ""),
                         help="Cloudflare Turnstile site key: signup then needs the human check "
                              "(the secret key goes in the TURNSTILE_SECRET_KEY environment variable)")
+    parser.add_argument("--client-ip-header", default="", metavar="NAME",
+                        help="behind a trusted proxy, take the client's address from this header when it holds one valid address "
+                             "(Cloudflare: CF-Connecting-IP); otherwise X-Forwarded-For is used")
     parser.add_argument("--require-email-verification", action="store_true",
                         help="signup asks for an email address and the account works only after its link is opened "
                              "(needs --public-url and the SMTP_* environment variables; see mailer.py)")
@@ -1022,6 +1028,7 @@ def main() -> int:
         server.public_url = args.public_url.rstrip("/")
     try:
         server.trusted_proxies = parse_networks(args.trusted_proxy)
+        server.client_ip_header = args.client_ip_header.strip()
     except ValueError as exc:
         print(f"--trusted-proxy: {exc}", file=sys.stderr)
         return 1

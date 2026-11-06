@@ -52,6 +52,19 @@ class ClientIpTests(unittest.TestCase):
         self.assertEqual(client_ip("127.0.0.1", None, self.PROXY), "127.0.0.1")
         self.assertEqual(client_ip("127.0.0.1", "198.51.100.7", []), "127.0.0.1")
 
+    def test_a_single_address_header_set_by_the_proxy_wins_over_x_forwarded_for(self) -> None:
+        self.assertEqual(client_ip("127.0.0.1", "6.6.6.6, 9.9.9.9", self.PROXY, "198.51.100.7"), "198.51.100.7")
+        self.assertEqual(client_ip("127.0.0.1", None, self.PROXY, " 2001:db8::5 "), "2001:db8::5")
+
+    def test_that_header_is_ignored_unless_the_peer_is_a_trusted_proxy(self) -> None:
+        self.assertEqual(client_ip("203.0.113.9", None, self.PROXY, "198.51.100.7"), "203.0.113.9")
+        self.assertEqual(client_ip("127.0.0.1", None, [], "198.51.100.7"), "127.0.0.1")
+
+    def test_a_malformed_or_multiple_value_falls_back_to_the_other_rules(self) -> None:
+        self.assertEqual(client_ip("127.0.0.1", "198.51.100.7", self.PROXY, "not-an-ip"), "198.51.100.7")
+        self.assertEqual(client_ip("127.0.0.1", None, self.PROXY, "1.2.3.4, 5.6.7.8"), "127.0.0.1")
+        self.assertEqual(client_ip("127.0.0.1", None, self.PROXY, ""), "127.0.0.1")
+
     def test_a_client_cannot_choose_its_address_by_sending_its_own_header(self) -> None:
         # our proxy appended the real address on the right; the left entry is whatever the client claimed
         self.assertEqual(client_ip("127.0.0.1", "6.6.6.6, 198.51.100.7", self.PROXY), "198.51.100.7")
@@ -164,6 +177,24 @@ class ServerHardeningTests(unittest.TestCase):
             resp = conn.getresponse()
             self.assertEqual(resp.status, expected, path)
             conn.close()
+
+    def test_behind_a_cloudflare_style_proxy_each_visitor_has_their_own_login_limit(self) -> None:
+        server = self.server
+        saved = (server.trusted_proxies, server.client_ip_header, server.login_throttle)
+        self.addCleanup(lambda: (setattr(server, "trusted_proxies", saved[0]), setattr(server, "client_ip_header", saved[1]),
+                                 setattr(server, "login_throttle", saved[2])))
+        server.trusted_proxies = parse_networks(["127.0.0.1"])  # the tunnel's connection arrives from here
+        server.client_ip_header = "CF-Connecting-IP"
+        server.login_throttle = Throttle(2, 60.0)
+
+        def attempt(visitor: str) -> int:
+            return call(self.port, "POST", "/login", {"username": "x", "password": "y"},
+                        headers={"CF-Connecting-IP": visitor, "X-Session": ""})[0]
+
+        self.assertEqual([attempt("198.51.100.1") for _ in range(3)], [401, 401, 429])  # one visitor hits their limit
+        self.assertEqual(attempt("198.51.100.2"), 401)  # a different visitor is unaffected
+        self.assertEqual(call(self.port, "POST", "/login", {"username": "x", "password": "y"},
+                              headers={"X-Session": ""})[0], 401)  # without the header the proxy's own address is used
 
     def test_login_is_rate_limited_per_address(self) -> None:
         statuses = {call(self.port, "POST", "/login", {"username": f"u{i}", "password": "badbadbad"})[0]

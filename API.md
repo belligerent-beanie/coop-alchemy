@@ -24,7 +24,7 @@ this file in the same commit (and add a line to the [change log](#change-log)).
   `Referrer-Policy` (and `Strict-Transport-Security` over HTTPS).
 - **Limits.** Per client address: 20 login attempts a minute, 5 sign-ups per 10 minutes, 10 verification-email requests an
   hour. 5 wrong passwords in a row for one account from one address lock that pair for 60 seconds. At most 5 players per
-  game. When the server runs behind a reverse proxy, start it with `--trusted-proxy` so these limits see real addresses.
+  game. When the server runs behind a reverse proxy, start it with `--trusted-proxy` (and, for Cloudflare, `--client-ip-header CF-Connecting-IP`) so these limits see real addresses.
 
 ## Pages and files (GET, return HTML or files)
 
@@ -185,7 +185,7 @@ checks that every option the server accepts appears in the README.
 
 Newest first. Add a line whenever an endpoint, event, status code or option is added, changed or removed.
 
-- **2026-11 (options)**: `--max-games`, `--log-file`, `--log-days` (README options table).
+- **2026-11 (options)**: `--client-ip-header`, `--max-games`, `--log-file`, `--log-days` (README options table).
 - **2026-11 (accounts and operations)**: `POST /account/change-password` and `POST /account/delete`; `GET /ops` and the `/ops/...`
   endpoints for administrators; `GET /privacy`; `must_change_password` on `GET /me` and `POST /login`; `403` from `/login` for a
   disabled account; the old `accounts_admin.py delete` now keeps shared saved games for the other players (name removed) instead of deleting them.

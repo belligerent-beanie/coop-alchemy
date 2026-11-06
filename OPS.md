@@ -34,6 +34,9 @@ Players never run development code. A change reaches them only through `ops\depl
 Every deploy and rollback is appended to `coop-alchemy-live\deploys.log`. A deploy ends running games and logs everyone out
 once (saved games stay). `restart-live.ps1 -Update` also exists but skips all checks: prefer `deploy.py`.
 
+This PC is a temporary host: the plan is to move to Cloudflare Tunnel on an external host, which is written up in
+`DEPLOYMENT.md` ("Moving to Cloudflare Tunnel and an external host"). Everything on this page then stops applying.
+
 ## Keeping it running without you
 `ops\install_tasks.ps1` registers three Windows scheduled tasks. It is **not run automatically**; read it, then run it once:
 

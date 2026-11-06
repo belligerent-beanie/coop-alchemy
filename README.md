@@ -256,6 +256,7 @@ python3 server.py [--host 0.0.0.0] [--port 8000]
 | `--recipes` | `recipes.json` next to `server.py` | The recipe file. |
 | `--saves-dir` | `saves` next to `server.py` | Where saved games are kept. |
 | `--accounts-file` | `accounts.json` next to `server.py` | Usernames and password hashes. |
+| `--client-ip-header` | none | Behind a trusted proxy, take the visitor's address from this header (Cloudflare: `CF-Connecting-IP`); otherwise `X-Forwarded-For` is used. |
 | `--require-invite` | off | Signup needs a single-use invite code (`accounts_admin.py invite create`; see DEPLOYMENT.md). |
 | `--invites-file` | `invites.json` next to `server.py` | Invite codes, stored as hashes. |
 | `--trusted-proxy` | none | A reverse proxy in front of the server (repeatable); its `X-Forwarded-*` headers are believed. See DEPLOYMENT.md. |
@@ -464,6 +465,7 @@ skipped if `recipes.json` is missing.
 | `erasure.py` | Deleting an account and everything kept under its name (used by the player, the admin page and the admin tool). |
 | `API.md` | The HTTP API: every endpoint, the event stream, errors and limits, plus a change log. `test_api_docs.py` fails if it drifts from the code. |
 | `ops/` , `OPS.md` | Running the live server: safe deploys with automatic rollback, backups, a watchdog, a daily summary, scheduled tasks, smoke test. See OPS.md. |
+| `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `.env.example` | Run the game, and its Cloudflare Tunnel, in containers on any host (not yet built: see DEPLOYMENT.md). |
 | `bench_load.py` | Load test: rooms of players and solo players against a real server; CPU, memory, threads, delay, errors. |
 | `bench_cursor.py` | Measures what shared cursors cost the server (`python3 bench_cursor.py`): connections, latency, delivery, CPU. |
 | `recipes.py`, `hints.py` | Recipe file loading and checking; hint logic. |
@@ -477,7 +479,7 @@ skipped if `recipes.json` is missing.
 | `static/elements/` | Element pictures, one PNG per element. |
 | `aigen/` | The optional AI suggestion tool (see *AI suggestions*); `python3 -m aigen --help`. |
 | `image_check.py` | Lists elements without a picture and pictures that match nothing. |
-| `test_coop.py`, `test_reload.py`, `test_drafts.py`, `test_daily.py`, `test_race.py`, `test_aigen.py`, `test_security.py`, `test_invites.py`, `test_signup_checks.py`, `test_keepalive.py`, `test_accounts_cache.py`, `test_cursors.py`, `test_ops.py`, `test_api_docs.py`, `test_account_tools.py`, `test_logging.py`, `test_recipes.json` | Tests and their fixed recipe set. |
+| `test_coop.py`, `test_reload.py`, `test_drafts.py`, `test_daily.py`, `test_race.py`, `test_aigen.py`, `test_security.py`, `test_invites.py`, `test_signup_checks.py`, `test_keepalive.py`, `test_accounts_cache.py`, `test_cursors.py`, `test_ops.py`, `test_api_docs.py`, `test_account_tools.py`, `test_logging.py`, `test_deploy_files.py`, `test_recipes.json` | Tests and their fixed recipe set. |
 
 ## Troubleshooting
 

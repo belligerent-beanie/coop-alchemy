@@ -70,11 +70,14 @@ def parse_networks(items: list[str]) -> list[ipaddress.IPv4Network | ipaddress.I
     return [ipaddress.ip_network(item.strip(), strict=False) for item in items if item.strip()]
 
 
-def client_ip(peer: str, forwarded: str | None, trusted: list[ipaddress.IPv4Network | ipaddress.IPv6Network]) -> str:
-    """The real client address. X-Forwarded-For is believed only when the peer is a trusted proxy.
+def client_ip(peer: str, forwarded: str | None, trusted: list[ipaddress.IPv4Network | ipaddress.IPv6Network],
+              direct: str | None = None) -> str:
+    """The real client address. Proxy headers are believed only when the peer is a trusted proxy.
 
-    Walks the header from the right (the entry our own proxy appended) and skips further trusted proxies, so a
-    client cannot choose its address by sending its own X-Forwarded-For.
+    `direct` is the value of a header that holds exactly one address and that the proxy sets itself (Cloudflare's
+    CF-Connecting-IP, see --client-ip-header): if it is a valid address it wins. Otherwise X-Forwarded-For is walked from the
+    right (the entry our own proxy appended), skipping further trusted proxies, so a client cannot choose its address by
+    sending its own X-Forwarded-For.
     """
     def trusted_addr(text: str) -> bool:
         try:
@@ -82,6 +85,11 @@ def client_ip(peer: str, forwarded: str | None, trusted: list[ipaddress.IPv4Netw
         except ValueError:
             return False
 
+    if trusted and direct and trusted_addr(peer):
+        try:
+            return str(ipaddress.ip_address(direct.strip()))
+        except ValueError:
+            pass  # a malformed value is not trusted: fall back to the other header
     if not trusted or not forwarded or not trusted_addr(peer):
         return peer
     for entry in reversed([part.strip() for part in forwarded.split(",") if part.strip()]):

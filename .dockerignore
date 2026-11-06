@@ -1,0 +1,21 @@
+.git
+.gitignore
+.env
+__pycache__
+*.pyc
+# the Windows live-server tooling, tests, benchmarks and the AI suggestion tool are not needed to run the game
+ops
+test_*.py
+bench_*.py
+aigen
+# data never goes into the image
+data
+backups
+saves
+accounts.json
+drafts.json
+daily.json
+invites.json
+reload_snapshot.json*
+*.pem
+*.md
