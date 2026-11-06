@@ -108,6 +108,7 @@ BASE_DIR = Path(__file__).resolve().parent
 MAX_BODY = 4096
 MAX_DRAIN = 65536  # an unread request body up to this size is read and thrown away before the connection closes
 KEEPALIVE_SECONDS = 3  # a closed browser is noticed on the second failed write, so about 6 s
+CURSOR_BATCH_SECONDS = 0.03  # after a cursor update, the stream waits this long to send the room's pointer moves together
 
 ACTIONS = ("/end", "/combine", "/cursor", "/genie", "/hint", "/journal", "/tile/add", "/tile/grab", "/tile/move",
            "/tile/drop", "/tile/remove", "/tiles/clear")
@@ -150,6 +151,27 @@ def run_action(state: GameState, path: str, token: str, body: dict[str, Any]) ->
 
 
 log = logging.getLogger("alchemy.auth")
+
+
+def cursor_pid(message: str) -> str | None:
+    """The player a cursor event is about, or None if `message` is any other kind of event."""
+    if not message.startswith("event: cursor\n"):
+        return None
+    try:
+        return str(json.loads(message.split("data: ", 1)[1])["pid"])
+    except (IndexError, KeyError, ValueError, TypeError):
+        return None
+
+
+def coalesce_cursors(messages: list[str]) -> list[str]:
+    """Keep only each player's newest cursor event in a batch; every other event stays, in order.
+
+    A pointer position is out of date the moment the next one exists, so a stream that is behind should send the latest
+    one, not all of them. Hiding a cursor is a cursor event too, so the newest of "moved" and "hidden" always wins.
+    """
+    pids = [cursor_pid(message) for message in messages]
+    newest = {pid: i for i, pid in enumerate(pids) if pid is not None}
+    return [message for i, (message, pid) in enumerate(zip(messages, pids)) if pid is None or newest[pid] == i]
 
 
 def build_csp(turnstile: bool) -> str:
@@ -701,8 +723,23 @@ class Handler(BaseHTTPRequestHandler):
                     message = ": keepalive\n\n"
                 if message is None:  # the game was ended; the "ended" event has already gone out
                     break
-                self.wfile.write(message.encode("utf-8"))
+                batch = [message]
+                if cursor_pid(message) is not None:
+                    time.sleep(CURSOR_BATCH_SECONDS)  # pointer moves are frequent: gather the room's moves into one write
+                ended = False
+                while True:  # whatever else is already waiting goes out in the same write
+                    try:
+                        more = sub.messages.get_nowait()
+                    except queue.Empty:
+                        break
+                    if more is None:
+                        ended = True
+                        break
+                    batch.append(more)
+                self.wfile.write("".join(coalesce_cursors(batch)).encode("utf-8"))
                 self.wfile.flush()
+                if ended:
+                    break
         except OSError:
             pass  # client went away
         finally:

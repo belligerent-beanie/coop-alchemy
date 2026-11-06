@@ -336,7 +336,13 @@ main { flex: 1; display: flex; min-height: 0; }
 .cursor {
   position: absolute;
   color: var(--c);
-  transition: left 0.06s linear, top 0.06s linear;
+  transition: opacity 0.15s;
+}
+
+/* The owner has stopped moving: fade slowly out of the way (it comes straight back on the next move). */
+.cursor.idle {
+  opacity: 0;
+  transition: opacity 0.8s;
 }
 
 .cursor svg { display: block; width: 18px; height: 22px; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35)); }

@@ -99,7 +99,39 @@ class LatestSender {
   }
 }
 
-const cursorSender = new LatestSender("/cursor");
+
+// Sharing my own pointer. The page only records where the pointer is; a timer sends the newest position at most 20
+// times a second, skips a tick while the previous send is still on its way, never repeats a position, and sends nothing
+// at all while I am alone in the room (daily challenges and races), since there is nobody to show it to.
+const CURSOR_TICK_MS = 50;
+let wantedCursor = null;   // the position to share next ({x, y}, or {x: null, y: null} to hide); null = nothing new
+let lastSentCursor = null;
+let cursorBusy = false;
+
+function shareCursor(pos) {
+  wantedCursor = pos;
+}
+
+async function sendCursorTick() {
+  if (cursorBusy || wantedCursor === null || !me.token) return;
+  if (players.size <= 1) { // nobody else is here
+    wantedCursor = null;
+    lastSentCursor = null;
+    return;
+  }
+  const pos = wantedCursor;
+  wantedCursor = null;
+  if (lastSentCursor && pos.x === lastSentCursor.x && pos.y === lastSentCursor.y) return;
+  lastSentCursor = pos;
+  cursorBusy = true;
+  try {
+    await api("/cursor", pos);
+  } catch (_) { /* a lost position update is harmless: the next one replaces it */ } finally {
+    cursorBusy = false;
+  }
+}
+
+setInterval(sendCursorTick, CURSOR_TICK_MS);
 const moveSender = new LatestSender("/tile/move");
 
 function toast(message, kind = "") {
@@ -378,6 +410,7 @@ function setPlayers(list) {
     if (!p) {
       node.remove();
       cursors.delete(pid);
+      cursorMotion.delete(pid);
     } else {
       paintCursor(node, p);
     }
@@ -406,18 +439,73 @@ function makeCursor(pid) {
   return node;
 }
 
+// A remote cursor glides to each new position instead of jumping, so 20 updates a second look smooth, and it fades out
+// when its owner has stopped moving.
+const CURSOR_SMOOTH_MS = 60;    // time constant of the glide
+const CURSOR_IDLE_MS = 5000;    // a cursor that has not moved for this long fades out
+const cursorMotion = new Map(); // pid -> {x, y, tx, ty, seen}: where it is drawn, where it is heading, when last heard of
+let cursorFrameId = 0;
+let cursorFrameAt = 0;
+
 function moveCursor(pid, x, y) {
   if (pid === me.pid) return;
   let node = cursors.get(pid);
   if (x === null || y === null || x === undefined || y === undefined) {
     if (node) node.hidden = true;
+    cursorMotion.delete(pid); // it reappears where it next shows up, rather than gliding in from where it left
     return;
   }
   if (!node) node = makeCursor(pid);
+  let m = cursorMotion.get(pid);
+  if (!m) {
+    m = { x, y, tx: x, ty: y, seen: 0 };
+    cursorMotion.set(pid, m);
+    placeCursor(node, m);
+  }
+  m.tx = x;
+  m.ty = y;
+  m.seen = performance.now();
   node.hidden = false;
-  node.style.left = x * 100 + "%";
-  node.style.top = y * 100 + "%";
+  node.classList.remove("idle");
+  if (!cursorFrameId) {
+    cursorFrameAt = performance.now();
+    cursorFrameId = requestAnimationFrame(cursorFrame);
+  }
 }
+
+function placeCursor(node, m) {
+  node.style.left = m.x * 100 + "%";
+  node.style.top = m.y * 100 + "%";
+}
+
+function cursorFrame(now) {
+  const k = 1 - Math.exp(-Math.min(now - cursorFrameAt, 100) / CURSOR_SMOOTH_MS);
+  cursorFrameAt = now;
+  let moving = false;
+  for (const [pid, m] of cursorMotion) {
+    const node = cursors.get(pid);
+    if (!node) continue;
+    if (Math.abs(m.tx - m.x) < 0.0005 && Math.abs(m.ty - m.y) < 0.0005) {
+      m.x = m.tx;
+      m.y = m.ty;
+    } else {
+      m.x += (m.tx - m.x) * k;
+      m.y += (m.ty - m.y) * k;
+      moving = true;
+    }
+    placeCursor(node, m);
+  }
+  cursorFrameId = moving ? requestAnimationFrame(cursorFrame) : 0; // no frames at all while everyone is still
+}
+
+function fadeIdleCursors() {
+  const now = performance.now();
+  for (const [pid, m] of cursorMotion) {
+    if (now - m.seen > CURSOR_IDLE_MS) cursors.get(pid)?.classList.add("idle");
+  }
+}
+
+setInterval(fadeIdleCursors, 1000);
 
 // ---- tiles ------------------------------------------------------------------------
 
@@ -760,10 +848,10 @@ document.addEventListener("pointermove", (e) => {
   if (drag || !me.token) return; // tile moves already carry the pointer position
   const r = wsRect();
   if (inside(r, e.clientX, e.clientY)) {
-    cursorSender.send({ x: clamp01((e.clientX - r.left) / r.width), y: clamp01((e.clientY - r.top) / r.height) });
+    shareCursor({ x: clamp01((e.clientX - r.left) / r.width), y: clamp01((e.clientY - r.top) / r.height) });
     cursorShown = true;
   } else if (cursorShown) {
-    cursorSender.send({ x: null, y: null });
+    shareCursor({ x: null, y: null });
     cursorShown = false;
   }
 });
@@ -771,7 +859,7 @@ document.addEventListener("pointermove", (e) => {
 document.documentElement.addEventListener("mouseleave", () => {
   tooltip.hidden = true;
   if (cursorShown) {
-    cursorSender.send({ x: null, y: null });
+    shareCursor({ x: null, y: null });
     cursorShown = false;
   }
 });
@@ -1011,6 +1099,7 @@ const handlers = {
     s.elements.forEach(upsertElement);
     for (const node of cursors.values()) node.remove();
     cursors.clear();
+    cursorMotion.clear();
     setPlayers(s.players);
     s.tiles.forEach((t) => addTile(t));
     updateCounter();
@@ -1183,6 +1272,8 @@ function showJoin(message = "") {
   if (source) source.close();
   me.token = null;
   cursorShown = false;
+  wantedCursor = null;
+  lastSentCursor = null;
   $("app").hidden = true;
   $("join").hidden = false;
   $("join-error").textContent = message;

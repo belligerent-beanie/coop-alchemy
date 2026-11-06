@@ -91,6 +91,24 @@ open a connection each. Things to know:
 - Behind nginx, add `proxy_http_version 1.1;` and `proxy_set_header Connection "";` to the locations above if you want
   the proxy to keep its own connections to the app open too (Caddy does this by default). The event stream needs no change.
 
+### Shared cursors
+Pointer sharing is the busiest traffic in a game, so it is kept cheap (`bench_cursor.py` measures it; 5 players):
+- **The page** sends a player's newest pointer position from a 20 Hz timer, skips a tick while the previous send is still on
+  its way, never repeats a position, and sends nothing at all while the player is alone in the room (daily challenges
+  and races). That is 15% fewer updates and bytes than the old send-wait-pause loop, and about 24 requests a second
+  saved per solo player.
+- **The server** waits `CURSOR_BATCH_SECONDS` (30 ms, in `server.py`) after a cursor event and sends everything queued for
+  that player in one write, keeping only each player's newest cursor position. In an interleaved test (6 rounds of 12 s) it
+  cut server CPU from about 22% to about 10% of a core, for 20 to 30 ms of extra cursor delay (median 24 ms, worst 36 ms).
+  No event is lost and every player's final position always arrives. Other events are never held back by more than the
+  window. Set the constant to 0 to turn batching off.
+- **The receiver** glides each remote cursor to its newest position (60 ms time constant, only while something is moving)
+  and fades a cursor out after 5 s without movement.
+- Cursor updates hold the game lock for about 30 microseconds each (0.3% of the time at 100 updates a second), so
+  they are not a contention problem at this room size. Moving to WebSockets only becomes worthwhile for much larger rooms.
+- Benchmark numbers on a laptop vary by 20% or more from run to run; compare configurations by alternating them, as
+  done here, not by running one after the other.
+
 ### Running it as a service (Linux)
 
 ```
