@@ -573,7 +573,7 @@ class Handler(BaseHTTPRequestHandler):
     def _resend_verification(self, body: dict[str, Any], client: str) -> None:
         """'Send me the email again'. Always answers the same, so it cannot be used to find out who has an account."""
         if self.server.mailer is None:
-            raise GameError(404, "not found")
+            raise GameError(404, "email verification is not switched on")
         wait = self.server.resend_throttle.allow(client)
         if wait:
             raise GameError(429, f"too many requests from this address; try again in {int(wait) + 1} seconds")
