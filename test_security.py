@@ -137,9 +137,9 @@ class ServerHardeningTests(unittest.TestCase):
 
     def test_error_replies_to_unread_posts_are_never_aborted(self) -> None:
         """Before the fix about 2% of these died with 'connection aborted' on Windows (a flaky test_coop)."""
-        phone = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148"}
+        cross_site = {"Origin": "http://evil.example"}  # refused with a 403 before the body is read, like any early error
         for _ in range(300):
-            self.assertEqual(call(self.port, "POST", "/games", {"name": "x" * 40, "player": "t" * 30}, headers=phone)[0], 403)
+            self.assertEqual(call(self.port, "POST", "/games", {"name": "x" * 40, "player": "t" * 30}, headers=cross_site)[0], 403)
             self.assertEqual(call(self.port, "POST", "/g/nope/elsewhere", {"a": "b" * 60})[0], 404)
 
     def test_responses_carry_security_headers(self) -> None:

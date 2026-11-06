@@ -11,7 +11,7 @@ username, which is also their name in games, and a password). Then they can star
 http://<ip>:8000/g/<game-id>, which can be shared directly.
 
 HTTP API
-    Everything except the pages, /register, /login and /laptop needs the header
+    Everything except the pages, /register and /login needs the header
     X-Session: <session token> from /register or /login (401 otherwise).
     POST /register {"username", "password"}  -> {"session", "username"}   (409 if the name is taken)
     POST /login    {"username", "password"}  -> {"session", "username"}   (401 wrong; 429 after 5 wrong in a row)
@@ -40,7 +40,6 @@ HTTP API
     POST /races/<id>/join | /leave | /start     (only the host can start, with at least 2 racers)
     GET  /race/<id>                     -> the lobby / results page
     POST /games/resume  {"id"}          -> {"id", "name", "url"}      (works even with 3 games running)
-    GET  /laptop                        the page every phone is sent to; phones get nothing else
 
 Per game, under /g/<game-id> (every POST except /join also carries {"player": <token>}):
     GET  /g/<id>                                          the game page
@@ -116,8 +115,6 @@ CURSOR_BATCH_SECONDS = 0.03  # after a cursor update, the stream waits this long
 
 ACTIONS = ("/end", "/combine", "/cursor", "/genie", "/hint", "/journal", "/tile/add", "/tile/grab", "/tile/move",
            "/tile/drop", "/tile/remove", "/tiles/clear")
-# Phones are not supported: they are sent to /laptop and get nothing else.
-PHONE_RE = re.compile(r"iPhone|iPod|Windows Phone|Android.+Mobile|Mobile.+Android|\bMobi", re.I)
 GAME_PATH = re.compile(r"^/g/([a-z0-9-]+)(/[a-z/]*)?$")
 RACE_PATH = re.compile(r"^/races/([a-z0-9-]+)(/(?:join|leave|start))?$")
 
@@ -322,20 +319,6 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- routing ------------------------------------------------------
 
-    def _block_phone(self, path: str) -> bool:
-        """Answer phones with the 'use a laptop' page. Returns True if the request was handled."""
-        if not PHONE_RE.search(self.headers.get("User-Agent", "")) or path == "/laptop":
-            return False
-        if self.command == "GET":
-            self.send_response(302)
-            self.send_header("Location", "/laptop")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-        else:
-            self._json(403, {"error": "please join from a laptop"})
-        return True
-
     def _user(self) -> str:
         """The username of the logged-in caller (401 if there is no valid session)."""
         name = self.server.accounts.username(self.headers.get("X-Session", ""))
@@ -347,12 +330,8 @@ class Handler(BaseHTTPRequestHandler):
         self._plan_for_request_body()
         parts = urlsplit(self.path)
         path = parts.path
-        if self._block_phone(path):
-            return
         try:
-            if path == "/laptop":
-                self._static("laptop.html")
-            elif path == "/login":
+            if path == "/login":
                 self._static("login.html")
             elif path == "/privacy":
                 self._static("privacy.html")
@@ -472,8 +451,6 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_post(self) -> None:
         try:
             path = urlsplit(self.path).path
-            if self._block_phone(path):
-                return
             if not self._same_origin():
                 raise GameError(403, "cross-site request refused")
             if path in ("/register", "/login", "/logout", "/verify-email", "/resend-verification"):

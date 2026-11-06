@@ -152,6 +152,22 @@ and delete old ones (`find backups -mtime +14 -delete`). Logs: `docker compose l
 `/data/live.log` inside the volume. The Windows-only tools in `ops/` (`deploy.py`, `restart-live.ps1`, `install_tasks.ps1`,
 `watchdog.py`) are for this PC and are not used there: Docker's `restart: unless-stopped` and the health check replace the watchdog.
 
+### Phones and tablets
+Phones play through exactly the same server, pages, API and tools as laptops: one codebase, no separate mobile site.
+- **How it plays on a touch screen:** tap an element to add it to the board; drag a tile onto another to combine; swipe the element
+  list to scroll it (dragging out of the list is for a mouse). The list sits under the board in portrait and moves to the side in
+  landscape. Tablets (wider than 700 px) get the desktop layout. The Create Recipes page works the same way.
+- **How it was checked:** `touch_check.py` drives a real Chrome as an emulated phone, with real touch input and a touch-screen pointer, and
+  checks layout at phone, landscape, tablet and desktop sizes, tapping, swiping, finger-dragging two tiles together, and that every page fits
+  the screen. Run it after any change to the pages (`python touch_check.py`; screenshots go to `touch-check-output/`). It is Chromium's engine,
+  so it does not cover **iOS Safari**.
+- **Before you tell people phones work, spend ten minutes on a real iPhone and a real Android phone** (the live address on the same Wi-Fi, or
+  the real site): log in, join a game, tap three elements, drag one tile onto another (they should combine), swipe the element list (it must
+  scroll and not add anything), turn the phone sideways, pull down on the page (it must not refresh), tap the search box (the page must
+  not zoom in), and open Account, the Journal and the end-game dialog (they must fit the screen).
+- Known limits: dragging a new element straight from the list onto a tile is mouse-only (on a phone you tap, then drag the tile); the layout
+  is tuned for 360 to 430 px wide phones and has not been looked at on foldables or very small screens.
+
 ### Running it as a service (Linux)
 
 ```
@@ -346,7 +362,7 @@ A privacy notice (what you store: username, password hash, game history, IP addr
 and a contact address. If anyone under 13 could play, check COPPA and similar rules. Add a retention rule for logs.
 
 ### Remaining hardening
-- Drop `'unsafe-inline'` from `style-src` once the inline `style=` attributes and `laptop.html`'s `<style>` are
+- Drop `'unsafe-inline'` from `style-src` once the inline `style=` attributes in the pages and scripts are
   moved into `style.css`.
 - Session tokens still live in `localStorage`, which any XSS could read. The CSP makes XSS much harder, but
   moving to an `HttpOnly; Secure; SameSite=Strict` cookie plus a CSRF header would remove the exposure. It's a

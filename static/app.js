@@ -352,6 +352,10 @@ $("filter").addEventListener("input", () => {
 // ---- tooltip ------------------------------------------------------------------
 
 function updateTooltip(e) {
+  if (e.pointerType === "touch") { // there is no hovering with a finger
+    tooltip.hidden = true;
+    return;
+  }
   const holder = drag || itemDrag ? null : e.target.closest?.("[data-element]");
   const el = holder ? elements.get(holder.dataset.element) : null;
   if (!el) {
@@ -803,6 +807,7 @@ function onItemPointerDown(e) {
 function onItemPointerMove(e) {
   const d = itemDrag;
   if (!d || e.pointerId !== d.pointerId) return;
+  if (e.pointerType === "touch") return; // a finger on the list scrolls it or taps; dragging out of the list is for a mouse
   if (!d.ghost) {
     if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < DRAG_THRESHOLD) return;
     d.ghost = makeFace(elements.get(d.id), "div");
@@ -822,8 +827,9 @@ function onItemPointerUp(e) {
   setTarget(null);
   if (d.ghost) d.ghost.remove();
   if (e.type === "pointercancel") return;
+  if (e.pointerType === "touch" && Math.hypot(e.clientX - d.startX, e.clientY - d.startY) > 12) return; // a swipe, not a tap
 
-  if (!d.ghost) { // a plain click: drop a new tile somewhere near the middle
+  if (!d.ghost) { // a plain click or tap: drop a new tile somewhere near the middle
     addNewTile(d.id, 0.3 + Math.random() * 0.4, 0.3 + Math.random() * 0.4);
     return;
   }
@@ -855,6 +861,26 @@ document.addEventListener("pointermove", (e) => {
     cursorShown = false;
   }
 });
+
+// A finger has no "leaving the page": when it lifts, stop showing a cursor for it to the other players.
+for (const type of ["pointerup", "pointercancel"]) {
+  document.addEventListener(type, (e) => {
+    if (e.pointerType === "touch" && cursorShown) {
+      shareCursor({ x: null, y: null });
+      cursorShown = false;
+    }
+  });
+}
+
+// No long-press menu on tiles and elements (it would pop up while someone holds a tile to move it).
+document.addEventListener("contextmenu", (e) => {
+  if (e.target.closest?.(".tile, .item")) e.preventDefault();
+});
+
+// On a touch screen the board says how to play with fingers.
+if (matchMedia("(pointer: coarse)").matches) {
+  $("hint").textContent = "Tap an element below to add it, then drag one tile onto another to combine them.";
+}
 
 document.documentElement.addEventListener("mouseleave", () => {
   tooltip.hidden = true;

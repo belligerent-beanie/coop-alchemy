@@ -22,6 +22,7 @@ Players never run development code. A change reaches them only through `ops\depl
 | Restore a backup (stop the server first) | `python ops\backup.py restore <name> --yes` |
 | Restart the live server by hand | `powershell -File ..\coop-alchemy-live\ops\restart-live.ps1` |
 | Check a copy of the code end to end | `python ops\smoke_test.py` |
+| Check phones, tablets and desktop with real touch input (needs Chrome or Edge installed) | `python touch_check.py` |
 
 ### What `deploy.py` does
 1. Refuses unless the development folder is clean and on `main`, and the live folder can simply move forward.

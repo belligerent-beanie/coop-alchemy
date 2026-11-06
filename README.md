@@ -9,8 +9,8 @@ JavaScript.
 ## Requirements
 
 - Python 3.10 or newer (developed and tested on 3.13).
-- A laptop or desktop browser for every player. **Phones are not supported**: they
-  are sent to a "please join from a laptop" page and can't use anything else.
+- A current browser for every player, on a laptop, a tablet or a phone. On a touch screen you tap an element to add it
+  and drag tiles together to combine them; the layout changes to suit portrait and landscape.
 - A recipe file (see [Recipes](#recipes)).
 
 ## Quick start
@@ -454,7 +454,7 @@ skipped if `recipes.json` is missing.
 
 | File | Purpose |
 | --- | --- |
-| `server.py` | HTTP server, routes, server-sent events, phone block, HTTPS. |
+| `server.py` | HTTP server, routes, server-sent events, HTTPS. |
 | `state.py` | One game: players, shared workspace, discoveries, hints, Djinn. |
 | `games.py` | Running games: the 3-game limit, idle closing, ending, resuming. |
 | `saves.py` | Saved games on disk, 3-day expiry. |
@@ -466,13 +466,14 @@ skipped if `recipes.json` is missing.
 | `API.md` | The HTTP API: every endpoint, the event stream, errors and limits, plus a change log. `test_api_docs.py` fails if it drifts from the code. |
 | `ops/` , `OPS.md` | Running the live server: safe deploys with automatic rollback, backups, a watchdog, a daily summary, scheduled tasks, smoke test. See OPS.md. |
 | `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `.env.example` | Run the game, and its Cloudflare Tunnel, in containers on any host (not yet built: see DEPLOYMENT.md). |
+| `touch_check.py` | Drives a real Chrome as a phone, a tablet and a desktop, with real touch input, and checks layout and gestures (needs Chrome or Edge installed). |
 | `bench_load.py` | Load test: rooms of players and solo players against a real server; CPU, memory, threads, delay, errors. |
 | `bench_cursor.py` | Measures what shared cursors cost the server (`python3 bench_cursor.py`): connections, latency, delivery, CPU. |
 | `recipes.py`, `hints.py` | Recipe file loading and checking; hint logic. |
 | `race.py` | Race rooms: lobby, countdown, standings and the winner. |
 | `daily.py` | The daily challenge: picking the targets, reference routes, score boards, streaks and the weekly board. |
 | `validate_recipes.py`, `recipe_report.py`, `recipe_flowchart.py` | Recipe tools. |
-| `static/` | The pages: login, home, game, and the "use a laptop" page. |
+| `static/` | The pages: login, home, game, race and the rest; they adapt to phones, tablets and desktops. |
 | `static/create.*`, `static/admin.*` | The Create Recipes page and the admin review page. |
 | `static/ops.*`, `static/privacy.html` | The administrator's operations page, and the privacy page. |
 | `static/journal.js` | The in-game journal (elements, what made them, what they make). |
@@ -485,8 +486,6 @@ skipped if `recipes.json` is missing.
 
 - **Other laptops can't connect:** check the firewall, that everyone is on the same
   network, and that you gave them the "Other players" address (not `localhost`).
-- **"Please join from a laptop":** the browser looks like a phone. Use a laptop or
-  desktop browser.
 - **Everyone was logged out:** the server restarted. Log in again; games that were
   running are gone unless they had been saved.
 - **"the accounts file cannot be read":** `accounts.json` is damaged. The server

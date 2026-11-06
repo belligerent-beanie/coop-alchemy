@@ -1781,32 +1781,20 @@ class ServerTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
 
-    def test_phones_only_ever_see_the_laptop_page(self) -> None:
+    def test_phones_and_tablets_get_the_same_pages_and_api_as_laptops(self) -> None:
         phone = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148"}
         android = {"User-Agent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"}
-        slug = self.new_game()
-        who = self.join(slug, "Ann")
-        for headers in (phone, android):
-            for path in ("/", "/games", f"/g/{slug}", "/g/never-existed", "/static/app.js", "/saved?name=a",
-                         f"/g/{slug}/events?ticket=x"):
-                conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
-                conn.request("GET", path, headers=headers)
-                resp = conn.getresponse()
-                resp.read()
-                conn.close()
-                self.assertEqual((resp.status, resp.getheader("Location")), (302, "/laptop"), path)
-            status, body = call(self.port, "GET", "/laptop", headers=headers)
-            self.assertEqual(status, 200)
-            self.assertIn(b"laptop", body)
-            for path in ("/games", f"/g/{slug}/join", f"/g/{slug}/tile/add", f"/g/{slug}/end", "/games/resume"):
-                self.assertEqual(call(self.port, "POST", path, {"name": "x", "player": who["token"]},
-                                      headers=headers)[0], 403, path)
-        self.assertEqual(call(self.port, "GET", "/games")[0], 200)  # laptops are unaffected
         desktop = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15"}
-        ipad = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/17.0 Safari/605.1.15"}
-        for headers in (desktop, ipad):
-            self.assertEqual(call(self.port, "GET", f"/g/{slug}", headers=headers)[0], 200)
-
+        slug = self.new_game()
+        for headers in (phone, android, desktop):
+            for path in ("/", "/login", "/privacy", f"/g/{slug}", "/static/app.js", "/static/style.css"):
+                status, body = call(self.port, "GET", path, headers=headers)
+                self.assertEqual(status, 200, (headers["User-Agent"][:20], path))
+            self.assertEqual(call(self.port, "GET", "/games", headers=headers)[0], 200)
+            status, game = call(self.port, "POST", "/games", {"name": f"phone game {headers['User-Agent'][13:17]}"}, headers=headers)
+            self.assertEqual(status, 200, game)
+            call(self.port, "POST", "/games/resume", {"id": "nothing"}, headers=headers)  # reachable (a 404 for the id, not a 403)
+        self.assertEqual(call(self.port, "GET", "/laptop")[0], 404)  # the page phones used to be sent to is gone
 
     def test_everything_needs_a_login(self) -> None:
         slug = self.new_game()
@@ -1817,7 +1805,7 @@ class ServerTests(unittest.TestCase):
                                        ("POST", "/games", {"name": "x"}), ("POST", "/games/resume", {"id": slug}),
                                        ("POST", f"/g/{slug}/join", {})):
                 self.assertEqual(call(self.port, method, path, body, headers=headers)[0], 401, (method, path))
-        for page in ("/", f"/g/{slug}", "/login", "/laptop", "/static/auth.js"):
+        for page in ("/", f"/g/{slug}", "/login", "/privacy", "/static/auth.js"):
             self.assertEqual(call(self.port, "GET", page, headers=none)[0], 200, page)  # pages hold nothing private
 
     def test_register_login_me_and_logout_over_http(self) -> None:

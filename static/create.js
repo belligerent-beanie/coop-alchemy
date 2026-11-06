@@ -110,6 +110,7 @@ function onItemPointerDown(e) {
 function onItemPointerMove(e) {
   const d = itemDrag;
   if (!d || e.pointerId !== d.pointerId) return;
+  if (e.pointerType === "touch") return; // a finger on the list scrolls it or taps; dragging out of the list is for a mouse
   if (!d.ghost) {
     if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < DRAG_THRESHOLD) return;
     d.ghost = makeFace(elements.get(d.id), "div");
@@ -128,8 +129,9 @@ function onItemPointerUp(e) {
   setTarget(null);
   if (d.ghost) d.ghost.remove();
   if (e.type === "pointercancel") return;
+  if (e.pointerType === "touch" && Math.hypot(e.clientX - d.startX, e.clientY - d.startY) > 12) return; // a swipe, not a tap
   const rect = workspace.getBoundingClientRect();
-  if (!d.ghost) { // a plain click: drop a tile near the middle
+  if (!d.ghost) { // a plain click or tap: drop a tile near the middle
     addTile(d.id, rect.width * (0.3 + Math.random() * 0.4), rect.height * (0.3 + Math.random() * 0.4));
     return;
   }
@@ -424,3 +426,9 @@ async function start() {
 }
 
 start();
+
+// On a touch screen the board says how to play with fingers.
+if (matchMedia("(pointer: coarse)").matches) {
+  const hint = document.getElementById("hint");
+  if (hint) hint.textContent = "Everything is unlocked here. Tap an element to add it, then drag one tile onto another: if they don't make anything yet, you can name what they make.";
+}

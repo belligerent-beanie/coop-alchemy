@@ -18,7 +18,6 @@ this file in the same commit (and add a line to the [change log](#change-log)).
 - **Game requests.** Joining a game returns a *player token*. Every POST under `/g/<id>` except `/join` carries
   `{"player": "<token>"}` in the body. A player token is not a login: it works only for that game.
 - **Same origin.** A browser POST whose `Origin` header does not match the `Host` header is refused with `403`.
-- **Phones.** Requests whose `User-Agent` looks like a phone get `302 /laptop` (GET) or `403` (POST), except `/laptop` itself.
 - **Connections.** HTTP/1.1 keep-alive; an idle connection is closed after 30 seconds. Responses have `Cache-Control: no-store`
   (JSON) or `no-cache` (files) and carry a Content-Security-Policy, `X-Content-Type-Options`, `X-Frame-Options` and
   `Referrer-Policy` (and `Strict-Transport-Security` over HTTPS).
@@ -32,7 +31,6 @@ this file in the same commit (and add a line to the [change log](#change-log)).
 |---|---|---|
 | `GET /` | none | Home page (alias: `/index.html`): games, daily challenge, races, saved games. |
 | `GET /login` | none | Log in / create account page. |
-| `GET /laptop` | none | The page phones are sent to. |
 | `GET /verify` | none | Opens the emailed confirmation link (the token is in the URL fragment, never sent to the server). |
 | `GET /create` | none | Create Recipes page (its data call needs a session). |
 | `GET /admin` | none | Recipe review page (its data calls need an admin session). |
@@ -185,6 +183,7 @@ checks that every option the server accepts appears in the README.
 
 Newest first. Add a line whenever an endpoint, event, status code or option is added, changed or removed.
 
+- **2026-11 (phones)**: phones are no longer redirected to `/laptop` or refused with `403`; they get the same pages and API as every other browser. `GET /laptop` is gone.
 - **2026-11 (options)**: `--client-ip-header`, `--max-games`, `--log-file`, `--log-days` (README options table).
 - **2026-11 (accounts and operations)**: `POST /account/change-password` and `POST /account/delete`; `GET /ops` and the `/ops/...`
   endpoints for administrators; `GET /privacy`; `must_change_password` on `GET /me` and `POST /login`; `403` from `/login` for a

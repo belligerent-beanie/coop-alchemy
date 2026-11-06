@@ -127,6 +127,7 @@ main { flex: 1; display: flex; min-height: 0; }
   position: relative;
   flex: 1;
   overflow: hidden;
+  touch-action: none;  /* a finger on the board moves tiles and shows your cursor; it never scrolls or zooms the page */
   background-image: radial-gradient(var(--dot) 1.5px, transparent 1.5px);
   background-size: 26px 26px;
 }
@@ -509,6 +510,12 @@ body.home { overflow: auto; }
 }
 .item:hover { border-color: var(--accent); }
 .item { position: relative; }
+/* Touch screens: a swipe on the element list scrolls it and a tap adds the element (dragging out of the list is for a mouse). */
+@media (pointer: coarse) {
+  .item { touch-action: pan-y; }
+}
+.item, .tile { -webkit-touch-callout: none; }
+body:not([class]) { overscroll-behavior: none; }  /* no pull-to-refresh or bounce while playing */
 .item.player-made::after { content: "★"; position: absolute; top: 2px; right: 6px; font-size: 0.75rem; color: #d9a400; pointer-events: none; }
 
 /* Picture slot: holds the emoji today, and an <img> later. */
@@ -600,9 +607,35 @@ body.home { overflow: auto; }
 }
 .toast.error { background: #b3261e; }
 
+/* Phones in portrait: board on top, element list underneath, a compact header. */
 @media (max-width: 700px) {
   main { flex-direction: column; }
-  #sidebar { width: auto; height: 38%; border-left: 0; border-top: 1px solid var(--line); }
+  #sidebar { width: auto; height: 42%; border-left: 0; border-top: 1px solid var(--line); }
+  header { gap: 4px 8px; padding: calc(4px + env(safe-area-inset-top)) 8px 4px; }
+  header h1 { display: none; }
+  header button { padding: 5px 10px; font-size: 0.85rem; }
+  header .cat { font-size: 1.4rem; padding: 0 4px; }
+  #count { font-size: 0.85rem; }
+  #key { order: 10; flex-basis: 100%; margin: 0; }   /* the players get their own row under the buttons */
+  #items { grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 8px;
+           padding: 4px 8px calc(12px + env(safe-area-inset-bottom)); }
+  .tile { padding: 8px 14px; }
+  input, select, textarea { font-size: 16px; }   /* iOS zooms into any field smaller than this */
+  .dialog, #end-dialog { max-width: calc(100vw - 24px); }
+}
+
+/* Phones turned sideways: the list moves to the right, and the header shrinks to leave room for the board. */
+@media (max-height: 520px) and (orientation: landscape) {
+  header { gap: 2px 8px; padding: 2px calc(8px + env(safe-area-inset-right)) 2px calc(8px + env(safe-area-inset-left)); }
+  header h1 { display: none; }
+  header button { padding: 3px 8px; font-size: 0.8rem; }
+  header .cat { font-size: 1.2rem; padding: 0 4px; }
+  main { flex-direction: row; }
+  #sidebar { width: 42%; height: auto; border-left: 1px solid var(--line); border-top: 0;
+             padding-right: env(safe-area-inset-right); }
+  #items { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px; padding: 4px 8px 10px; }
+  input, select, textarea { font-size: 16px; }
+  .dialog, #end-dialog { max-width: calc(100vw - 24px); max-height: calc(100vh - 16px); overflow-y: auto; }
 }
 
 /* ---- end game, saved games ---- */
