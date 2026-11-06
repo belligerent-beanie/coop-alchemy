@@ -21,8 +21,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -85,14 +87,36 @@ def check_health(port: int, seconds: float = HEALTH_SECONDS) -> str | None:
         time.sleep(1.0)
 
 
+def run_and_wait(command: list[str], timeout: float) -> tuple[int, str]:
+    """Run `command`, wait for IT to finish (not for anything it started), and return (exit code, its error output or output).
+
+    Output goes to temporary files, never pipes. A pipe stays open for as long as any process that inherited it lives, so reading
+    one would hang forever when the command starts a server that keeps running: that is exactly what the restart script does
+    (this hung the first real deploy until it was stopped by hand).
+    """
+    out_fd, out_name = tempfile.mkstemp(prefix="alchemy-out-")
+    err_fd, err_name = tempfile.mkstemp(prefix="alchemy-err-")
+    try:
+        with os.fdopen(out_fd, "wb") as out, os.fdopen(err_fd, "wb") as err:
+            result = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=out, stderr=err, timeout=timeout)
+        text = Path(err_name).read_bytes() or Path(out_name).read_bytes()
+        return result.returncode, text.decode("utf-8", "replace")
+    finally:
+        for name in (out_name, err_name):
+            try:
+                os.unlink(name)
+            except OSError:
+                pass  # a long-running child that inherited the file may still hold it; it is tiny and goes with that process
+
+
 def restart_with_script(script: Path, port: int) -> None:
     """Restart the live server by running restart-live.ps1 (stops whatever listens on `port`, then starts it)."""
     if not script.is_file():
         raise DeployError(f"the restart script {script} is missing")
-    result = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-Port", str(port)],
-                            capture_output=True, text=True, timeout=120)
-    if result.returncode != 0:
-        raise DeployError(f"restarting failed: {(result.stderr or result.stdout).strip()[-300:]}")
+    code, text = run_and_wait(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-Port", str(port)],
+                              timeout=120)
+    if code != 0:
+        raise DeployError(f"restarting failed: {text.strip()[-300:]}")
 
 
 @dataclass
