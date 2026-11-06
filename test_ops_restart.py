@@ -20,6 +20,19 @@ SPAWN_AND_EXIT = ("import subprocess, sys; "
                   "open(sys.argv[1], 'w').write(str(child.pid))")
 
 
+class OpsFilesAreTrackedTests(unittest.TestCase):
+    def test_every_ops_script_is_committed(self) -> None:
+        """A script that exists only on this machine does not reach the live folder, and deploys then quietly fall back to
+        something older (a too-broad local ignore rule once hid ops/restart-live.ps1 this way)."""
+        root = Path(__file__).resolve().parent
+        listed = subprocess.run(["git", "-C", str(root), "ls-files", "ops"], capture_output=True, text=True)
+        if listed.returncode != 0:
+            self.skipTest("not a git checkout")
+        tracked = {Path(line).name for line in listed.stdout.splitlines()}
+        on_disk = {p.name for p in (root / "ops").iterdir() if p.is_file() and p.suffix in (".py", ".ps1")}
+        self.assertEqual(sorted(on_disk - tracked), [], "ops scripts that git does not track (ignored or never added)")
+
+
 class RunAndWaitTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
