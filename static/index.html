@@ -5,13 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Co-op Alchemy</title>
   <link rel="stylesheet" href="/static/style.css">
-  <script>
-    // Phones are not supported (the server also redirects them; this catches desktop-mode browsers).
-    if (/iPhone|iPod|Android.+Mobile|Mobi/i.test(navigator.userAgent) ||
-        (matchMedia("(pointer: coarse)").matches && Math.min(screen.width, screen.height) < 600)) {
-      location.replace("/laptop");
-    }
-  </script>
+  <script src="/static/phone-guard.js"></script>
 </head>
 <body>
   <section id="join">

@@ -169,7 +169,9 @@ class RealReloadTests(unittest.TestCase):
     def first_snapshot(self, slug: str, token: str) -> dict[str, Any]:
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
         try:
-            conn.request("GET", f"/g/{slug}/events?player={token}")
+            status, ticket = self.call("POST", f"/g/{slug}/ticket", {"player": token})
+            self.assertEqual(status, 200)
+            conn.request("GET", f"/g/{slug}/events?ticket={ticket['ticket']}")
             res = conn.getresponse()
             self.assertEqual(res.status, 200)
             event = ""

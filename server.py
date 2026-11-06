@@ -71,7 +71,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import html
+import ipaddress
 import json
+import logging
 import mimetypes
 import os
 import queue
@@ -87,18 +89,24 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from accounts import AccountStore
+from accounts import AccountStore, clean_email
+from captcha import ORIGIN as TURNSTILE_ORIGIN
+from captcha import Turnstile
 from daily import DailyStore
 from drafts import DraftStore
 from games import IDLE_CLOSE_SECONDS, GameRegistry
 from hints import find_element
 from hotreload import restore_snapshot, write_snapshot
+from invites import InviteStore
+from mailer import MailConfigError, Mailer, verification_message
 from recipes import RecipeError, load_recipes
 from saves import SaveStore
 from state import GameError, GameState
+from throttle import Throttle, TicketStore, client_ip, parse_networks
 
 BASE_DIR = Path(__file__).resolve().parent
 MAX_BODY = 4096
+MAX_DRAIN = 65536  # an unread request body up to this size is read and thrown away before the connection closes
 KEEPALIVE_SECONDS = 3  # a closed browser is noticed on the second failed write, so about 6 s
 
 ACTIONS = ("/end", "/combine", "/cursor", "/genie", "/hint", "/journal", "/tile/add", "/tile/grab", "/tile/move",
@@ -141,6 +149,17 @@ def run_action(state: GameState, path: str, token: str, body: dict[str, Any]) ->
     raise GameError(404, "not found")
 
 
+log = logging.getLogger("alchemy.auth")
+
+
+def build_csp(turnstile: bool) -> str:
+    """The Content-Security-Policy: our own files only, plus Cloudflare's origin when the Turnstile widget is on."""
+    extra = f" {TURNSTILE_ORIGIN}" if turnstile else ""
+    return (f"default-src 'self'; script-src 'self'{extra}; style-src 'self' 'unsafe-inline'; "
+            f"img-src 'self' data:; connect-src 'self'{extra}; frame-src 'self'{extra}; object-src 'none'; "
+            "base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+
+
 class AlchemyServer(ThreadingHTTPServer):
     daemon_threads = True      # SSE handler threads must not block shutdown
     allow_reuse_address = True
@@ -160,6 +179,17 @@ class AlchemyServer(ThreadingHTTPServer):
         self.drafts = drafts or DraftStore(None)  # draft recipes and promotion requests (memory only if no file)
         self.public_base = ""  # how other players reach this server, e.g. http://192.168.1.20:8000 (set by main)
         self.static_dir = Path(static_dir).resolve()
+        self.login_throttle = Throttle(20, 60.0)    # password guesses per client address
+        self.register_throttle = Throttle(5, 600.0)  # new accounts per client address
+        self.invites: InviteStore | None = None      # set by --require-invite: signup then needs a single-use code
+        self.captcha: Turnstile | None = None        # set by --turnstile-site-key: signup needs a Turnstile answer
+        self.mailer: Mailer | None = None            # set by --require-email-verification: signup needs a confirmed email
+        self.public_url = ""                         # how links in emails reach us, e.g. https://alchemy.example.com
+        self.resend_throttle = Throttle(10, 3600.0)  # "send the email again" requests per client address
+        self.email_throttle = Throttle(3, 3600.0)    # verification emails per mailbox
+        self.csp = build_csp(False)
+        self.tickets = TicketStore()                 # one-time passes for event streams
+        self.trusted_proxies: list = []              # addresses whose X-Forwarded-* headers are believed (--trusted-proxy)
 
     def handle_error(self, request: Any, client_address: Any) -> None:
         if isinstance(sys.exc_info()[1], (ConnectionError, TimeoutError, ssl.SSLError)):
@@ -169,7 +199,63 @@ class AlchemyServer(ThreadingHTTPServer):
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "CoopAlchemy/1.0"
+    protocol_version = "HTTP/1.1"  # keep-alive: a browser reuses one connection for its many small requests (cursors!)
     server: AlchemyServer
+    # Seconds a client may stall while sending a request, and also how long an idle kept-alive connection is held open
+    # (the event stream only writes, so it is not affected).
+    timeout = 30
+
+    SECURITY_HEADERS = (
+        ("X-Content-Type-Options", "nosniff"),
+        ("X-Frame-Options", "DENY"),
+        ("Referrer-Policy", "no-referrer"),
+    )
+
+    def end_headers(self) -> None:
+        self.send_header("Content-Security-Policy", self.server.csp)
+        for name, value in self.SECURITY_HEADERS:
+            self.send_header(name, value)
+        if self._https():
+            self.send_header("Strict-Transport-Security", "max-age=31536000")
+        if self.close_connection:
+            self.send_header("Connection", "close")  # so the browser does not try to reuse a connection we are about to drop
+        super().end_headers()
+
+    def _plan_for_request_body(self) -> None:
+        """Decide, before replying, whether this connection may carry another request.
+
+        Keep-alive treats whatever follows a request as the next request, so a body we never read (or cannot read, such
+        as a chunked one) would be misread as one. Bodies we do not expect, or that are too big to throw away, end the
+        connection instead; small unread POST bodies are discarded after the reply (see _discard_unread_body).
+        """
+        if self.headers.get("Transfer-Encoding"):
+            self.close_connection = True
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            self.close_connection = True
+            return
+        if length < 0 or (length > 0 and self.command != "POST") or length > MAX_DRAIN:
+            self.close_connection = True
+
+    def _same_origin(self) -> bool:
+        """False if a browser says this request comes from a page on another site."""
+        origin = self.headers.get("Origin")
+        return origin is None or urlsplit(origin).netloc == self.headers.get("Host", "")
+
+    def _client(self) -> str:
+        """The caller's address, looking through a trusted reverse proxy (see --trusted-proxy)."""
+        peer = str(self.client_address[0])
+        return client_ip(peer, self.headers.get("X-Forwarded-For"), self.server.trusted_proxies)
+
+    def _https(self) -> bool:
+        """True if the browser reached us over HTTPS: directly, or via a trusted proxy that says so."""
+        if self.server.public_base.startswith("https://"):
+            return True
+        peer = ipaddress.ip_address(self.client_address[0])
+        return (any(peer in net for net in self.server.trusted_proxies)
+                and self.headers.get("X-Forwarded-Proto", "").lower() == "https")
 
     def log_message(self, format: str, *args: Any) -> None:  # keep the console quiet
         pass
@@ -198,6 +284,7 @@ class Handler(BaseHTTPRequestHandler):
         return name
 
     def do_GET(self) -> None:
+        self._plan_for_request_body()
         parts = urlsplit(self.path)
         path = parts.path
         if self._block_phone(path):
@@ -207,6 +294,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._static("laptop.html")
             elif path == "/login":
                 self._static("login.html")
+            elif path == "/auth-config":
+                server = self.server
+                self._json(200, {"invite_required": server.invites is not None,
+                                 "email_required": server.mailer is not None,
+                                 "turnstile_site_key": server.captcha.site_key if server.captcha else None})
+            elif path == "/verify":
+                self._static("verify.html")
             elif path == "/me":
                 username = self._user()
                 self._json(200, {"username": username, "admin": self.server.accounts.is_admin(username)})
@@ -265,18 +359,43 @@ class Handler(BaseHTTPRequestHandler):
                 elif rest == "/events":
                     if game is None:
                         raise GameError(404, "that game does not exist (it may have ended)")
-                    self._events(game, parse_qs(parts.query))
+                    self._events(game, slug, parse_qs(parts.query))
                 else:
                     raise GameError(404, "not found")
         except GameError as exc:
             self._json(exc.status, {"error": exc.message})
 
     def do_POST(self) -> None:
+        self._body_read = False
+        self._plan_for_request_body()
+        try:
+            self._handle_post()
+        finally:
+            self._discard_unread_body()
+
+    def _discard_unread_body(self) -> None:
+        """Read a request body nobody looked at (e.g. we answered 403 or 404 first) so closing does not reset the connection.
+
+        Closing a socket that still holds unread incoming data makes Windows (and sometimes other systems) send a
+        reset, which can destroy the reply we just wrote: the browser sees "connection aborted" instead of the error.
+        """
+        if self._body_read:
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            if 0 < length <= MAX_DRAIN:
+                self.rfile.read(length)
+        except (ValueError, OSError):
+            pass  # a bad header or a client that went away: nothing to tidy up
+
+    def _handle_post(self) -> None:
         try:
             path = urlsplit(self.path).path
             if self._block_phone(path):
                 return
-            if path in ("/register", "/login", "/logout"):
+            if not self._same_origin():
+                raise GameError(403, "cross-site request refused")
+            if path in ("/register", "/login", "/logout", "/verify-email", "/resend-verification"):
                 self._account_action(path, self._read_json())
                 return
             if path == "/games":
@@ -312,9 +431,12 @@ class Handler(BaseHTTPRequestHandler):
                 return
             match = GAME_PATH.match(path)
             rest = match.group(2) if match else None
-            if not match or (rest != "/join" and rest not in ACTIONS):
+            if not match or (rest not in ("/join", "/ticket") and rest not in ACTIONS):
                 raise GameError(404, "not found")
             body = self._read_json()
+            if rest == "/ticket":
+                self._json(200, {"ticket": self._event_ticket(match.group(1), body.get("player"))})
+                return
             username = self._user() if rest == "/join" else ""
             if rest == "/end":
                 save = body.get("save")
@@ -338,18 +460,101 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- helpers ------------------------------------------------------
 
+    def _event_ticket(self, slug: str, token: object) -> str:
+        """A one-time pass for GET /g/<id>/events, so the player token itself never appears in a URL."""
+        game = self.server.registry.get(slug)
+        if game is None:
+            raise GameError(404, "that game does not exist (it may have ended)")
+        player = game.authorize(token)
+        return self.server.tickets.issue(slug, player.token)
+
+    def _register(self, body: dict[str, Any]) -> str:
+        """Create an account, spending an invite code first if signup requires one."""
+        accounts, invites = self.server.accounts, self.server.invites
+        email = None
+        if self.server.mailer is not None:
+            if body.get("email") is None:
+                raise GameError(400, "an email address is needed to create an account")
+            email = body.get("email")
+        if invites is None:
+            return accounts.register(body.get("username"), body.get("password"), email)
+        handle = invites.claim(body.get("invite"))  # 403 unless it is a valid, unused code
+        try:
+            username = accounts.register(body.get("username"), body.get("password"), email)
+        except GameError:
+            invites.release(handle)  # a typo or a taken name should not burn the code
+            raise
+        invites.finish(handle, username)
+        return username
+
     def _account_action(self, path: str, body: dict[str, Any]) -> None:
         accounts = self.server.accounts
         if path == "/logout":
             accounts.logout(self.headers.get("X-Session", ""))
             self._json(200, {})
             return
-        if path == "/register":
-            username = accounts.register(body.get("username"), body.get("password"))
-            self._json(200, {"session": accounts.session_for(username), "username": username})
-        else:
-            session, username = accounts.login(body.get("username"), body.get("password"))
-            self._json(200, {"session": session, "username": username})
+        client = self._client()
+        if path == "/resend-verification":
+            self._resend_verification(body, client)
+            return
+        if path == "/verify-email":
+            if self.server.login_throttle.allow(client):
+                raise GameError(429, "too many attempts from this address; try again in a minute")
+            username = accounts.verify_email(body.get("token"))
+            log.info("email verified client=%s user=%s", client, username)
+            self._json(200, {"username": username})
+            return
+        if path in ("/register", "/login"):
+            throttle = self.server.register_throttle if path == "/register" else self.server.login_throttle
+            wait = throttle.allow(client)
+            if wait:
+                log.warning("%s throttled client=%s", path[1:], client)
+                raise GameError(429, f"too many attempts from this address; try again in {int(wait) + 1} seconds")
+        if path == "/register" and self.server.captcha is not None:
+            self.server.captcha.verify(body.get("captcha"), client)  # before anything else: bots learn nothing
+        try:
+            if path == "/register" and self.server.mailer is not None:
+                username = self._register(body)
+                self._send_verification(username)
+                self._json(200, {"verify_email": True, "username": username})
+            elif path == "/register":
+                username = self._register(body)
+                self._json(200, {"session": accounts.session_for(username), "username": username})
+            else:
+                session, username = accounts.login(body.get("username"), body.get("password"), client)
+                self._json(200, {"session": session, "username": username})
+        except GameError as exc:
+            if path == "/login":
+                log.warning("login failed status=%s client=%s user=%s", exc.status, client,
+                            str(body.get("username"))[:40].encode("ascii", "replace").decode())
+            raise
+        log.info("%s ok client=%s user=%s", path[1:], client, username)
+
+    def _send_verification(self, username: str) -> None:
+        """Email a fresh confirmation link to a pending account (limited per mailbox)."""
+        found = self.server.accounts.begin_verification(username)
+        self._mail_link(found)
+
+    def _mail_link(self, found: tuple[str, str] | None) -> None:
+        if found is None:
+            return
+        email, token = found
+        if self.server.email_throttle.allow(clean_email(email)[1]):
+            return  # this mailbox already got its quota; stay quiet rather than reveal anything
+        # The token sits after the # so it is never sent to a server, logged by a proxy or leaked in a Referer header.
+        subject, text = verification_message(f"{self.server.public_url}/verify#{token}")
+        assert self.server.mailer is not None
+        self.server.mailer.send(email, subject, text)
+
+    def _resend_verification(self, body: dict[str, Any], client: str) -> None:
+        """'Send me the email again'. Always answers the same, so it cannot be used to find out who has an account."""
+        if self.server.mailer is None:
+            raise GameError(404, "not found")
+        wait = self.server.resend_throttle.allow(client)
+        if wait:
+            raise GameError(429, f"too many requests from this address; try again in {int(wait) + 1} seconds")
+        self._mail_link(self.server.accounts.begin_verification_for_email(body.get("email")))
+        self._json(200, {"ok": True})
 
     def _admin(self) -> str:
         """The username of the logged-in caller, who must be an admin (403 otherwise)."""
@@ -399,6 +604,7 @@ class Handler(BaseHTTPRequestHandler):
             raise GameError(400, "bad Content-Length") from None
         if length <= 0 or length > MAX_BODY:
             raise GameError(400, "request body missing or too large")
+        self._body_read = True
         try:
             data = json.loads(self.rfile.read(length).decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
@@ -473,8 +679,9 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _events(self, game: GameState, query: dict[str, list[str]]) -> None:
-        sub = game.subscribe(query.get("player", [""])[0])
+    def _events(self, game: GameState, slug: str, query: dict[str, list[str]]) -> None:
+        token = self.server.tickets.redeem(query.get("ticket", [""])[0], slug)
+        sub = game.subscribe(token) if token else None
         if sub is None:
             raise GameError(403, "unknown player")
         self.close_connection = True
@@ -484,6 +691,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
             self.send_header("X-Accel-Buffering", "no")
+            self.send_header("Connection", "close")  # no Content-Length: the stream ends when the connection does
             self.end_headers()
             self.wfile.write(b"retry: 3000\n\n")
             while not sub.dead:
@@ -540,6 +748,21 @@ def main() -> int:
                         help="where saved games are kept for 3 days (default: ./saves)")
     parser.add_argument("--accounts-file", default=str(BASE_DIR / "accounts.json"),
                         help="where usernames and password hashes are kept (default: ./accounts.json)")
+    parser.add_argument("--trusted-proxy", action="append", default=[], metavar="IP_OR_CIDR",
+                        help="a reverse proxy in front of this server (repeatable, e.g. 127.0.0.1): its "
+                             "X-Forwarded-For / X-Forwarded-Proto headers are believed, so rate limits see real client addresses")
+    parser.add_argument("--require-invite", action="store_true",
+                        help="signup needs a single-use invite code (make them with accounts_admin.py invite create)")
+    parser.add_argument("--invites-file", default=str(BASE_DIR / "invites.json"),
+                        help="where invite codes are kept, hashed (default: ./invites.json)")
+    parser.add_argument("--turnstile-site-key", default=os.environ.get("TURNSTILE_SITE_KEY", ""),
+                        help="Cloudflare Turnstile site key: signup then needs the human check "
+                             "(the secret key goes in the TURNSTILE_SECRET_KEY environment variable)")
+    parser.add_argument("--require-email-verification", action="store_true",
+                        help="signup asks for an email address and the account works only after its link is opened "
+                             "(needs --public-url and the SMTP_* environment variables; see mailer.py)")
+    parser.add_argument("--public-url", default="",
+                        help="the site's public address, used in emailed links (e.g. https://alchemy.example.com)")
     parser.add_argument("--tls-cert", help="certificate file (PEM): serve over HTTPS so passwords are encrypted")
     parser.add_argument("--tls-key", help="private key file (PEM) for --tls-cert")
     parser.add_argument("--drafts-file", default=str(BASE_DIR / "drafts.json"),
@@ -571,6 +794,32 @@ def main() -> int:
     except OSError as exc:
         print(f"cannot listen on {args.host}:{args.port}: {exc}", file=sys.stderr)
         return 1
+    if args.require_invite:
+        server.invites = InviteStore(args.invites_file)
+    if args.turnstile_site_key:
+        secret = os.environ.get("TURNSTILE_SECRET_KEY", "")
+        if not secret:
+            print("--turnstile-site-key needs the secret key in the TURNSTILE_SECRET_KEY environment variable",
+                  file=sys.stderr)
+            return 1
+        server.captcha = Turnstile(args.turnstile_site_key, secret)
+        server.csp = build_csp(True)
+    if args.require_email_verification:
+        if not args.public_url.startswith(("http://", "https://")):
+            print("--require-email-verification needs --public-url (e.g. https://alchemy.example.com)", file=sys.stderr)
+            return 1
+        try:
+            server.mailer = Mailer.from_env(os.environ)
+        except MailConfigError as exc:
+            print(f"--require-email-verification: {exc}", file=sys.stderr)
+            return 1
+        server.public_url = args.public_url.rstrip("/")
+    try:
+        server.trusted_proxies = parse_networks(args.trusted_proxy)
+    except ValueError as exc:
+        print(f"--trusted-proxy: {exc}", file=sys.stderr)
+        return 1
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s", stream=sys.stderr)
     scheme = "http"
     if bool(args.tls_cert) != bool(args.tls_key):
         print("--tls-cert and --tls-key must be given together", file=sys.stderr)
@@ -585,9 +834,15 @@ def main() -> int:
             print(f"cannot use the TLS certificate: {exc}", file=sys.stderr)
             return 1
         scheme = "https"
-    else:
+    elif not server.trusted_proxies:
         print("note: passwords are sent unencrypted over this network (use --tls-cert/--tls-key for HTTPS).")
 
+    if server.captcha is not None:
+        print("Signup needs the Turnstile human check.")
+    if server.mailer is not None:
+        print(f"Signup needs a confirmed email address (links point to {server.public_url}).")
+    if server.invites is not None:
+        print("Signup needs an invite code. Make some with: python3 accounts_admin.py invite create --count 5")
     print(f"{len(book.elements)} elements, {len(book.lookup)} recipes loaded.")
     if book.notes:
         print(f"{len(book.notes)} repeated recipe(s) were merged or ignored "

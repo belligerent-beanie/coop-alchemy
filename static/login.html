@@ -5,13 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Log in · Co-op Alchemy</title>
   <link rel="stylesheet" href="/static/style.css">
-  <script>
-    // Phones are not supported (the server also redirects them; this catches desktop-mode browsers).
-    if (/iPhone|iPod|Android.+Mobile|Mobi/i.test(navigator.userAgent) ||
-        (matchMedia("(pointer: coarse)").matches && Math.min(screen.width, screen.height) < 600)) {
-      location.replace("/laptop");
-    }
-  </script>
+  <script src="/static/phone-guard.js"></script>
 </head>
 <body class="home">
   <main id="home" class="auth">
@@ -25,15 +19,32 @@
       <input id="username" name="username" autocomplete="username" maxlength="24" required autofocus>
       <p id="username-hint" class="muted" hidden>3 to 24 characters: letters, digits, spaces, _ - . This is the name other
         players see, and no one else can use it.</p>
+      <label for="email" id="email-label" hidden>Email address</label>
+      <input id="email" name="email" type="email" autocomplete="email" maxlength="254" hidden>
+      <p id="email-hint" class="muted" hidden>We send one link to confirm it. It is used for nothing else.</p>
       <label for="password">Password</label>
       <input id="password" name="password" type="password" autocomplete="current-password" maxlength="128" required>
       <p id="password-hint" class="muted" hidden>At least 8 characters. Don't reuse a password from anywhere important:
         on this network it may be sent unencrypted.</p>
       <label for="password2" id="password2-label" hidden>Password again</label>
       <input id="password2" type="password" autocomplete="new-password" maxlength="128" hidden>
+      <label for="invite" id="invite-label" hidden>Invite code</label>
+      <input id="invite" name="invite" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="32" hidden>
+      <p id="invite-hint" class="muted" hidden>Signup is by invitation. Enter the code you were given (it works once).</p>
+      <div id="turnstile-box" hidden></div>
       <button type="submit" id="auth-submit">Log in</button>
       <p id="auth-error" class="error" role="alert"></p>
+      <p id="auth-info" class="muted" role="status" hidden></p>
     </form>
+    <details id="resend" hidden>
+      <summary>Didn't get the confirmation email?</summary>
+      <form id="resend-form">
+        <label for="resend-email">Email address you signed up with</label>
+        <input id="resend-email" type="email" autocomplete="email" maxlength="254" required>
+        <button type="submit">Send the link again</button>
+        <p id="resend-msg" class="muted" role="status"></p>
+      </form>
+    </details>
   </main>
   <script src="/static/auth.js"></script>
   <script src="/static/login.js"></script>

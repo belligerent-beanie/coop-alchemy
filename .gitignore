@@ -1,5 +1,6 @@
 # Secrets and per-machine runtime state (see README "Files" section)
 accounts.json
+invites.json
 saves/
 *.pem
 drafts.json

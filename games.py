@@ -15,6 +15,7 @@ from __future__ import annotations
 import random
 import re
 import secrets
+import string
 import threading
 import time
 import unicodedata
@@ -42,6 +43,11 @@ def clean_game_name(raw: object) -> str:
     collapsed = " ".join(raw.split())
     cleaned = "".join(ch for ch in collapsed if unicodedata.category(ch)[0] != "C")
     return cleaned[:MAX_GAME_NAME_LEN].strip()
+
+
+def random_room_name() -> str:
+    """A random 6-character lowercase alphanumeric room name, for games created without one."""
+    return "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(6))
 
 
 def slugify(name: str) -> str:
@@ -90,8 +96,7 @@ class GameRegistry:
                                      f"to end (a game closes {round(self.idle_seconds / 60)} minutes after "
                                      f"the last player leaves)")
             if not name:
-                number = next(n for n in range(1, self.max_games + 2) if f"game-{n}" not in self._games)
-                name = f"Game {number}"
+                name = next(n for n in (random_room_name() for _ in range(100)) if slugify(n) not in self._games)
             slug = slugify(name) or secrets.token_hex(3)
             if slug in self._games:
                 raise GameError(409, f"a game called {self._games[slug].name!r} is already running")

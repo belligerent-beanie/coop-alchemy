@@ -256,6 +256,11 @@ python3 server.py [--host 0.0.0.0] [--port 8000]
 | `--recipes` | `recipes.json` next to `server.py` | The recipe file. |
 | `--saves-dir` | `saves` next to `server.py` | Where saved games are kept. |
 | `--accounts-file` | `accounts.json` next to `server.py` | Usernames and password hashes. |
+| `--require-invite` | off | Signup needs a single-use invite code (`accounts_admin.py invite create`; see DEPLOYMENT.md). |
+| `--invites-file` | `invites.json` next to `server.py` | Invite codes, stored as hashes. |
+| `--trusted-proxy` | none | A reverse proxy in front of the server (repeatable); its `X-Forwarded-*` headers are believed. See DEPLOYMENT.md. |
+| `--turnstile-site-key` | off | Cloudflare Turnstile human check on signup (secret key in the `TURNSTILE_SECRET_KEY` environment variable). |
+| `--require-email-verification`, `--public-url` | off | Signup asks for an email and the account works only after its link is opened; links use the public URL. SMTP settings come from `SMTP_*` environment variables. See DEPLOYMENT.md. |
 | `--tls-cert`, `--tls-key` | off | Serve over HTTPS (see below). |
 | `--idle-minutes` | `10` | How long an empty game stays open. |
 | `--drafts-file` | `drafts.json` next to `server.py` | Players' draft recipes and promotion proposals. |
@@ -447,6 +452,8 @@ skipped if `recipes.json` is missing.
 | `drafts.py` | Draft recipes and promotion proposals (per account, with admin handling). |
 | `hotreload.py`, `reload.py` | Snapshot and restore for patching without stopping games; the command that triggers it. |
 | `accounts.py`, `accounts_admin.py` | Accounts, passwords, sessions, and the admin tool (admins and bots). |
+| `throttle.py`, `invites.py`, `captcha.py`, `mailer.py` | Rate limits and one-time event tickets, single-use invite codes, the Turnstile check, and verification email (see DEPLOYMENT.md). |
+| `bench_cursor.py` | Measures what shared cursors cost the server (`python3 bench_cursor.py`): connections, latency, delivery, CPU. |
 | `recipes.py`, `hints.py` | Recipe file loading and checking; hint logic. |
 | `race.py` | Race rooms: lobby, countdown, standings and the winner. |
 | `daily.py` | The daily challenge: picking the targets, reference routes, score boards, streaks and the weekly board. |
@@ -457,7 +464,7 @@ skipped if `recipes.json` is missing.
 | `static/elements/` | Element pictures, one PNG per element. |
 | `aigen/` | The optional AI suggestion tool (see *AI suggestions*); `python3 -m aigen --help`. |
 | `image_check.py` | Lists elements without a picture and pictures that match nothing. |
-| `test_coop.py`, `test_reload.py`, `test_drafts.py`, `test_daily.py`, `test_race.py`, `test_aigen.py`, `test_recipes.json` | Tests and their fixed recipe set. |
+| `test_coop.py`, `test_reload.py`, `test_drafts.py`, `test_daily.py`, `test_race.py`, `test_aigen.py`, `test_security.py`, `test_invites.py`, `test_signup_checks.py`, `test_keepalive.py`, `test_recipes.json` | Tests and their fixed recipe set. |
 
 ## Troubleshooting
 

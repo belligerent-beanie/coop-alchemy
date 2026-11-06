@@ -1109,17 +1109,31 @@ const handlers = {
   },
 };
 
-function connect() {
+let reconnectTimer = null;
+
+/** Opens the event stream with a one-time ticket, so the player token never appears in a URL. */
+async function connect() {
+  clearTimeout(reconnectTimer);
   if (source) source.close();
-  source = new EventSource(`${BASE}/events?player=${encodeURIComponent(me.token)}`);
+  let ticket;
+  try {
+    ticket = (await api("/ticket")).ticket;
+  } catch (err) {
+    if (gameEnded) return;
+    if (err.status === 403 || err.status === 404) rejoin(); // the server no longer knows us (e.g. it restarted)
+    else reconnectTimer = setTimeout(connect, 3000);       // the server is unreachable: keep trying
+    return;
+  }
+  source = new EventSource(`${BASE}/events?ticket=${encodeURIComponent(ticket)}`);
   for (const [name, handler] of Object.entries(handlers)) {
     source.addEventListener(name, (e) => handler(JSON.parse(e.data)));
   }
   source.onopen = () => $("status").classList.add("on");
   source.onerror = () => {
     $("status").classList.remove("on");
-    // The browser retries by itself, unless the server refused us (e.g. it restarted).
-    if (source.readyState === EventSource.CLOSED && !gameEnded) rejoin();
+    // A ticket works once, so the browser's own retry cannot reuse it: close and ask for a fresh one.
+    source.close();
+    if (!gameEnded) reconnectTimer = setTimeout(connect, 1500);
   };
 }
 

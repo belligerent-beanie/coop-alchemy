@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import threading
 import time
@@ -32,6 +33,9 @@ SESSION_SECONDS = 24 * 3600.0   # a session ends after this long without being u
 MAX_FAILURES = 5                # wrong passwords in a row before the account is locked for a while
 LOCKOUT_SECONDS = 60.0
 MAX_SESSIONS = 2000
+VERIFY_SECONDS = 24 * 3600.0    # an emailed link works this long; an account still unverified then is deleted
+MAX_EMAIL_LEN = 254
+EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]+$")
 
 
 def clean_username(raw: object) -> str:
@@ -54,6 +58,30 @@ def check_password(password: object, username: str = "") -> str:
     if username and password.casefold() == username.casefold():
         raise GameError(400, "the password must not be the same as the username")
     return password
+
+
+def clean_email(raw: object) -> tuple[str, str]:
+    """Validate an email address; returns (the address as typed, a key that treats aliases as the same mailbox).
+
+    The key lower-cases everything and drops a "+tag" from the name part, and for Gmail also ignores dots, so
+    a.b+x@gmail.com and ab@googlemail.com cannot be used to open several accounts on one mailbox.
+    """
+    if not isinstance(raw, str):
+        raise GameError(400, "the email address must be text")
+    email = raw.strip()
+    if not email.isascii() or len(email) > MAX_EMAIL_LEN or not EMAIL_RE.match(email):
+        raise GameError(400, "please enter a valid email address")
+    local, domain = email.rsplit("@", 1)
+    local, domain = local.lower().split("+")[0], domain.lower()
+    if domain in ("gmail.com", "googlemail.com"):
+        local, domain = local.replace(".", ""), "gmail.com"
+    if not local:
+        raise GameError(400, "please enter a valid email address")
+    return email, f"{local}@{domain}"
+
+
+def token_digest(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8", "ignore")).hexdigest()
 
 
 def key_of(username: str) -> str:
@@ -102,37 +130,128 @@ class AccountStore:
 
     # ---- sign up and log in --------------------------------------------
 
-    def register(self, raw_username: object, raw_password: object) -> str:
-        """Create an account; returns its username. 409 if the name is taken (ignoring case)."""
+    def register(self, raw_username: object, raw_password: object, raw_email: object = None) -> str:
+        """Create an account; returns its username. 409 if the name is taken (ignoring case).
+
+        With an email address the account starts unverified: it cannot log in until verify_email() succeeds, and it is
+        deleted after VERIFY_SECONDS if that never happens (so nobody can hold a name or an address for long).
+        """
         username = clean_username(raw_username)
         password = check_password(raw_password, username)
         key = key_of(username)
+        email, email_key = clean_email(raw_email) if raw_email is not None else ("", "")
         with self._lock:
             accounts = self._load()
-            if key in accounts:
-                raise GameError(409, "that username is taken")
-            if len(accounts) >= MAX_ACCOUNTS:
-                raise GameError(409, "this server has reached its limit on accounts")
+            self._claim_free(accounts, key, email_key)
         salt = secrets.token_hex(16)
         digest = self._hash(password, salt, self._iterations)  # slow, so done outside the lock
         with self._lock:
             accounts = self._load()
-            if key in accounts:
-                raise GameError(409, "that username is taken")
+            self._claim_free(accounts, key, email_key)
             accounts[key] = {"name": username, "salt": salt, "hash": digest,
                              "iterations": self._iterations, "created": self._clock()}
+            if email:
+                accounts[key].update(email=email, email_key=email_key, verified=False)
             self._save(accounts)
         return username
 
-    def login(self, raw_username: object, raw_password: object) -> tuple[str, str]:
-        """Check a username and password; returns (session token, username)."""
+    def _claim_free(self, accounts: dict[str, dict[str, Any]], key: str, email_key: str) -> None:
+        """Make sure a new account may use this username and email (call with the lock held; may drop stale pending ones).
+
+        A pending (unverified) account holding the same email is replaced, so someone cannot lock a victim out of
+        signing up by registering the victim's address first. A verified account is never replaced.
+        """
+        now = self._clock()
+        stale = [k for k, r in accounts.items() if r.get("verified") is False and now - r.get("created", 0) >= VERIFY_SECONDS]
+        if email_key:
+            stale += [k for k, r in accounts.items()
+                      if r.get("email_key") == email_key and r.get("verified") is False and k not in stale]
+        if stale:
+            for k in stale:
+                del accounts[k]
+            self._save(accounts)
+        if key in accounts:
+            raise GameError(409, "that username is taken")
+        if email_key and any(r.get("email_key") == email_key for r in accounts.values()):
+            raise GameError(409, "that email address already has an account")
+        if len(accounts) >= MAX_ACCOUNTS:
+            raise GameError(409, "this server has reached its limit on accounts")
+
+    # ---- email verification --------------------------------------------
+
+    def begin_verification(self, username: str) -> tuple[str, str] | None:
+        """A fresh single-use link token for a pending account: (email address, token); None if nothing is pending."""
+        return self._issue_token(lambda key, record: key == key_of(username))
+
+    def begin_verification_for_email(self, raw_email: object) -> tuple[str, str] | None:
+        """The same, found by address (for 'resend the email'); None if no pending account uses it."""
+        try:
+            _, email_key = clean_email(raw_email)
+        except GameError:
+            return None
+        return self._issue_token(lambda key, record: record.get("email_key") == email_key)
+
+    def _issue_token(self, wanted: Callable[[str, dict[str, Any]], bool]) -> tuple[str, str] | None:
+        with self._lock:
+            accounts = self._load()
+            now = self._clock()
+            for key, record in accounts.items():
+                if record.get("verified") is False and wanted(key, record) and now - record.get("created", 0) < VERIFY_SECONDS:
+                    token = secrets.token_urlsafe(24)
+                    record["verify"] = {"hash": token_digest(token), "expires": now + VERIFY_SECONDS}
+                    self._save(accounts)
+                    return str(record["email"]), token
+        return None
+
+    def verify_email(self, token: object) -> str:
+        """Activate the account a link token belongs to; returns its username, or raises 400 if it is wrong or too old."""
+        invalid = GameError(400, "this link is not valid any more; log in to ask for a new one")
+        if not isinstance(token, str) or not 16 <= len(token) <= 200:
+            raise invalid
+        digest = token_digest(token)
+        with self._lock:
+            accounts = self._load()
+            now = self._clock()
+            for record in accounts.values():
+                pending = record.get("verify")
+                if record.get("verified") is False and isinstance(pending, dict) \
+                        and hmac.compare_digest(str(pending.get("hash")), digest):
+                    if pending.get("expires", 0) <= now:
+                        raise invalid
+                    record["verified"] = True
+                    del record["verify"]
+                    self._save(accounts)
+                    return str(record["name"])
+        raise invalid
+
+    def set_verified(self, username: str) -> None:
+        """Mark an account's email as confirmed without a link (accounts_admin.py verify)."""
+        key = key_of(username)
+        with self._lock:
+            accounts = self._load()
+            if key not in accounts:
+                raise GameError(404, f"there is no account called {username!r}")
+            accounts[key]["verified"] = True
+            accounts[key].pop("verify", None)
+            self._save(accounts)
+
+    def unverified(self) -> list[str]:
+        with self._lock:
+            return sorted((r["name"] for r in self._load().values() if r.get("verified") is False), key=str.casefold)
+
+    def login(self, raw_username: object, raw_password: object, client: str = "") -> tuple[str, str]:
+        """Check a username and password; returns (session token, username).
+
+        Wrong-password lockouts are per (account, client address), so a stranger cannot lock you out."""
         if not isinstance(raw_username, str) or not isinstance(raw_password, str) \
                 or len(raw_password) > MAX_PASSWORD_LEN or len(raw_username) > 200:
             raise GameError(401, "wrong username or password")
         key = key_of(raw_username)
+        fail_key = f"{key}|{client}"
         now = self._clock()
         with self._lock:
-            count, until = self._failures.get(key, (0, 0.0))
+            self._drop_stale_pending()
+            count, until = self._failures.get(fail_key, (0, 0.0))
             if until > now:
                 raise GameError(429, f"too many wrong passwords; try again in {int(until - now) + 1} seconds")
             record = self._load().get(key)
@@ -142,14 +261,27 @@ class AccountStore:
         good = record is not None and hmac.compare_digest(digest, record["hash"])
         with self._lock:
             if not good:
-                count = self._failures.get(key, (0, 0.0))[0] + 1
+                count = self._failures.get(fail_key, (0, 0.0))[0] + 1
                 locked = now + LOCKOUT_SECONDS if count >= MAX_FAILURES else 0.0
-                self._failures[key] = (0 if locked else count, locked)
+                self._failures[fail_key] = (0 if locked else count, locked)
                 if len(self._failures) > 5000:
                     self._failures = {k: v for k, v in self._failures.items() if v[1] > now}
                 raise GameError(401, "wrong username or password")
-            self._failures.pop(key, None)
+            self._failures.pop(fail_key, None)
+            if record.get("verified") is False:  # told only once the password is right
+                raise GameError(403, "please confirm your email address first: open the link we sent you, "
+                                     "or ask for a new one below")
             return self._new_session(key, record["salt"]), record["name"]
+
+    def _drop_stale_pending(self) -> None:
+        """Delete accounts that never confirmed their email within VERIFY_SECONDS (call with the lock held)."""
+        accounts = self._load()
+        now = self._clock()
+        stale = [k for k, r in accounts.items() if r.get("verified") is False and now - r.get("created", 0) >= VERIFY_SECONDS]
+        if stale:
+            for k in stale:
+                del accounts[k]
+            self._save(accounts)
 
     def _new_session(self, key: str, salt: str) -> str:
         now = self._clock()
@@ -236,7 +368,7 @@ class AccountStore:
                 raise GameError(404, f"there is no account called {username!r}")
             accounts[key].update(salt=salt, hash=digest, iterations=self._iterations)
             self._save(accounts)
-            self._failures.pop(key, None)
+            self._failures = {k: v for k, v in self._failures.items() if not k.startswith(f"{key}|")}  # unlock it for everyone
 
     def is_admin(self, username: str) -> bool:
         """True for accounts an administrator has marked as admins (see accounts_admin.py make-admin)."""

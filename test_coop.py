@@ -30,6 +30,7 @@ from recipe_report import build_report
 from saves import SaveStore
 from recipes import RecipeError, depths, find_problems, load_recipes, parse_recipes, reachable
 from server import AlchemyServer, BASE_DIR
+from throttle import Throttle
 from state import DJINN, MAX_TILES, PALETTE, RECENT_SECONDS, TIME_UNLOCK_AT, UNLOCKED_BY, GameError, GameState
 
 RECIPES = BASE_DIR / "test_recipes.json"  # fixed test data, independent of the real recipes.json
@@ -828,7 +829,10 @@ class RegistryTests(unittest.TestCase):
                          ("friday-night", 0, 4, 5))
 
     def test_unnamed_games_get_numbers_and_unicode_names_still_work(self) -> None:
-        self.assertEqual([self.registry.create(None).name, self.registry.create("  ").name], ["Game 1", "Game 2"])
+        names = [self.registry.create(None).name, self.registry.create("  ").name]
+        self.assertEqual(len(set(names)), 2)
+        for name in names:
+            self.assertRegex(name, r"^[a-z0-9]{6}$")
         odd = self.registry.create("ゲーム")
         self.assertRegex(odd.slug, r"^[0-9a-f]{6}$")
         self.assertEqual(odd.name, "ゲーム")
@@ -1399,7 +1403,9 @@ class SSEClient:
 
     def __init__(self, port: int, slug: str, token: str) -> None:
         self.conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-        self.conn.request("GET", f"/g/{slug}/events?player={token}")
+        status, data = call(port, "POST", f"/g/{slug}/ticket", {"player": token})
+        ticket = data["ticket"] if status == 200 else "no-such-ticket"  # an unknown player gets the stream's 403
+        self.conn.request("GET", f"/g/{slug}/events?ticket={ticket}")
         self.resp = self.conn.getresponse()
         self.status = self.resp.status
 
@@ -1435,6 +1441,7 @@ def serve(registry: GameRegistry) -> tuple[AlchemyServer, int]:
     tmp = tempfile.TemporaryDirectory()
     accounts = AccountStore(Path(tmp.name) / "accounts.json", iterations=1000)  # few iterations: fast tests
     server = AlchemyServer(("127.0.0.1", 0), registry, BASE_DIR / "static", accounts)
+    server.register_throttle = Throttle(10_000, 1.0)  # the tests make many accounts from one address
     close = server.server_close
 
     def close_and_clean() -> None:
@@ -1776,7 +1783,7 @@ class ServerTests(unittest.TestCase):
         who = self.join(slug, "Ann")
         for headers in (phone, android):
             for path in ("/", "/games", f"/g/{slug}", "/g/never-existed", "/static/app.js", "/saved?name=a",
-                         f"/g/{slug}/events?player={who['token']}"):
+                         f"/g/{slug}/events?ticket=x"):
                 conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
                 conn.request("GET", path, headers=headers)
                 resp = conn.getresponse()

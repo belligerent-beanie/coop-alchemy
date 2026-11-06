@@ -212,7 +212,7 @@ class DraftStoreTests(unittest.TestCase):
     def test_waiting_proposals_close_when_the_game_gains_the_recipe(self) -> None:
         rid = self.store.create("Ann", BOOK, "air", "air", "Gale")["recipe"]["id"]
         self.store.promote("Ann", BOOK, rid, "")
-        data = json.loads((BASE_DIR / "test_recipes.json").read_text())
+        data = json.loads((BASE_DIR / "test_recipes.json").read_text(encoding="utf-8"))
         data["recipes"].append({"a": "air", "b": "air", "result": "dust"})
         self.assertEqual(self.store.queue(parse_recipes(data)), [])
         self.assertEqual(self.store.approved(BOOK)["proposals"], [])
@@ -233,7 +233,7 @@ class DraftStoreTests(unittest.TestCase):
         self.store.create("Ann", BOOK, "air", "air", "Gale")
         self.store.create("Ann", BOOK, "Gale", "fire", "Firestorm")
         self.store.create("Ann", BOOK, "air", "fire", "Smoke Signal")
-        data = json.loads((BASE_DIR / "test_recipes.json").read_text())
+        data = json.loads((BASE_DIR / "test_recipes.json").read_text(encoding="utf-8"))
         # An admin added "Gale" (under another id, same label) and the air + fire recipe.
         data["elements"]["gale"] = {"label": "Gale"}
         data["recipes"] += [{"a": "air", "b": "air", "result": "gale"}, {"a": "air", "b": "fire", "result": "dust"}]

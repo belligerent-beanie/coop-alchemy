@@ -8,6 +8,10 @@ Usage:
     python3 accounts_admin.py remove-admin <username>
     python3 accounts_admin.py make-bot <username>      an automated proposer: no limit on drafts or waiting proposals
     python3 accounts_admin.py remove-bot <username>
+    python3 accounts_admin.py invite create [--count N] [--note TEXT]   new single-use signup codes (shown once)
+    python3 accounts_admin.py invite list
+    python3 accounts_admin.py invite revoke <id>       deletes an unused code (ids are in `invite list`)
+    python3 accounts_admin.py verify <username>        confirm an account's email by hand (e.g. if mail is not arriving)
 Add --file path/to/accounts.json and --saves-dir path/to/saves if the server uses different ones.
 
 Resetting a password or deleting an account logs that account out of the server.
@@ -21,10 +25,31 @@ from pathlib import Path
 
 from accounts import AccountStore
 from drafts import DraftStore
+from invites import InviteStore
 from saves import SaveStore
 from state import GameError
 
 BASE_DIR = Path(__file__).resolve().parent
+
+
+def invite_command(invites: InviteStore, args: argparse.Namespace) -> int:
+    if args.action == "create":
+        codes = invites.create(args.count, args.note)
+        print("Give each code to one person. They are shown only now (only hashes are stored):")
+        print("\n".join(f"  {code}" for code in codes))
+    elif args.action == "revoke":
+        removed = invites.revoke(args.id)
+        print(f"Revoked {removed} unused code(s)." if removed else "No unused code has an id starting with that.")
+        return 0 if removed else 1
+    else:
+        rows = invites.listing()
+        for row in sorted(rows, key=lambda r: r["created"]):
+            state = f"used by {row['used_by']}" if row["used_by"] else "unused"
+            note = f"  ({row['note']})" if row["note"] else ""
+            print(f"{row['id']}  {state}{note}")
+        if not rows:
+            print("(no invite codes)")
+    return 0
 
 
 def main(argv: list[str]) -> int:
@@ -32,6 +57,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--file", default=str(BASE_DIR / "accounts.json"))
     parser.add_argument("--saves-dir", default=str(BASE_DIR / "saves"))
     parser.add_argument("--drafts-file", default=str(BASE_DIR / "drafts.json"))
+    parser.add_argument("--invites-file", default=str(BASE_DIR / "invites.json"))
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("list")
     sub.add_parser("reset").add_argument("username")
@@ -40,15 +66,29 @@ def main(argv: list[str]) -> int:
     sub.add_parser("remove-admin").add_argument("username")
     sub.add_parser("make-bot").add_argument("username")
     sub.add_parser("remove-bot").add_argument("username")
+    sub.add_parser("verify").add_argument("username")
+    invite = sub.add_parser("invite").add_subparsers(dest="action", required=True)
+    create = invite.add_parser("create")
+    create.add_argument("--count", type=int, default=1)
+    create.add_argument("--note", default="")
+    invite.add_parser("list")
+    invite.add_parser("revoke").add_argument("id")
     args = parser.parse_args(argv[1:])
     store = AccountStore(args.file)
     try:
-        if args.command == "list":
+        if args.command == "invite":
+            return invite_command(InviteStore(args.invites_file), args)
+        if args.command == "verify":
+            store.set_verified(args.username)
+            print(f"{args.username!r} can now log in.")
+        elif args.command == "list":
             names = store.usernames()
             admins = {n.casefold() for n in store.admins()}
             bots = {n.casefold() for n in store.bots()}
+            pending = {n.casefold() for n in store.unverified()}
             print("\n".join(n + ("  (admin)" if n.casefold() in admins else "")
-                            + ("  (bot)" if n.casefold() in bots else "") for n in names)
+                            + ("  (bot)" if n.casefold() in bots else "")
+                            + ("  (email not confirmed)" if n.casefold() in pending else "") for n in names)
                   if names else "(no accounts)")
         elif args.command in ("make-bot", "remove-bot"):
             store.set_bot(args.username, args.command == "make-bot")
