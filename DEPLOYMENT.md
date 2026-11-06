@@ -227,14 +227,23 @@ python3 server.py --host 127.0.0.1 --trusted-proxy 127.0.0.1 \
   no longer re-reads `accounts.json` on every request: it is parsed once and again only when the file changes (about
   50 microseconds per request at any size, down from 1.4 ms at 500 accounts and 15 ms at 5000). Signup, login and
   other changes still rewrite the whole file, which is fine at hundreds to low thousands of accounts.
-- Password reset by email is the natural next feature now that addresses are confirmed. It isn't built yet.
+- Email verification stays available but is off by default: it means storing an email address per player. Recovery works without it (above).
 
-### Account recovery and deletion
-There's no self-service password reset, only `accounts_admin.py` run by you. For strangers you need either
-email-based reset (so you need emails) or an explicit "no recovery, ask the admin" policy on the signup page.
-There's also no account deletion, so people can't remove themselves. That is a legal requirement in some
-regions (GDPR "right to erasure"), so build a "delete my account" action and decide what happens to
-leaderboard and draft entries that carry the username.
+### Account recovery and deletion (built, with no email needed)
+The server collects only a username and a password hash, and keeps it that way, so recovery does not use email:
+- **Forgot the password:** an administrator opens the operations page (`/ops`), clicks "New password" beside the account, and
+  gives the owner the temporary password shown once. The old password and logins stop working at once, and at the next login
+  the owner is made to choose their own. (`accounts_admin.py reset` does the same from the command line.) The owner has to
+  contact you out of band, so say how on your site.
+- **Changing a password:** "Account" on the home page (needs the current password; ends the account's other logins).
+- **Deleting an account:** "Account" on the home page, or an administrator from `/ops`, or `accounts_admin.py delete`. One routine
+  (`erasure.py`) removes the account, recipe drafts, daily scores and attempts, saved games nobody else played, and replaces the
+  name in shared saved games with "deleted player" and on the invite code it used. Credit on a recipe already added to
+  `recipes.json` is part of the recipe book and is edited by hand if someone asks. Log lines are not edited; they expire.
+- **Moderation:** from `/ops`, disable an account (its logins stop, nothing is deleted; reversible), end any running game, or delete an
+  account. Administrators can only be changed with `accounts_admin.py`, so a slip on the page cannot lock you out.
+- `/privacy` states what is stored and for how long. It is written from what the code does and says the activity log is deleted
+  after 14 days: keep that true (see Logging below), and add a way to reach you if you want one on that page.
 
 ### Logging, monitoring and alerting
 The access log is silenced (`log_message` is a no-op), so only the new auth lines exist. Decide where stderr

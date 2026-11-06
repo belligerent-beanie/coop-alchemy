@@ -330,11 +330,61 @@ loadSaved();
 setInterval(refresh, POLL_MS);
 setInterval(loadSaved, 15000); // a game that is resumed or expires drops off the list
 
-// Admins get a link to the promotion requests, with how many are waiting.
+// ---- account: change password, delete account ---------------------------------------------------
+
+let accountForced = false; // an administrator reset the password: the dialog cannot be dismissed until it is changed
+
+function openAccount(forced = false) {
+  accountForced = forced;
+  const dialog = $("account-dialog");
+  $("account-title").textContent = forced ? "Choose a new password" : "Account";
+  $("forced-note").hidden = !forced;
+  $("delete-box").hidden = forced;
+  $("account-close").hidden = forced;
+  if (!dialog.open) dialog.showModal();
+}
+
+$("account-open").addEventListener("click", () => openAccount(false));
+$("account-close").addEventListener("click", () => $("account-dialog").close());
+$("account-dialog").addEventListener("cancel", (e) => { if (accountForced) e.preventDefault(); }); // Escape
+
+$("password-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("pw-msg").textContent = "";
+  if ($("pw-new").value !== $("pw-new2").value) {
+    $("pw-msg").textContent = "The two new passwords are different.";
+    return;
+  }
+  try {
+    const data = await Auth.fetch("/account/change-password", { current: $("pw-current").value, new: $("pw-new").value });
+    Auth.set(data.session, Auth.user()); // every other login of this account just ended; this one carries on
+    $("password-form").reset();
+    accountForced = false;
+    $("account-dialog").close();
+  } catch (err) {
+    $("pw-msg").textContent = err.message;
+  }
+});
+
+$("delete-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("del-msg").textContent = "";
+  try {
+    await Auth.fetch("/account/delete", { password: $("del-password").value });
+    Auth.clear();
+    location.href = "/login";
+  } catch (err) {
+    $("del-msg").textContent = err.message;
+  }
+});
+
+// Admins get links to the promotion requests (with how many are waiting) and to operations.
 async function loadAdmin() {
   try {
     const me = await Auth.fetch("/me");
+    if (me.must_change_password && !accountForced) openAccount(true);
     if (!me.admin) return;
+    $("ops-link").hidden = false;
     $("admin-link").hidden = false;
     const data = await Auth.fetch("/admin/queue");
     $("admin-pending").textContent = data.proposals.length;

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Operations · Co-op Alchemy</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/phone-guard.js"></script>
+</head>
+<body class="ops">
+  <main id="ops-main">
+    <p><a href="/">← Home</a></p>
+    <h1>Operations</h1>
+    <p class="who">For administrators. Counts and names only: no passwords, emails, or addresses are shown here.
+      <button type="button" id="refresh" class="link">Refresh now</button> <span id="updated" class="muted"></span></p>
+    <p id="ops-error" class="error" role="alert"></p>
+
+    <section>
+      <h2>Status</h2>
+      <div id="stats" class="stat-grid"></div>
+      <p id="signup-line" class="muted"></p>
+    </section>
+
+    <section>
+      <h2>Games running now</h2>
+      <table id="games-table" class="ops-table">
+        <thead><tr><th>Name</th><th>Kind</th><th>Players</th><th>Found</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="no-games" class="muted" hidden>No games are running.</p>
+    </section>
+
+    <section>
+      <h2>Accounts</h2>
+      <p>
+        <input id="account-filter" type="search" placeholder="Find an account" aria-label="Find an account" maxlength="40">
+      </p>
+      <div id="temp-box" class="notice" hidden>
+        <p><strong>Temporary password for <span id="temp-for"></span>:</strong> <code id="temp-value"></code></p>
+        <p class="muted">Shown only once. Give it to the owner; their old password no longer works and they must choose
+          their own the next time they log in.</p>
+        <button type="button" id="temp-done">Done</button>
+      </div>
+      <table id="accounts-table" class="ops-table">
+        <thead><tr><th>Name</th><th>State</th><th>Joined</th><th>Actions</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="no-accounts" class="muted" hidden>No accounts match.</p>
+    </section>
+
+    <section id="invites-section">
+      <h2>Invite codes</h2>
+      <p id="invites-off" class="muted" hidden>Invite codes are not switched on. Start the server with
+        <code>--require-invite</code> to make signup need one.</p>
+      <div id="invites-on" hidden>
+        <form id="invite-form" class="inline-form">
+          <label>How many <input id="invite-count" type="number" min="1" max="100" value="1"></label>
+          <label>Note <input id="invite-note" maxlength="60" placeholder="who it is for (optional)"></label>
+          <button type="submit">Make codes</button>
+        </form>
+        <div id="new-codes" class="notice" hidden>
+          <p><strong>New codes</strong> (shown only now; each works once):</p>
+          <pre id="new-codes-list"></pre>
+          <button type="button" id="codes-done">Done</button>
+        </div>
+        <table id="invites-table" class="ops-table">
+          <thead><tr><th>Id</th><th>Note</th><th>State</th><th>Made</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script src="/static/auth.js"></script>
+  <script src="/static/ops.js"></script>
+</body>
+</html>

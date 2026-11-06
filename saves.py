@@ -22,6 +22,9 @@ SAVE_TTL_SECONDS = 3 * 24 * 3600
 SLUG_RE = re.compile(r"^[a-z0-9-]{1,64}$")
 
 
+DELETED_PLAYER = "deleted player"
+
+
 def normalise(text: str) -> str:
     return " ".join(text.split()).casefold()
 
@@ -133,6 +136,45 @@ class SaveStore:
                         raise GameError(500, f"could not delete the saved game {data['slug']!r}: {exc}") from exc
                     removed.append(data["slug"])
         return removed
+
+    def anonymize_player(self, username: str) -> tuple[list[str], list[str]]:
+        """Remove an account's name from every saved game it played in (used when the account is deleted).
+
+        A game nobody else played is deleted; in a game other people played the name is replaced by DELETED_PLAYER (as
+        player, creator and discoverer) and the game stays for them. Returns (ids deleted, ids rewritten).
+        """
+        wanted = normalise(username)
+        deleted, rewritten = [], []
+        for data in self._all():
+            if not self.has_player(data, username):
+                continue
+            path = self._path(data["slug"])
+            if path is None:
+                continue
+            others = {normalise(p) for p in data.get("players", []) if isinstance(p, str)} - {wanted}
+            try:
+                if not others:
+                    path.unlink(missing_ok=True)
+                    deleted.append(data["slug"])
+                    continue
+                players: list[str] = []
+                for name in data.get("players", []):
+                    name = DELETED_PLAYER if isinstance(name, str) and normalise(name) == wanted else name
+                    if name not in players:
+                        players.append(name)
+                data["players"] = players
+                if isinstance(data.get("creator"), str) and normalise(data["creator"]) == wanted:
+                    data["creator"] = ""  # nobody can save it any more, which is what "no creator" means
+                if isinstance(data.get("discovered"), dict):
+                    data["discovered"] = {eid: (DELETED_PLAYER if isinstance(by, str) and normalise(by) == wanted else by)
+                                          for eid, by in data["discovered"].items()}
+                tmp = path.with_name(path.name + ".tmp")
+                tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+                os.replace(tmp, path)
+                rewritten.append(data["slug"])
+            except OSError as exc:
+                raise GameError(500, f"could not update the saved game {data['slug']!r}: {exc}") from exc
+        return deleted, rewritten
 
     def purge(self) -> int:
         """Delete expired saves; returns how many saved games remain."""

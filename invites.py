@@ -106,6 +106,18 @@ class InviteStore:
                 self._save(codes)
             return len(gone)
 
+    def forget_user(self, username: str) -> int:
+        """Replace an account's name on the codes it used with a placeholder (used when the account is deleted)."""
+        with self._lock:
+            codes = self._load()
+            changed = [info for info in codes.values()
+                       if isinstance(info.get("used_by"), str) and info["used_by"].casefold() == username.casefold()]
+            for info in changed:
+                info["used_by"] = "(deleted)"
+            if changed:
+                self._save(codes)
+            return len(changed)
+
     # ---- use at signup -------------------------------------------------
 
     def claim(self, raw: object) -> str:

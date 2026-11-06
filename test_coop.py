@@ -1365,7 +1365,7 @@ class AccountTests(unittest.TestCase):
 
 
 class AdminToolTests(unittest.TestCase):
-    def test_deleting_an_account_also_deletes_its_saved_games(self) -> None:
+    def test_deleting_an_account_removes_its_solo_saves_and_its_name_from_shared_ones(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             accounts_file, saves_dir = Path(tmp) / "accounts.json", Path(tmp) / "saves"
             store = AccountStore(accounts_file, iterations=1000)
@@ -1386,15 +1386,20 @@ class AdminToolTests(unittest.TestCase):
             out = io.StringIO()
             with mock.patch("builtins.input", return_value="no"), contextlib.redirect_stdout(out):
                 self.assertEqual(accounts_admin.main(args), 1)
-            self.assertIn("'duo' (also played by Bob)", out.getvalue())  # the admin sees what will go
+            self.assertIn("'duo' (also played by Bob", out.getvalue())  # the admin sees what will happen to each
             self.assertEqual(len(saves.for_player("Ann")), 2)
             self.assertEqual(store.usernames(), ["Ann", "Bob"])  # answering no changes nothing
             out = io.StringIO()
             with mock.patch("builtins.input", return_value="yes"), contextlib.redirect_stdout(out):
                 self.assertEqual(accounts_admin.main(args), 0)
-            self.assertIn("and 2 saved game(s)", out.getvalue())
+            self.assertIn("1 saved game(s) deleted, 1 kept for the others", out.getvalue())
             self.assertEqual(store.usernames(), ["Bob"])
-            self.assertEqual([g["id"] for g in saves.for_player("Bob")], ["other"])
+            self.assertEqual(sorted(g["id"] for g in saves.for_player("Bob")), ["duo", "other"])  # Bob keeps the shared game
+            duo = saves.load("duo")
+            assert duo is not None
+            self.assertEqual(duo["players"], ["deleted player", "Bob"])
+            self.assertNotIn("Ann", json.dumps(duo))  # her name is gone from the creator and discoverer fields too
+            self.assertFalse(saves.exists("solo"))
             self.assertEqual(saves.for_player("Ann"), [])
 
 
@@ -1820,7 +1825,7 @@ class ServerTests(unittest.TestCase):
         status, data = call(self.port, "POST", "/register", {"username": "Zoe Z", "password": "zoe-pass-1"}, headers=none)
         self.assertEqual((status, data["username"]), (200, "Zoe Z"))
         session = {"X-Session": data["session"]}
-        self.assertEqual(call(self.port, "GET", "/me", headers=session)[1], {"username": "Zoe Z", "admin": False})
+        self.assertEqual(call(self.port, "GET", "/me", headers=session)[1], {"username": "Zoe Z", "admin": False, "must_change_password": False})
         self.assertEqual(call(self.port, "POST", "/register", {"username": "zoe z", "password": "zoe-pass-2"},
                               headers=none)[0], 409)
         self.assertEqual(call(self.port, "POST", "/register", {"username": "Q", "password": "zoe-pass-2"},

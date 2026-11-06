@@ -56,6 +56,24 @@ Limits, because the host is a Windows PC:
 Where to look when something seems wrong (all in `coop-alchemy-live`):
 `data\live.err.log` (server messages), `data\watchdog.log` (restarts), `deploys.log` (what was deployed when), `backups\`.
 
+## Day-to-day moderation: the operations page
+Log in as an administrator and open `/ops` (the home page shows an "Operations" button). It shows counts since the server started
+(accounts, logins, failed logins, sign-ups, rate-limited requests, server errors), the games running now, every account, and invite
+codes. Buttons that change things ask for a second click.
+
+| To do this | On `/ops` |
+|---|---|
+| A player forgot their password | **New password**: give them the temporary one shown once; they must pick their own at next login |
+| Lock someone out without deleting anything | **Disable** (and **Enable** to let them back). Their logins stop at once; a game they are in goes on until you **End game** |
+| Remove an account | **Delete**: also removes its drafts, daily scores and unshared saved games, and the name from shared ones |
+| Stop an abusive or stuck game | **End game** in the games list (it is not saved) |
+| Hand out invite codes (needs `--require-invite`) | **Make codes**; copy them from the notice, they are shown only once |
+
+Administrators cannot be disabled, deleted or reset on the page. Make someone an administrator (or remove the role) with
+`python accounts_admin.py make-admin <name>` / `remove-admin <name>` on the live data
+(`--file ..\coop-alchemy-live\data\accounts.json`). `accounts_admin.py` also has `list`, `verify`, `disable`, `enable`, `delete`
+and `reset` for when you are at the machine.
+
 ## What is stored and where
 `data\accounts.json` (usernames and password hashes, never passwords), `data\daily.json` (daily challenge scores),
 `data\drafts.json` (recipe drafts), `data\invites.json` (hashed invite codes, if used), `data\saves\` (saved games).

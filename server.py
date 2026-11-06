@@ -78,12 +78,14 @@ import mimetypes
 import os
 import queue
 import re
+import secrets
 import signal
 import socket
 import ssl
 import sys
 import threading
 import time
+from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -94,6 +96,7 @@ from captcha import ORIGIN as TURNSTILE_ORIGIN
 from captcha import Turnstile
 from daily import DailyStore
 from drafts import DraftStore
+from erasure import erase_account
 from games import IDLE_CLOSE_SECONDS, GameRegistry
 from hints import find_element
 from hotreload import restore_snapshot, write_snapshot
@@ -210,12 +213,22 @@ class AlchemyServer(ThreadingHTTPServer):
         self.resend_throttle = Throttle(10, 3600.0)  # "send the email again" requests per client address
         self.email_throttle = Throttle(3, 3600.0)    # verification emails per mailbox
         self.csp = build_csp(False)
+        self.started = time.time()
+        self.stats: Counter[str] = Counter()  # things that happened since the server started, for the operations page
+        self._stats_lock = threading.Lock()
         self.tickets = TicketStore()                 # one-time passes for event streams
         self.trusted_proxies: list = []              # addresses whose X-Forwarded-* headers are believed (--trusted-proxy)
+
+    def bump(self, counter: str) -> None:
+        with self._stats_lock:
+            self.stats[counter] += 1
 
     def handle_error(self, request: Any, client_address: Any) -> None:
         if isinstance(sys.exc_info()[1], (ConnectionError, TimeoutError, ssl.SSLError)):
             return  # a browser closing a tab is not worth a traceback
+        self.bump("server_errors")
+        failure = sys.exc_info()[1]
+        logging.getLogger("alchemy.server").error("unexpected error: %s: %s", type(failure).__name__, failure)
         super().handle_error(request, client_address)
 
 
@@ -316,6 +329,23 @@ class Handler(BaseHTTPRequestHandler):
                 self._static("laptop.html")
             elif path == "/login":
                 self._static("login.html")
+            elif path == "/privacy":
+                self._static("privacy.html")
+            elif path == "/ops":
+                self._static("ops.html")
+            elif path == "/ops/status":
+                self._admin()
+                self._json(200, self._ops_status())
+            elif path == "/ops/accounts":
+                self._admin()
+                self._json(200, {"accounts": self.server.accounts.listing()})
+            elif path == "/ops/games":
+                self._admin()
+                self._json(200, {"games": self.server.registry.overview(), "max_games": self.server.registry.max_games})
+            elif path == "/ops/invites":
+                self._admin()
+                invites = self.server.invites
+                self._json(200, {"enabled": invites is not None, "codes": invites.listing() if invites else []})
             elif path == "/healthz":  # for the watchdog and deploy checks: answers only if the server is really working
                 self._json(200, {"ok": True})
             elif path == "/auth-config":
@@ -327,7 +357,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._static("verify.html")
             elif path == "/me":
                 username = self._user()
-                self._json(200, {"username": username, "admin": self.server.accounts.is_admin(username)})
+                accounts = self.server.accounts
+                self._json(200, {"username": username, "admin": accounts.is_admin(username),
+                                 "must_change_password": accounts.must_change_password(username)})
             elif path == "/create":
                 self._static("create.html")
             elif path == "/create/data":
@@ -450,6 +482,12 @@ class Handler(BaseHTTPRequestHandler):
                 game = self.server.registry.resume(self._read_json().get("id"), self._user())
                 self._json(200, {"id": game.slug, "name": game.name, "url": f"/g/{game.slug}"})
                 return
+            if path.startswith("/ops/"):
+                self._json(200, self._ops_action(path, self._read_json()))
+                return
+            if path in ("/account/change-password", "/account/delete"):
+                self._account_self_service(path, self._read_json())
+                return
             if path.startswith(("/create/", "/admin/")):
                 self._json(200, self._drafts_action(path, self._read_json()))
                 return
@@ -532,6 +570,7 @@ class Handler(BaseHTTPRequestHandler):
             throttle = self.server.register_throttle if path == "/register" else self.server.login_throttle
             wait = throttle.allow(client)
             if wait:
+                self.server.bump("throttled")
                 log.warning("%s throttled client=%s", path[1:], client)
                 raise GameError(429, f"too many attempts from this address; try again in {int(wait) + 1} seconds")
         if path == "/register" and self.server.captcha is not None:
@@ -540,19 +579,120 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/register" and self.server.mailer is not None:
                 username = self._register(body)
                 self._send_verification(username)
+                self.server.bump("registrations")
                 self._json(200, {"verify_email": True, "username": username})
             elif path == "/register":
                 username = self._register(body)
+                self.server.bump("registrations")
                 self._json(200, {"session": accounts.session_for(username), "username": username})
             else:
                 session, username = accounts.login(body.get("username"), body.get("password"), client)
-                self._json(200, {"session": session, "username": username})
+                self.server.bump("logins")
+                reply: dict[str, Any] = {"session": session, "username": username}
+                if accounts.must_change_password(username):  # an administrator reset it: the page asks for a new one
+                    reply["must_change_password"] = True
+                self._json(200, reply)
         except GameError as exc:
             if path == "/login":
+                self.server.bump("login_failures")
                 log.warning("login failed status=%s client=%s user=%s", exc.status, client,
                             str(body.get("username"))[:40].encode("ascii", "replace").decode())
             raise
         log.info("%s ok client=%s user=%s", path[1:], client, username)
+
+    def _ops_status(self) -> dict[str, Any]:
+        """What the administrator's overview shows: counts only, nothing about individual players."""
+        server = self.server
+        games = server.registry.overview()
+        public = [g for g in games if not g["private"]]
+        return {
+            "uptime_seconds": int(time.time() - server.started),
+            "accounts": server.accounts.counts(),
+            "sessions": server.accounts.session_count(),
+            "games": {"running": len(public), "max": server.registry.max_games, "private": len(games) - len(public),
+                      "players": sum(int(g["players"]) for g in games)},
+            "since_start": dict(server.stats),
+            "signup": {"invite_required": server.invites is not None, "email_required": server.mailer is not None,
+                       "human_check": server.captcha is not None, "behind_proxy": bool(server.trusted_proxies)},
+        }
+
+    def _ops_action(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        """The administrator's actions. Administrators themselves can only be changed with accounts_admin.py."""
+        admin = self._admin()
+        server, accounts = self.server, self.server.accounts
+        if path in ("/ops/invites/create", "/ops/invites/revoke"):
+            if server.invites is None:
+                raise GameError(409, "invite codes are not switched on (start the server with --require-invite)")
+            if path == "/ops/invites/create":
+                count, note = body.get("count", 1), body.get("note", "")
+                if not isinstance(count, int) or isinstance(count, bool) or not isinstance(note, str):
+                    raise GameError(400, "count must be a whole number and note must be text")
+                log.info("admin %s made %s invite code(s)", admin, count)
+                return {"codes": server.invites.create(count, note)}
+            handle = body.get("id")
+            if not isinstance(handle, str):
+                raise GameError(400, "missing invite id")
+            return {"revoked": server.invites.revoke(handle)}
+        if path == "/ops/games/end":
+            slug = body.get("id")
+            if not isinstance(slug, str):
+                raise GameError(400, "missing game id")
+            server.registry.admin_end(slug)
+            log.info("admin %s ended game %s", admin, slug)
+            return {}
+        actions = ("verify", "enable", "disable", "reset-password", "delete")
+        action = path[len("/ops/accounts/"):] if path.startswith("/ops/accounts/") else ""
+        if action not in actions:
+            raise GameError(404, "not found")
+        username = body.get("username")
+        if not isinstance(username, str):
+            raise GameError(400, "missing username")
+        if action != "verify" and action != "enable" and accounts.is_admin(username):
+            raise GameError(403, "administrators cannot be changed here: take the admin role away with accounts_admin.py first")
+        log.info("admin %s: %s %s", admin, action, username)
+        if action == "verify":
+            accounts.set_verified(username)
+            return {}
+        if action in ("enable", "disable"):
+            accounts.set_disabled(username, action == "disable")
+            return {}
+        if action == "reset-password":
+            temporary = secrets.token_urlsafe(9)
+            accounts.set_password(username, temporary, must_change=True)
+            return {"temporary_password": temporary}
+        registry = server.registry
+        summary = erase_account(username, accounts=accounts, saves=registry.saves, drafts=server.drafts,
+                                daily=registry.daily, invites=server.invites)
+        server.bump("accounts_deleted")
+        return {"deleted": summary.as_json()}
+
+    def _account_self_service(self, path: str, body: dict[str, Any]) -> None:
+        """A logged-in player changing their own password or deleting their own account (both ask for the password again)."""
+        username = self._user()
+        client = self._client()
+        wait = self.server.login_throttle.allow(client)
+        if wait:
+            raise GameError(429, f"too many attempts from this address; try again in {int(wait) + 1} seconds")
+        accounts = self.server.accounts
+        try:
+            if path == "/account/change-password":
+                session = accounts.change_password(username, body.get("current"), body.get("new"), client)
+                log.info("password changed client=%s user=%s", client, username)
+                self._json(200, {"session": session})
+                return
+            accounts.login(username, body.get("password"), client)  # 403 or 429 unless the password is right
+        except GameError as exc:
+            if exc.status == 401:
+                # 401 must keep meaning "you are not logged in": the pages sign a person out when they see it, and a typo
+                # in a password box is not that.
+                raise GameError(403, "that password is not right") from None
+            raise
+        registry = self.server.registry
+        summary = erase_account(username, accounts=accounts, saves=registry.saves, drafts=self.server.drafts,
+                                daily=registry.daily, invites=self.server.invites)
+        self.server.bump("accounts_deleted")
+        log.info("account deleted client=%s user=%s", client, username)
+        self._json(200, {"deleted": summary.as_json()})
 
     def _send_verification(self, username: str) -> None:
         """Email a fresh confirmation link to a pending account (limited per mailbox)."""

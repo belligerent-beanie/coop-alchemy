@@ -36,6 +36,8 @@ this file in the same commit (and add a line to the [change log](#change-log)).
 | `GET /verify` | none | Opens the emailed confirmation link (the token is in the URL fragment, never sent to the server). |
 | `GET /create` | none | Create Recipes page (its data call needs a session). |
 | `GET /admin` | none | Recipe review page (its data calls need an admin session). |
+| `GET /ops` | none | The administrator's operations page (its data calls need an admin session). |
+| `GET /privacy` | none | What the server stores about players and for how long, in plain language. |
 | `GET /race/<id>` | none | A race's lobby and results page. |
 | `GET /g/<id>` | none | The game page (a "game isn't running" page if the game has ended). |
 | `GET /static/<file>` | none | Scripts, styles and element pictures (`/static/elements/<name>.png`). |
@@ -55,11 +57,13 @@ this file in the same commit (and add a line to the [change log](#change-log)).
 | Endpoint | Auth | Description |
 |---|---|---|
 | `POST /register` | none | `{"username", "password"}` plus, when the server asks for them (see `/auth-config`), `"invite"` (a single-use invite code), `"captcha"` (the Turnstile answer) and `"email"`. Returns `{"session", "username"}`, or `{"verify_email": true, "username"}` when the account must first confirm its email (no session yet). Errors: `400` invalid username, password or email; `403` invalid invite code; `409` name or email taken; `429`; `503` human check unavailable. |
-| `POST /login` | none | `{"username", "password"}` → `{"session", "username"}`. Errors: `401` wrong username or password; `403` the email is not confirmed yet; `429` too many attempts or locked. |
+| `POST /login` | none | `{"username", "password"}` → `{"session", "username"}`, plus `"must_change_password": true` when an administrator gave the account a temporary password (the page then asks for a new one). Errors: `401` wrong username or password; `403` the email is not confirmed yet, or the account was disabled by an administrator (said only once the password is right); `429` too many attempts or locked. |
 | `POST /logout` | session | `{}` → `{}`. Ends that session. |
-| `GET /me` | session | `{"username", "admin"}`. |
+| `GET /me` | session | `{"username", "admin", "must_change_password"}`. |
 | `POST /verify-email` | none | `{"token"}` → `{"username"}`: confirms the email address the link was sent to. `400` if the token is wrong, used or older than 24 hours. |
 | `POST /resend-verification` | none | `{"email"}` → `{"ok": true}`, always the same answer whether or not such an account exists. `404` ("email verification is not switched on") when the server does not use email verification. |
+| `POST /account/change-password` | session | `{"current", "new"}` → `{"session"}`. Checks the current password (`403` if it is wrong, never `401`, which only ever means "no valid login"; wrong ones count toward the lockout and the login limit), then sets the new one and ends every other login of the account; the returned session replaces the caller's. Also clears a temporary-password flag. `400` for a weak new password. |
+| `POST /account/delete` | session | `{"password"}` → `{"deleted": {"saves_deleted", "saves_kept_anonymised", "drafts", "daily_entries", "invite_codes"}}`. Deletes the caller's account and what it left behind: drafts, daily scores, saved games nobody else played, and the name in shared saved games (replaced by "deleted player"). Cannot be undone. `403` if the password is wrong. |
 
 ## Games
 
@@ -151,6 +155,27 @@ A ticket works once, so after a dropped connection a page asks for a fresh ticke
 | `POST /admin/handle` | session + admin | `{"id", "action", "reply"?}`: accept or reject a proposal. |
 | `POST /admin/reopen` | session + admin | `{"id"}`: reopen a handled proposal. |
 
+## Operations (administrators only)
+
+The page at `/ops` uses these. Every one needs a session whose account is an administrator (`403` otherwise). Administrators
+themselves cannot be disabled, deleted or reset here: remove the role with `accounts_admin.py` first. The responses hold counts
+and names, never password hashes, email addresses, login tokens or client addresses.
+
+| Endpoint | Auth | Description |
+|---|---|---|
+| `GET /ops/status` | session + admin | `{"uptime_seconds", "accounts": {"total", "pending", "disabled", "admins"}, "sessions", "games": {"running", "max", "private", "players"}, "since_start": {"logins", "login_failures", "registrations", "throttled", "accounts_deleted", "server_errors"}, "signup": {"invite_required", "email_required", "human_check", "behind_proxy"}}`. Counters are in memory and reset when the server restarts. |
+| `GET /ops/accounts` | session + admin | `{"accounts": [{"name", "admin", "bot", "pending", "disabled", "created"}]}`, by name. |
+| `GET /ops/games` | session + admin | `{"games": [{"id", "name", "players", "max_players", "found", "total", "genie", "kind", "private"}], "max_games"}`; `kind` is `game`, `daily` or `race`. |
+| `GET /ops/invites` | session + admin | `{"enabled", "codes": [{"id", "note", "created", "used_by", "used_at"}]}`. Codes are stored hashed, so they cannot be shown again. |
+| `POST /ops/invites/create` | session + admin | `{"count"?, "note"?}` → `{"codes": [...]}`, shown only now. `409` if invite codes are not switched on (`--require-invite`). |
+| `POST /ops/invites/revoke` | session + admin | `{"id"}` → `{"revoked": n}`: deletes an unused code. |
+| `POST /ops/games/end` | session + admin | `{"id"}` → `{}`: ends a running game for everyone, unsaved. `404` if it is not running. |
+| `POST /ops/accounts/verify` | session + admin | `{"username"}` → `{}`: confirms an email address by hand. |
+| `POST /ops/accounts/disable` | session + admin | `{"username"}` → `{}`: the account's logins stop at once and it cannot log in; nothing is deleted. A game it is in keeps going until it is ended. |
+| `POST /ops/accounts/enable` | session + admin | `{"username"}` → `{}`. |
+| `POST /ops/accounts/reset-password` | session + admin | `{"username"}` → `{"temporary_password"}`, shown only now. The old password and sessions stop; at the next login the owner must choose their own. |
+| `POST /ops/accounts/delete` | session + admin | `{"username"}` → `{"deleted": {...}}`, the same as `POST /account/delete`. |
+
 ## Server options
 
 Command-line options (`python server.py --help`) are described in the README's options table and in `DEPLOYMENT.md`. A test
@@ -160,6 +185,9 @@ checks that every option the server accepts appears in the README.
 
 Newest first. Add a line whenever an endpoint, event, status code or option is added, changed or removed.
 
+- **2026-11 (accounts and operations)**: `POST /account/change-password` and `POST /account/delete`; `GET /ops` and the `/ops/...`
+  endpoints for administrators; `GET /privacy`; `must_change_password` on `GET /me` and `POST /login`; `403` from `/login` for a
+  disabled account; the old `accounts_admin.py delete` now keeps shared saved games for the other players (name removed) instead of deleting them.
 - **2026-11**: `GET /healthz`; `POST /g/<id>/ticket` and ticket-based `events` (the old `?player=<token>` form is gone);
   `GET /auth-config`, `GET /verify`, `POST /verify-email`, `POST /resend-verification`, optional `invite`, `captcha` and `email`
   fields on `POST /register`; `403` from `/login` for an unconfirmed email; `POST /games` names a game randomly when no name is

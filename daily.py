@@ -295,6 +295,26 @@ class DailyStore:
 
     # ---- attempts and scores ---------------------------------------------------
 
+    def delete_user(self, username: str) -> int:
+        """Remove an account's scores and attempt counts from every stored day (used when the account is deleted).
+
+        Returns how many entries were removed.
+        """
+        key = key_of(username)
+        removed = 0
+        with self._lock:
+            data = self._load()
+            for entry in data["days"].values():
+                tiers = entry.get("tiers") if isinstance(entry, dict) else None
+                for tier in tiers.values() if isinstance(tiers, dict) else []:
+                    for field in ("scores", "attempts"):
+                        bucket = tier.get(field) if isinstance(tier, dict) else None
+                        if isinstance(bucket, dict) and bucket.pop(key, None) is not None:
+                            removed += 1
+            if removed:
+                self._save(data)
+        return removed
+
     def attempts(self, day: str, tier: str, username: str) -> int:
         """How many attempts this account has started in `tier` on `day`."""
         with self._lock:

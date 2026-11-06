@@ -104,6 +104,21 @@ class GameRegistry:
             self._games[slug] = game
             return game
 
+    def overview(self) -> list[dict[str, Any]]:
+        """Every running game for the administrator: its summary, its kind (game, daily or race) and whether it is private."""
+        with self._lock:
+            self._expire()
+            return [{**game.summary(), "kind": "daily" if game.challenge is not None else "race" if game.race is not None else "game",
+                     "private": game.private} for game in self._games.values()]
+
+    def admin_end(self, slug: str) -> None:
+        """End a running game for everyone, without saving it (the administrator's way; players use end())."""
+        with self._lock:
+            game = self._games.pop(slug, None)
+        if game is None:
+            raise GameError(404, "that game does not exist (it may have ended)")
+        game.close("an administrator", False)
+
     def end(self, slug: str, token: object, save: bool) -> dict[str, Any]:
         """End a running game on behalf of one of its players, optionally saving it first."""
         with self._lock:

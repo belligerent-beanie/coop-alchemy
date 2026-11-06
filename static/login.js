@@ -79,7 +79,7 @@ $("auth-form").addEventListener("submit", async (e) => {
       return;
     }
     Auth.set(data.session, data.username);
-    location.replace(nextPage());
+    location.replace(data.must_change_password ? "/" : nextPage()); // a temporary password is replaced on the home page
   } catch (err) {
     $("auth-error").textContent = err.name === "QuotaExceededError" || err.name === "SecurityError"
       ? "This browser is blocking site storage, so you can't stay logged in."

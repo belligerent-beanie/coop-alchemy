@@ -10,7 +10,8 @@
 <body class="home">
   <main id="home">
     <h1>⚗️ Co-op Alchemy</h1>
-    <p class="who">Logged in as <strong id="who"></strong> · <button type="button" id="logout" class="link">Log out</button></p>
+    <p class="who">Logged in as <strong id="who"></strong> · <button type="button" id="account-open" class="link">Account</button> ·
+      <button type="button" id="logout" class="link">Log out</button></p>
 
     <section id="daily" hidden>
       <h2>Daily challenge <span id="daily-date" class="muted"></span> <span id="daily-streak" class="streak" hidden></span></h2>
@@ -58,6 +59,7 @@
       <p class="home-links">
         <a class="btn" href="/create">Create recipes</a>
         <a id="admin-link" class="btn" href="/admin" hidden>Review proposals <span id="admin-pending" class="pill" hidden></span></a>
+        <a id="ops-link" class="btn" href="/ops" hidden>Operations</a>
       </p>
     </section>
 
@@ -90,7 +92,39 @@
       <p id="no-saved" class="muted" hidden>You have no saved games.</p>
       <p id="saved-msg" class="error" role="alert"></p>
     </section>
+    <p class="muted"><a href="/privacy">Privacy</a></p>
   </main>
+
+  <dialog id="account-dialog" class="dialog">
+    <h2 id="account-title">Account</h2>
+    <p id="forced-note" class="muted" hidden>An administrator gave you a temporary password. Choose your own to continue.</p>
+    <form id="password-form" autocomplete="off">
+      <label for="pw-current">Current password</label>
+      <input id="pw-current" type="password" autocomplete="current-password" maxlength="128" required>
+      <label for="pw-new">New password (at least 8 characters)</label>
+      <input id="pw-new" type="password" autocomplete="new-password" maxlength="128" required>
+      <label for="pw-new2">New password again</label>
+      <input id="pw-new2" type="password" autocomplete="new-password" maxlength="128" required>
+      <p id="pw-msg" class="error" role="alert"></p>
+      <div class="dialog-buttons">
+        <button type="submit">Change password</button>
+        <button type="button" id="account-close">Close</button>
+      </div>
+    </form>
+    <div id="delete-box">
+      <h2>Delete my account</h2>
+      <p class="muted">This removes your account, your recipe drafts and daily scores, and saved games nobody else played; your
+        name in shared saved games becomes "deleted player". It cannot be undone.
+        <a href="/privacy">What is stored</a></p>
+      <form id="delete-form" autocomplete="off">
+        <label for="del-password">Your password</label>
+        <input id="del-password" type="password" autocomplete="current-password" maxlength="128" required>
+        <label class="check"><input id="del-sure" type="checkbox" required> I understand this cannot be undone</label>
+        <p id="del-msg" class="error" role="alert"></p>
+        <div class="dialog-buttons"><button type="submit" class="danger">Delete my account</button></div>
+      </form>
+    </div>
+  </dialog>
   <script src="/static/auth.js"></script>
   <script src="/static/daily-common.js"></script>
   <script src="/static/home.js"></script>

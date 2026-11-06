@@ -299,6 +299,8 @@ class AccountStore:
             if record.get("verified") is False:  # told only once the password is right
                 raise GameError(403, "please confirm your email address first: open the link we sent you, "
                                      "or ask for a new one below")
+            if record.get("disabled") is True:
+                raise GameError(403, "this account has been disabled by an administrator")
             return self._new_session(key, record["salt"]), record["name"]
 
     def _drop_stale_pending(self) -> None:
@@ -343,8 +345,8 @@ class AccountStore:
             key, salt, last = entry
             now = self._clock()
             record = self._peek().get(key)
-            if now - last >= SESSION_SECONDS or record is None or record["salt"] != salt:
-                del self._sessions[token]  # expired, deleted account, or password reset
+            if now - last >= SESSION_SECONDS or record is None or record["salt"] != salt or record.get("disabled") is True:
+                del self._sessions[token]  # expired, deleted account, password reset, or disabled by an administrator
                 return None
             self._sessions[token] = (key, salt, now)
             return str(record["name"])
@@ -385,7 +387,32 @@ class AccountStore:
         with self._lock:
             return sorted((r["name"] for r in self._peek().values()), key=str.casefold)
 
-    def set_password(self, username: str, password: str) -> None:
+    def listing(self) -> list[dict[str, object]]:
+        """Every account as {"name", "admin", "bot", "pending", "disabled", "created"} (created is a date), by name.
+
+        Nothing private: no password hashes, and no email addresses.
+        """
+        with self._lock:
+            rows = [{"name": r["name"], "admin": r.get("admin") is True, "bot": r.get("bot") is True,
+                     "pending": r.get("verified") is False, "disabled": r.get("disabled") is True,
+                     "created": time.strftime("%Y-%m-%d", time.localtime(r["created"])) if isinstance(r.get("created"), (int, float)) else ""}
+                    for r in self._peek().values()]
+        return sorted(rows, key=lambda row: str(row["name"]).casefold())
+
+    def counts(self) -> dict[str, int]:
+        rows = self.listing()
+        return {"total": len(rows), "pending": sum(1 for r in rows if r["pending"]),
+                "disabled": sum(1 for r in rows if r["disabled"]), "admins": sum(1 for r in rows if r["admin"])}
+
+    def session_count(self) -> int:
+        """How many logins are active right now."""
+        with self._lock:
+            now = self._clock()
+            return sum(1 for _, _, last in self._sessions.values() if now - last < SESSION_SECONDS)
+
+    def set_password(self, username: str, password: str, must_change: bool = False) -> None:
+        """Replace an account's password (this ends all its sessions). With must_change the owner has to pick their own
+        at next login: used for the temporary password an administrator hands out."""
         key = key_of(username)
         with self._lock:
             if key not in self._peek():
@@ -398,8 +425,47 @@ class AccountStore:
             if key not in accounts:
                 raise GameError(404, f"there is no account called {username!r}")
             accounts[key].update(salt=salt, hash=digest, iterations=self._iterations)
+            if must_change:
+                accounts[key]["must_change"] = True
+            else:
+                accounts[key].pop("must_change", None)
             self._save(accounts)
             self._failures = {k: v for k, v in self._failures.items() if not k.startswith(f"{key}|")}  # unlock it for everyone
+
+    def change_password(self, username: str, current: object, new: object, client: str = "") -> str:
+        """Check the current password (with the same lockout as logging in), set the new one, and return a fresh session.
+
+        Every other session of the account ends, because the password's salt changes.
+        """
+        token, name = self.login(username, current, client)  # 401/403/429 exactly as at login
+        self.logout(token)
+        check_password(new, name)
+        self.set_password(name, str(new))
+        return self.session_for(name)
+
+    def must_change_password(self, username: str) -> bool:
+        """True if an administrator reset this password and the owner has not chosen a new one yet."""
+        with self._lock:
+            record = self._peek().get(key_of(username))
+            return bool(record and record.get("must_change") is True)
+
+    def set_disabled(self, username: str, disabled: bool) -> None:
+        """Lock an account out (its sessions stop working at once) or let it back in. Nothing is deleted."""
+        key = key_of(username)
+        with self._lock:
+            accounts = self._load()
+            if key not in accounts:
+                raise GameError(404, f"there is no account called {username!r}")
+            if disabled:
+                accounts[key]["disabled"] = True
+            else:
+                accounts[key].pop("disabled", None)
+            self._save(accounts)
+
+    def is_disabled(self, username: str) -> bool:
+        with self._lock:
+            record = self._peek().get(key_of(username))
+            return bool(record and record.get("disabled") is True)
 
     def is_admin(self, username: str) -> bool:
         """True for accounts an administrator has marked as admins (see accounts_admin.py make-admin)."""

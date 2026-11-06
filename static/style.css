@@ -657,6 +657,33 @@ header .spacer { flex: 1; }
 .dialog input, .dialog textarea { width: 100%; font: inherit; padding: 6px 8px; }
 .dialog .muted, #drafts .muted { color: var(--muted); font-size: 0.85rem; margin: 0 0 8px; }
 .dialog .error { color: #d33; min-height: 1.4em; margin: 6px 0 0; }
+.dialog label { display: block; margin-top: 8px; font-size: 0.9rem; }
+.dialog label.check { display: flex; gap: 8px; align-items: center; }
+.dialog label.check input { width: auto; }
+#delete-box { margin-top: 18px; padding-top: 6px; border-top: 1px solid var(--line); }
+.prose { max-width: 40rem; line-height: 1.55; }
+.prose li { margin-bottom: 6px; }
+
+/* ---- operations page ---- */
+body.ops { overflow: auto; }
+body.ops #ops-main { max-width: 64rem; margin: 0 auto; padding: 24px 16px 48px; display: flex; flex-direction: column; gap: 14px; }
+body.ops #ops-main > section { display: flex; flex-direction: column; gap: 8px; }
+body.ops h1 { font-size: 1.5rem; }
+body.ops h2 { font-size: 1.05rem; margin: 0; }
+@media (max-width: 640px) { .ops-table { display: block; overflow-x: auto; } }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: 10px; }
+.stat { display: flex; flex-direction: column; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat strong { font-size: 1.4rem; }
+.ops-table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+.ops-table th, .ops-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.ops-table td.actions { display: flex; flex-wrap: wrap; gap: 6px; border-bottom: 0; }
+.ops-table button { font-size: 0.85rem; padding: 3px 8px; }
+.ops-table button.danger, .dialog-buttons .danger { border-color: #b3261e; color: #b3261e; }
+.notice { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 10px; background: var(--panel); }
+.notice code, .notice pre { font-size: 1.05rem; user-select: all; }
+.inline-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin: 8px 0; }
+.inline-form input { font: inherit; padding: 4px 6px; }
+.inline-form input[type=number] { width: 5rem; }
 #drafts { margin: 8px 8px 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--tile); }
 #drafts summary { cursor: pointer; font-weight: 600; }
 #drafts[open] summary { margin-bottom: 8px; }

@@ -3,7 +3,9 @@
 Usage:
     python3 accounts_admin.py list
     python3 accounts_admin.py reset <username>     asks for a new password
-    python3 accounts_admin.py delete <username>    also deletes the saved games the account played in
+    python3 accounts_admin.py delete <username>    removes the account and what it left behind (see erasure.py)
+    python3 accounts_admin.py disable <username>   locks the account out without deleting anything
+    python3 accounts_admin.py enable <username>
     python3 accounts_admin.py make-admin <username>    lets the account review recipe promotion requests
     python3 accounts_admin.py remove-admin <username>
     python3 accounts_admin.py make-bot <username>      an automated proposer: no limit on drafts or waiting proposals
@@ -24,7 +26,9 @@ import sys
 from pathlib import Path
 
 from accounts import AccountStore
+from daily import DailyStore
 from drafts import DraftStore
+from erasure import erase_account
 from invites import InviteStore
 from saves import SaveStore
 from state import GameError
@@ -58,6 +62,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--saves-dir", default=str(BASE_DIR / "saves"))
     parser.add_argument("--drafts-file", default=str(BASE_DIR / "drafts.json"))
     parser.add_argument("--invites-file", default=str(BASE_DIR / "invites.json"))
+    parser.add_argument("--daily-file", default=str(BASE_DIR / "daily.json"))
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("list")
     sub.add_parser("reset").add_argument("username")
@@ -67,6 +72,8 @@ def main(argv: list[str]) -> int:
     sub.add_parser("make-bot").add_argument("username")
     sub.add_parser("remove-bot").add_argument("username")
     sub.add_parser("verify").add_argument("username")
+    sub.add_parser("disable").add_argument("username")
+    sub.add_parser("enable").add_argument("username")
     invite = sub.add_parser("invite").add_subparsers(dest="action", required=True)
     create = invite.add_parser("create")
     create.add_argument("--count", type=int, default=1)
@@ -81,6 +88,9 @@ def main(argv: list[str]) -> int:
         if args.command == "verify":
             store.set_verified(args.username)
             print(f"{args.username!r} can now log in.")
+        elif args.command in ("disable", "enable"):
+            store.set_disabled(args.username, args.command == "disable")
+            print(f"{args.username!r} is {'now locked out' if args.command == 'disable' else 'allowed in again'}.")
         elif args.command == "list":
             names = store.usernames()
             admins = {n.casefold() for n in store.admins()}
@@ -112,20 +122,22 @@ def main(argv: list[str]) -> int:
             saves = SaveStore(args.saves_dir)
             games = saves.for_player(args.username)
             if games:
-                print("These saved games will be deleted too:")
+                print("Saved games this account played in:")
                 for game in games:
                     others = [p for p in game["players"] if p.casefold() != args.username.casefold()]
-                    print(f"  - {game['name']!r}" + (f" (also played by {', '.join(others)})" if others else ""))
-            if input(f"Delete the account {args.username!r}"
-                     f"{' and ' + str(len(games)) + ' saved game(s)' if games else ''}? "
+                    print(f"  - {game['name']!r}" + (f" (also played by {', '.join(others)}: it stays for them, "
+                                                     "with this name removed)" if others else " (nobody else: it will be deleted)"))
+            if input(f"Delete the account {args.username!r} and its drafts, daily-challenge scores and saved games? "
                      "Type yes to confirm: ").strip().lower() != "yes":
                 print("Nothing was deleted.")
                 return 1
-            store.delete(args.username)
-            removed = saves.delete_for_player(args.username)
-            drafts = DraftStore(args.drafts_file).delete_user(args.username)
-            print(f"Deleted {args.username!r}" + (f" and {len(removed)} saved game(s)" if removed else "")
-                  + (f", and {drafts} draft recipe(s)" if drafts else "") + ".")
+            # the daily store only needs its file here, not the recipes
+            summary = erase_account(args.username, accounts=store, saves=saves, drafts=DraftStore(args.drafts_file),
+                                    daily=DailyStore(args.daily_file, None),  # type: ignore[arg-type]
+                                    invites=InviteStore(args.invites_file))
+            print(f"Deleted {args.username!r}: {summary.saves_deleted} saved game(s) deleted, "
+                  f"{summary.saves_kept_anonymised} kept for the others, {summary.drafts} draft recipe(s), "
+                  f"{summary.daily_entries} daily-challenge entries.")
     except GameError as exc:
         print(exc.message, file=sys.stderr)
         return 1

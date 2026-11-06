@@ -345,8 +345,8 @@ class HttpTests(unittest.TestCase):
             self.assertEqual(self.req("", method, path, {} if method == "POST" else None)[0], 401, path)
 
     def test_me_reports_admins(self) -> None:
-        self.assertEqual(self.req(self.admin, "GET", "/me")[1], {"username": "Rooty", "admin": True})
-        self.assertEqual(self.req(self.ann, "GET", "/me")[1], {"username": "Annie", "admin": False})
+        self.assertEqual(self.req(self.admin, "GET", "/me")[1], {"username": "Rooty", "admin": True, "must_change_password": False})
+        self.assertEqual(self.req(self.ann, "GET", "/me")[1], {"username": "Annie", "admin": False, "must_change_password": False})
 
     def test_create_and_promote_flow(self) -> None:
         status, data = self.req(self.ann, "GET", "/create/data")

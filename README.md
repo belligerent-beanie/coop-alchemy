@@ -459,6 +459,7 @@ skipped if `recipes.json` is missing.
 | `hotreload.py`, `reload.py` | Snapshot and restore for patching without stopping games; the command that triggers it. |
 | `accounts.py`, `accounts_admin.py` | Accounts, passwords, sessions, and the admin tool (admins and bots). |
 | `throttle.py`, `invites.py`, `captcha.py`, `mailer.py` | Rate limits and one-time event tickets, single-use invite codes, the Turnstile check, and verification email (see DEPLOYMENT.md). |
+| `erasure.py` | Deleting an account and everything kept under its name (used by the player, the admin page and the admin tool). |
 | `API.md` | The HTTP API: every endpoint, the event stream, errors and limits, plus a change log. `test_api_docs.py` fails if it drifts from the code. |
 | `ops/` , `OPS.md` | Running the live server: safe deploys with automatic rollback, backups, a watchdog, scheduled tasks, smoke test. See OPS.md. |
 | `bench_cursor.py` | Measures what shared cursors cost the server (`python3 bench_cursor.py`): connections, latency, delivery, CPU. |
@@ -468,11 +469,12 @@ skipped if `recipes.json` is missing.
 | `validate_recipes.py`, `recipe_report.py`, `recipe_flowchart.py` | Recipe tools. |
 | `static/` | The pages: login, home, game, and the "use a laptop" page. |
 | `static/create.*`, `static/admin.*` | The Create Recipes page and the admin review page. |
+| `static/ops.*`, `static/privacy.html` | The administrator's operations page, and the privacy page. |
 | `static/journal.js` | The in-game journal (elements, what made them, what they make). |
 | `static/elements/` | Element pictures, one PNG per element. |
 | `aigen/` | The optional AI suggestion tool (see *AI suggestions*); `python3 -m aigen --help`. |
 | `image_check.py` | Lists elements without a picture and pictures that match nothing. |
-| `test_coop.py`, `test_reload.py`, `test_drafts.py`, `test_daily.py`, `test_race.py`, `test_aigen.py`, `test_security.py`, `test_invites.py`, `test_signup_checks.py`, `test_keepalive.py`, `test_accounts_cache.py`, `test_cursors.py`, `test_ops.py`, `test_api_docs.py`, `test_recipes.json` | Tests and their fixed recipe set. |
+| `test_coop.py`, `test_reload.py`, `test_drafts.py`, `test_daily.py`, `test_race.py`, `test_aigen.py`, `test_security.py`, `test_invites.py`, `test_signup_checks.py`, `test_keepalive.py`, `test_accounts_cache.py`, `test_cursors.py`, `test_ops.py`, `test_api_docs.py`, `test_account_tools.py`, `test_recipes.json` | Tests and their fixed recipe set. |
 
 ## Troubleshooting
 
