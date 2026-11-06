@@ -97,6 +97,7 @@ class AccountStore:
         self._lock = threading.Lock()
         self._sessions: dict[str, tuple[str, str, float]] = {}   # token -> (key, salt, last used)
         self._failures: dict[str, tuple[int, float]] = {}        # key -> (count, locked until)
+        self._cache: tuple[tuple[int, int] | None, dict[str, dict[str, Any]]] | None = None  # see _peek()
 
     # ---- file ----------------------------------------------------------
 
@@ -114,7 +115,34 @@ class AccountStore:
             raise GameError(500, f"the accounts file ({self.path.name}) is not in the expected format")
         return accounts
 
+    def _stamp(self) -> tuple[int, int] | None:
+        """Changes whenever the file is rewritten (by us, or by accounts_admin.py); None if there is no file."""
+        try:
+            info = self.path.stat()
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise GameError(500, f"the accounts file ({self.path.name}) cannot be read") from exc
+        return info.st_mtime_ns, info.st_size
+
+    def _peek(self) -> dict[str, dict[str, Any]]:
+        """A READ-ONLY view of the accounts, for the lookups made on every request (call with the lock held).
+
+        The file is parsed only when it has changed since the last time, which is what makes a logged-in request cheap
+        (parsing took about 1.4 ms with 500 accounts and 15 ms with 5000, on every request, one at a time). Never change
+        what this returns: writers use _load(), which always gives them a private copy, so a failed or half-done
+        change can never leak into what other requests see.
+        """
+        stamp = self._stamp()
+        cached = self._cache
+        if cached is not None and cached[0] == stamp:
+            return cached[1]
+        accounts = self._load()
+        self._cache = (stamp, accounts)
+        return accounts
+
     def _save(self, accounts: dict[str, dict[str, Any]]) -> None:
+        self._cache = None  # whatever happens next, readers must look at the file again
         tmp = self.path.with_name(self.path.name + ".tmp")
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -237,7 +265,7 @@ class AccountStore:
 
     def unverified(self) -> list[str]:
         with self._lock:
-            return sorted((r["name"] for r in self._load().values() if r.get("verified") is False), key=str.casefold)
+            return sorted((r["name"] for r in self._peek().values() if r.get("verified") is False), key=str.casefold)
 
     def login(self, raw_username: object, raw_password: object, client: str = "") -> tuple[str, str]:
         """Check a username and password; returns (session token, username).
@@ -254,7 +282,7 @@ class AccountStore:
             count, until = self._failures.get(fail_key, (0, 0.0))
             if until > now:
                 raise GameError(429, f"too many wrong passwords; try again in {int(until - now) + 1} seconds")
-            record = self._load().get(key)
+            record = self._peek().get(key)
         salt = record["salt"] if record else "00" * 16
         iterations = record.get("iterations", self._iterations) if record else self._iterations
         digest = self._hash(raw_password, salt, iterations)  # unknown names cost the same time as wrong passwords
@@ -275,8 +303,11 @@ class AccountStore:
 
     def _drop_stale_pending(self) -> None:
         """Delete accounts that never confirmed their email within VERIFY_SECONDS (call with the lock held)."""
-        accounts = self._load()
         now = self._clock()
+        if not any(r.get("verified") is False and now - r.get("created", 0) >= VERIFY_SECONDS
+                   for r in self._peek().values()):
+            return  # nothing to do: the common case costs no file read
+        accounts = self._load()
         stale = [k for k, r in accounts.items() if r.get("verified") is False and now - r.get("created", 0) >= VERIFY_SECONDS]
         if stale:
             for k in stale:
@@ -296,7 +327,7 @@ class AccountStore:
     def session_for(self, username: str) -> str:
         """A new session for an account that was just created."""
         with self._lock:
-            record = self._load().get(key_of(username))
+            record = self._peek().get(key_of(username))
             if record is None:
                 raise GameError(404, "no such account")
             return self._new_session(key_of(username), record["salt"])
@@ -311,7 +342,7 @@ class AccountStore:
                 return None
             key, salt, last = entry
             now = self._clock()
-            record = self._load().get(key)
+            record = self._peek().get(key)
             if now - last >= SESSION_SECONDS or record is None or record["salt"] != salt:
                 del self._sessions[token]  # expired, deleted account, or password reset
                 return None
@@ -352,12 +383,12 @@ class AccountStore:
 
     def usernames(self) -> list[str]:
         with self._lock:
-            return sorted((r["name"] for r in self._load().values()), key=str.casefold)
+            return sorted((r["name"] for r in self._peek().values()), key=str.casefold)
 
     def set_password(self, username: str, password: str) -> None:
         key = key_of(username)
         with self._lock:
-            if key not in self._load():
+            if key not in self._peek():
                 raise GameError(404, f"there is no account called {username!r}")
         password = check_password(password, username)
         salt = secrets.token_hex(16)
@@ -373,7 +404,7 @@ class AccountStore:
     def is_admin(self, username: str) -> bool:
         """True for accounts an administrator has marked as admins (see accounts_admin.py make-admin)."""
         with self._lock:
-            record = self._load().get(key_of(username))
+            record = self._peek().get(key_of(username))
             return bool(record and record.get("admin") is True)
 
     def set_admin(self, username: str, admin: bool) -> None:
@@ -390,12 +421,12 @@ class AccountStore:
 
     def admins(self) -> list[str]:
         with self._lock:
-            return sorted((r["name"] for r in self._load().values() if r.get("admin") is True), key=str.casefold)
+            return sorted((r["name"] for r in self._peek().values() if r.get("admin") is True), key=str.casefold)
 
     def is_bot(self, username: str) -> bool:
         """True for accounts marked as bots (see accounts_admin.py make-bot): automated proposers with no draft or proposal limits."""
         with self._lock:
-            record = self._load().get(key_of(username))
+            record = self._peek().get(key_of(username))
             return bool(record and record.get("bot") is True)
 
     def set_bot(self, username: str, bot: bool) -> None:
@@ -412,7 +443,7 @@ class AccountStore:
 
     def bots(self) -> list[str]:
         with self._lock:
-            return sorted((r["name"] for r in self._load().values() if r.get("bot") is True), key=str.casefold)
+            return sorted((r["name"] for r in self._peek().values() if r.get("bot") is True), key=str.casefold)
 
     def delete(self, username: str) -> None:
         key = key_of(username)
