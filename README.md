@@ -453,6 +453,7 @@ skipped if `recipes.json` is missing.
 | `hotreload.py`, `reload.py` | Snapshot and restore for patching without stopping games; the command that triggers it. |
 | `accounts.py`, `accounts_admin.py` | Accounts, passwords, sessions, and the admin tool (admins and bots). |
 | `throttle.py`, `invites.py`, `captcha.py`, `mailer.py` | Rate limits and one-time event tickets, single-use invite codes, the Turnstile check, and verification email (see DEPLOYMENT.md). |
+| `ops/` , `OPS.md` | Running the live server: safe deploys with automatic rollback, backups, a watchdog, scheduled tasks, smoke test. See OPS.md. |
 | `bench_cursor.py` | Measures what shared cursors cost the server (`python3 bench_cursor.py`): connections, latency, delivery, CPU. |
 | `recipes.py`, `hints.py` | Recipe file loading and checking; hint logic. |
 | `race.py` | Race rooms: lobby, countdown, standings and the winner. |
@@ -464,7 +465,7 @@ skipped if `recipes.json` is missing.
 | `static/elements/` | Element pictures, one PNG per element. |
 | `aigen/` | The optional AI suggestion tool (see *AI suggestions*); `python3 -m aigen --help`. |
 | `image_check.py` | Lists elements without a picture and pictures that match nothing. |
-| `test_coop.py`, `test_reload.py`, `test_drafts.py`, `test_daily.py`, `test_race.py`, `test_aigen.py`, `test_security.py`, `test_invites.py`, `test_signup_checks.py`, `test_keepalive.py`, `test_accounts_cache.py`, `test_cursors.py`, `test_recipes.json` | Tests and their fixed recipe set. |
+| `test_coop.py`, `test_reload.py`, `test_drafts.py`, `test_daily.py`, `test_race.py`, `test_aigen.py`, `test_security.py`, `test_invites.py`, `test_signup_checks.py`, `test_keepalive.py`, `test_accounts_cache.py`, `test_cursors.py`, `test_ops.py`, `test_recipes.json` | Tests and their fixed recipe set. |
 
 ## Troubleshooting
 

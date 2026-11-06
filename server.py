@@ -316,6 +316,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._static("laptop.html")
             elif path == "/login":
                 self._static("login.html")
+            elif path == "/healthz":  # for the watchdog and deploy checks: answers only if the server is really working
+                self._json(200, {"ok": True})
             elif path == "/auth-config":
                 server = self.server
                 self._json(200, {"invite_required": server.invites is not None,
