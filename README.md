@@ -462,7 +462,7 @@ If you keep the project in git, add `accounts.json`, `saves/`, `*.pem`,
 
 ## Going live
 
-[LAUNCH.md](LAUNCH.md) is the step-by-step runbook from this PC to a public game behind a Cloudflare Tunnel (server, tunnel, first
+[HUMAN_TODO.md](HUMAN_TODO.md) lists what only a person can do (accounts, decisions, real-phone tests). [LAUNCH.md](LAUNCH.md) is the step-by-step runbook from this PC to a public game behind a Cloudflare Tunnel (server, tunnel, first
 administrator, invites, the admin lock, backups and a tested restore). [DEPLOYMENT.md](DEPLOYMENT.md) has the reasons and the security detail.
 
 ## Documentation rules
