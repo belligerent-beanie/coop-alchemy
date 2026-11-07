@@ -23,7 +23,7 @@ class CategoryTests(unittest.TestCase):
         names = [c["name"] for c in self.categories]
         self.assertEqual(len(names), len(set(names)))
         for c in self.categories:
-            self.assertTrue(c["name"] and c["description"] and c["elements"], c["name"])
+            self.assertTrue(c["name"] and c["description"], c["name"])   # a category may be empty: it waits for elements we add later
 
 
 class JournalCategoryTests(unittest.TestCase):
@@ -36,6 +36,7 @@ class JournalCategoryTests(unittest.TestCase):
         self.assertEqual(sum(c["total"] for c in tally), journal["progress"]["total"])
         self.assertEqual(sum(c["found"] for c in tally), journal["progress"]["found"])
         self.assertTrue(all(set(c) == {"name", "found", "total"} for c in tally))
+        self.assertTrue(all(c["total"] > 0 for c in tally), "a category with nothing in it is not shown")
         by_name = {c["name"]: c for c in tally}
         self.assertEqual(by_name["Materials & Substances"]["found"], 4, "the four starters")
         self.assertEqual({e["category"] for e in journal["elements"]}, {"Materials & Substances"})

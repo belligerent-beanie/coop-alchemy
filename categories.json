@@ -985,6 +985,46 @@
     "water gun",
     "windsurfer"
    ]
+  },
+  {
+   "name": "Emotions & Feelings",
+   "description": "Joy, fear, anger and everything in between.",
+   "elements": []
+  },
+  {
+   "name": "Colors",
+   "description": "Red, blue and the rest of the palette.",
+   "elements": []
+  },
+  {
+   "name": "Numbers & Shapes",
+   "description": "Counting, geometry and patterns.",
+   "elements": []
+  },
+  {
+   "name": "Games & Toys",
+   "description": "Board games, dolls, puzzles and playthings.",
+   "elements": []
+  },
+  {
+   "name": "Body Parts",
+   "description": "Hands, eyes, hearts and so on.",
+   "elements": []
+  },
+  {
+   "name": "Countries & Cultures",
+   "description": "Nations, languages, customs and landmarks.",
+   "elements": []
+  },
+  {
+   "name": "History & Society",
+   "description": "Eras, events, laws and how people live together.",
+   "elements": []
+  },
+  {
+   "name": "Language & Writing",
+   "description": "Words, alphabets and the written word.",
+   "elements": []
   }
  ]
 }
