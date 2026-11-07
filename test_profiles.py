@@ -281,5 +281,60 @@ class RegistryAndHttpTests(unittest.TestCase):
         self.assertEqual(registry.profiles.counters("Ann"), {})
 
 
+class ProfileViewTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.now = [10_000.0]
+        self.registry = GameRegistry(load_recipes(RECIPES), profiles=ProfileStore(None, clock=lambda: self.now[0]))
+        self.server, self.port = serve(self.registry)
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+        self.ann = login_as(self.port, "Ann")
+
+    def profile(self, session: str | None = None) -> tuple[int, Any]:
+        return call(self.port, "GET", "/profile", headers={"X-Session": self.ann if session is None else session})
+
+    def test_a_login_is_needed(self) -> None:
+        self.assertEqual(self.profile("")[0], 401)
+
+    def test_a_new_account_starts_at_zero_with_every_achievement_still_to_find(self) -> None:
+        status, data = self.profile()
+        self.assertEqual(status, 200)
+        self.assertEqual(data["username"], "Ann")
+        self.assertIsInstance(data["member_since"], int)
+        self.assertTrue(all(value == 0 for value in data["stats"].values()), data["stats"])
+        self.assertEqual(data["achievements"], {"earned": 0, "total": len(ACHIEVEMENTS) + len(BADGES), "recent": []})
+        self.assertEqual(data["solo"], {"found": 0, "total": 0, "complete": False})
+
+    def test_it_reports_the_accounts_own_counters_solo_progress_and_latest_achievements(self) -> None:
+        profiles = self.registry.profiles
+        profiles.bump("Ann", {"finds": 12, "games": 3, "epic_finds": 1, "emotes": 2, "struck": 1, "daily_done": 2, "race_done": 4, "race_wins": 1},
+                      {"daily_streak": 5})
+        self.now[0] += 100
+        self.registry.solo.record("Ann", {}, 40, 830, False, {"found_10"})
+        data = self.profile()[1]
+        stats = data["stats"]
+        self.assertEqual((stats["shared_finds"], stats["shared_games"], stats["epic_finds"], stats["emotes"], stats["struck"]), (12, 3, 1, 2, 1))
+        self.assertEqual((stats["daily_done"], stats["best_streak"], stats["races_done"], stats["race_wins"]), (2, 5, 4, 1))
+        self.assertEqual((data["solo"]["found"], data["solo"]["total"]), (40, 830))
+        achievements = data["achievements"]
+        self.assertEqual(achievements["earned"], len(set(profiles.achievements("Ann")) | set(self.registry.solo.achievements("Ann"))))
+        self.assertEqual(len(achievements["recent"]), 3)
+        times = [a["earned_at"] for a in achievements["recent"]]
+        self.assertEqual(times, sorted(times, reverse=True))
+        self.assertEqual(achievements["recent"][0]["id"], "found_10")   # the newest, earned last
+        self.assertEqual(set(achievements["recent"][0]), {"id", "icon", "title", "description", "earned_at"})
+
+    def test_it_shows_nobody_elses_numbers(self) -> None:
+        self.registry.profiles.bump("Bob", {"finds": 500, "games": 60})
+        bob = login_as(self.port, "Bob")
+        self.assertEqual(self.profile()[1]["stats"]["shared_finds"], 0)
+        self.assertEqual(self.profile(bob)[1]["stats"]["shared_finds"], 500)
+        self.assertNotIn("Bob", json.dumps(self.profile()[1]))
+
+    def test_the_account_knows_when_it_was_made(self) -> None:
+        self.assertIsNotNone(self.server.accounts.created_at("Ann"))
+        self.assertIsNone(self.server.accounts.created_at("nobody-here"))
+
+
 if __name__ == "__main__":
     unittest.main()

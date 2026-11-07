@@ -489,6 +489,13 @@ class AccountStore:
         with self._lock:
             return sorted((r["name"] for r in self._peek().values() if r.get("admin") is True), key=str.casefold)
 
+    def created_at(self, username: str) -> int | None:
+        """When the account was created (a unix time), or None for an account from before that was recorded."""
+        with self._lock:
+            record = self._peek().get(key_of(username))
+            created = record.get("created") if record else None
+            return int(created) if isinstance(created, (int, float)) and not isinstance(created, bool) else None
+
     def is_bot(self, username: str) -> bool:
         """True for accounts marked as bots (see accounts_admin.py make-bot): automated proposers with no draft or proposal limits."""
         with self._lock:

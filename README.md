@@ -112,6 +112,13 @@ vanishes. Click *Skip* to get the elements at once. For anyone who has asked the
   way to see the cutscene. `--mr-alchemy off` switches him off; `--mr-alchemy-chance` makes some games miss out.
 - His look (a 🎩 glyph) is a placeholder: the cutscene's pieces are in `static/app.js` (`MR_ALCHEMY`, `playVisitor`) and `static/style.css`.
 
+### Your profile
+
+The home page opens with a small card of your own numbers: elements found with others, games with others, how far you are in Solo, daily challenges
+finished (and your best run of days), races finished and won, achievements earned and the latest three, and, if they apply, how often Mr Alchemy has
+struck, your epic finds and the emotes you sent. It is built from what is already kept (`profiles.py`, `solo.py`) and shows nobody else's numbers or
+any ranking: the game is meant to be played together, not against each other.
+
 ### Achievements
 
 There are three lists, one on each tab of the home page: **Solo** (12, from a solo game's progress), **Multiplayer** (11) and **Challenges** (8). Earning one

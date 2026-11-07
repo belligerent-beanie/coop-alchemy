@@ -913,3 +913,11 @@ button.collection-tile:hover { border-color: var(--accent); }
 @keyframes vis-title { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: scale(1); } }
 @keyframes vis-fade { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { #visitor * { animation: none !important; transition: none !important; } }
+
+.profile { margin: 14px 0; border: 1px solid var(--line); border-radius: 12px; background: var(--tile); padding: 10px 14px; }
+.profile summary { cursor: pointer; font-weight: 600; list-style-position: inside; }
+.profile .stat-grid { grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr)); margin-top: 10px; gap: 8px; }
+.profile .stat { padding: 8px 10px; }
+.profile .stat strong { font-size: 1.2rem; }
+.profile .stat span { font-size: 0.8rem; color: var(--muted); }
+.profile p { margin: 8px 0 0; font-size: 0.9rem; }

@@ -29,6 +29,7 @@ HTTP API
                                            a picture's address with the element it belongs to, see pictures.py)
     GET  /pic/<token>.png               -> an element picture at its secret address
     GET  /terms                         -> the terms of use page, with the --contact line filled in (also on /privacy)
+    GET  /profile                       -> the caller's own numbers for the home page: {"username", "member_since", "solo", "stats", "achievements"}
     GET  /achievements                  -> {"solo": [...], "multiplayer": [...], "challenges": [...]}   every achievement for the caller, with when
                                            it was earned (see achievements.py and profiles.py)
     GET  /emotes                        -> {"emotes": [{"id", "label", "glyph"}]}   what players can send (see emotes.py)
@@ -105,8 +106,9 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from accounts import AccountStore, clean_email, key_of
 from captcha import ORIGIN as TURNSTILE_ORIGIN
 from captcha import Turnstile
+from achievements import ACHIEVEMENTS, BADGES, describe_badges
 from achievements import describe as describe_achievements
-from achievements import describe_badges
+from achievements import one as achievement_json
 from daily import DailyStore
 from emotes import emote_list
 from bots import BotPolicy, BotRunner, bot_loop
@@ -427,6 +429,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"games": self.server.registry.find_saved(self._user())})
             elif path == "/solo":
                 self._json(200, self._solo_status())
+            elif path == "/profile":
+                self._json(200, self._profile_view(self._user()))
             elif path == "/achievements":
                 username = self._user()
                 registry = self.server.registry
@@ -874,6 +878,27 @@ class Handler(BaseHTTPRequestHandler):
         and bot accounts (who never play it). Everyone else would learn the whole recipe book from the playground."""
         accounts = self.server.accounts
         return accounts.is_admin(username) or accounts.is_bot(username) or self.server.registry.solo.is_complete(username)
+
+    def _profile_view(self, username: str) -> dict[str, Any]:
+        """The caller's own numbers for the home page: what is already kept (counters, solo progress, achievements), nothing new, and
+        nothing comparing them with anybody."""
+        registry = self.server.registry
+        counters = registry.profiles.counters(username)
+        earned = {**registry.solo.achievements(username), **registry.profiles.achievements(username)}
+        recent = sorted(earned.items(), key=lambda item: (-item[1], item[0]))[:3]
+        return {
+            "username": username,
+            "member_since": self.server.accounts.created_at(username),
+            "solo": registry.solo.status(username),
+            "stats": {
+                "shared_finds": counters.get("finds", 0), "shared_games": counters.get("games", 0), "epic_finds": counters.get("epic_finds", 0),
+                "daily_done": counters.get("daily_done", 0), "best_streak": counters.get("daily_streak", 0),
+                "races_done": counters.get("race_done", 0), "race_wins": counters.get("race_wins", 0),
+                "struck": counters.get("struck", 0), "emotes": counters.get("emotes", 0),
+            },
+            "achievements": {"earned": len(earned), "total": len(ACHIEVEMENTS) + len(BADGES),
+                             "recent": [{**achievement_json(a), "earned_at": at} for a, at in recent]},
+        }
 
     def _solo_status(self) -> dict[str, Any]:
         username = self._user()

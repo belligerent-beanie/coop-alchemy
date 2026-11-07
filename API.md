@@ -79,6 +79,7 @@ this file in the same commit (and add a line to the [change log](#change-log)).
 | Endpoint | Auth | Description |
 |---|---|---|
 | `GET /solo` | session | `{"found", "total", "complete", "may_create", "achievements": [{"id", "icon", "title", "description", "earned_at"}]}`: the caller's solo-mode progress, whether Create Recipes is open to them (administrators and bot accounts always may), and every achievement (`earned_at` is a unix time, or null). |
+| `GET /profile` | session | `{"username", "member_since", "solo": {"found", "total", "complete"}, "stats": {"shared_finds", "shared_games", "epic_finds", "daily_done", "best_streak", "races_done", "race_wins", "struck", "emotes"}, "achievements": {"earned", "total", "recent": [{"id", "icon", "title", "description", "earned_at"}]}}`: the caller's own numbers for the home page (`member_since` is a unix time, or null for an account from before it was recorded; `recent` is the latest three). Nothing new is stored for it. |
 | `GET /achievements` | session | `{"solo": [...], "multiplayer": [...], "challenges": [...]}`: every achievement for the caller, each `{"id", "icon", "title", "description", "earned_at"}` (`earned_at` is a unix time, or null). The solo ones are the same as in `GET /solo`; the others are earned in shared games, the daily challenge and races. |
 | `GET /emotes` | session | `{"emotes": [{"id", "label", "glyph"}]}`: what players can send with `POST /g/<id>/emote` (the list lives in `emotes.py`). |
 | `POST /solo/start` | session | `{}` → `{"id", "url"}`: the caller's private solo game (the one running, or a new one that carries on from what they found; saved after every discovery). |
@@ -199,6 +200,7 @@ checks that every option the server accepts appears in the README.
 
 Newest first. Add a line whenever an endpoint, event, status code or option is added, changed or removed.
 
+- **2026-11 (profile)**: `GET /profile`.
 - **2026-11 (achievements)**: `GET /achievements`; the `achievement` event now also reaches players in shared games, daily challenges and races (to the one who earned it); option `--profile-file`; `profile` in the account-deletion summary.
 - **2026-11 (load)**: `load` in the `GET /ops/status` response, and the `lobby_full` counter in `since_start`.
 - **2026-11 (companions)**: `POST /ops/bots/add` and `POST /ops/bots/remove`; `companions` and `companions_on` in the `GET /ops/games` response; `POST /register` answers `409` for the cast's names too; options `--bots`, `--bots-max`. Companions appear in `players` and the `snapshot` exactly like people (the same `pid`, `name`, `color`).

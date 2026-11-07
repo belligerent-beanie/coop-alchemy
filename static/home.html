@@ -12,6 +12,13 @@
     <p class="who">Logged in as <strong id="who"></strong> · <button type="button" id="account-open" class="link">Account</button> ·
       <button type="button" id="logout" class="link">Log out</button></p>
 
+    <details id="profile" class="profile" hidden>
+      <summary><span id="profile-title">Your profile</span> <span id="profile-since" class="muted"></span></summary>
+      <div id="profile-stats" class="stat-grid"></div>
+      <p id="profile-more" class="muted"></p>
+      <p id="profile-recent" class="muted"></p>
+    </details>
+
     <div class="home-tabs" role="tablist" aria-label="Ways to play">
       <button type="button" class="home-tab" id="home-tab-solo" role="tab" data-tab="solo">Solo</button>
       <button type="button" class="home-tab" id="home-tab-multiplayer" role="tab" data-tab="multiplayer">Multiplayer</button>

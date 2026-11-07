@@ -324,6 +324,39 @@ window.addEventListener("pageshow", loadRaces);
 loadDaily();
 setInterval(loadDaily, 15000);
 
+/** The profile card: the player's own numbers, with nothing to compare them against. */
+async function loadProfile() {
+  try {
+    const p = await Auth.fetch("/profile");
+    const s = p.stats;
+    if ($("profile").hidden) $("profile").open = window.innerWidth >= 700;   // open on a laptop, a one-line summary on a phone
+    $("profile").hidden = false;
+    $("profile-since").textContent = p.member_since
+      ? `· here since ${new Date(p.member_since * 1000).toLocaleDateString(undefined, { month: "long", year: "numeric" })}` : "";
+    const tile = (value, label) => {
+      const box = el("div", "stat");
+      box.append(el("strong", "", String(value)), el("span", "", label));
+      return box;
+    };
+    $("profile-stats").replaceChildren(
+      tile(s.shared_finds, "elements found with others"),
+      tile(s.shared_games, "games with others"),
+      tile(p.solo.total ? `${p.solo.found} / ${p.solo.total}` : "0", "found in Solo"),
+      tile(s.daily_done, s.best_streak ? `daily challenges (best run ${s.best_streak})` : "daily challenges"),
+      tile(s.races_done, s.race_wins ? `races (${s.race_wins} won)` : "races"),
+      tile(`${p.achievements.earned} / ${p.achievements.total}`, "achievements"),
+    );
+    const more = [];
+    if (s.struck) more.push(`Struck by Mr Alchemy ${s.struck} time${s.struck === 1 ? "" : "s"}`);
+    if (s.epic_finds) more.push(`${s.epic_finds} epic find${s.epic_finds === 1 ? "" : "s"}`);
+    if (s.emotes) more.push(`${s.emotes} emote${s.emotes === 1 ? "" : "s"} sent`);
+    $("profile-more").textContent = more.join(" · ");
+    $("profile-more").hidden = more.length === 0;
+    $("profile-recent").textContent = p.achievements.recent.length
+      ? "Latest: " + p.achievements.recent.map((a) => `${a.icon} ${a.title}`).join(" · ") : "No achievements yet: your first is a few moves away.";
+  } catch (_) { /* the rest of the page still works */ }
+}
+
 /** An achievements list: the earned ones with their icon, the rest locked, and "earned / all" beside the heading. */
 function renderAchievements(listId, countId, items) {
   const earned = items.filter((a) => a.earned_at !== null).length;
@@ -373,7 +406,9 @@ $("solo-start").addEventListener("click", async () => {
 });
 loadSolo();
 loadAchievements();
-window.addEventListener("pageshow", () => { loadSolo(); loadAchievements(); });
+loadProfile();
+setInterval(loadProfile, 30000);
+window.addEventListener("pageshow", () => { loadSolo(); loadAchievements(); loadProfile(); });
 window.addEventListener("pageshow", loadDaily);  // coming back with the browser's back button
 
 refresh();

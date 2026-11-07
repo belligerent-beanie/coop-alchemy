@@ -676,6 +676,17 @@ def run(out: Path, chrome_path: str) -> int:
         print("\nHome page tabs and Solo mode on a phone")
         browser.navigate(base + "/#solo")
         time.sleep(1.0)
+        time.sleep(1.0)
+        report.check(not browser.evaluate("document.getElementById('profile').hidden"), "the home page shows the player's profile card")
+        report.check(browser.evaluate("document.querySelectorAll('#profile-stats .stat').length") == 6, "...with six numbers")
+        report.check("with others" in browser.evaluate("document.getElementById('profile-stats').textContent"), "...about playing with others")
+        report.check(browser.evaluate("document.documentElement.scrollWidth - innerWidth") <= 1, "...that fits the phone screen")
+        report.check(not browser.evaluate("document.getElementById('profile').open"), "...collapsed to one line on a phone")
+        browser.evaluate("document.querySelector('#profile summary').click()")
+        time.sleep(0.4)
+        report.check(browser.evaluate("document.documentElement.scrollWidth - innerWidth") <= 1, "...and still fits when opened")
+        browser.screenshot(out / "phone-profile.png")
+        browser.evaluate("document.querySelector('#profile summary').click()")
         report.check(browser.evaluate("[...document.querySelectorAll('.home-tab')].map(t => t.textContent).join()") == "Solo,Multiplayer,Challenges",
                      "the home page has Solo, Multiplayer and Challenges tabs")
         report.check(browser.evaluate("!document.getElementById('panel-solo').hidden && document.getElementById('panel-multiplayer').hidden"),
