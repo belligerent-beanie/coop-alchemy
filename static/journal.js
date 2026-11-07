@@ -203,6 +203,19 @@ function refreshJournal() {
   if (journalDialog.open) loadJournal().catch(() => { /* the next discovery tries again */ });
 }
 
+/** Opens the journal on one element's page (a long press on a phone, a right-click on a laptop; see app.js). */
+async function openJournalFor(id) {
+  try {
+    await loadJournal();
+    showJournalTab("list");
+    selectJournalElement(id);
+    $("journal-detail").scrollTop = 0;
+    if (!journalDialog.open) journalDialog.showModal();
+  } catch (err) {
+    toast(err.message, "error");
+  }
+}
+
 $("journal-open").addEventListener("click", async () => {
   try {
     await loadJournal();

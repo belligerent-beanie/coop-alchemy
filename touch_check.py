@@ -219,6 +219,21 @@ class Chrome:
         time.sleep(0.05)
         self.touch("touchEnd")
 
+    def long_press(self, x: float, y: float, hold: float = 0.8) -> None:
+        self.touch("touchStart", x, y)
+        time.sleep(hold)
+        self.touch("touchEnd")
+
+    def hold_drag(self, x1: float, y1: float, x2: float, y2: float, hold: float = 0.7, steps: int = 12) -> None:
+        """Hold still long enough to lift the element, then drag it."""
+        self.touch("touchStart", x1, y1)
+        time.sleep(hold)
+        for step in range(1, steps + 1):
+            time.sleep(0.02)
+            self.touch("touchMove", x1 + (x2 - x1) * step / steps, y1 + (y2 - y1) * step / steps)
+        time.sleep(0.05)
+        self.touch("touchEnd")
+
     def close(self) -> None:
         try:
             self.ws.close()
@@ -460,6 +475,75 @@ def run(out: Path, chrome_path: str) -> int:
         made = browser.evaluate("[...document.querySelectorAll('#workspace .tile')].map(t => t.dataset.element)")
         report.check("steam" in made and "water" not in made and "fire" not in made,
                      "dragging a tile onto another with a finger combines them (water + fire = steam)", str(made))
+
+        print("\nlong press and hold-to-drag on a phone")
+        dialog_open = "document.getElementById('journal-dialog').open"
+        shown = "(document.querySelector('#journal-detail h2') || {}).textContent || ''"
+        x, y = center_of(browser, '#workspace .tile[data-element="steam"]')
+        under = browser.evaluate(f"document.elementFromPoint({x}, {y}).closest('.tile').dataset.element")   # tiles may overlap
+        under_label = browser.evaluate(f"document.querySelector('#items .item[data-element=\"{under}\"]').dataset.search")
+        browser.long_press(x, y)
+        time.sleep(0.8)
+        report.check(browser.evaluate(dialog_open), "holding a tile opens the journal")
+        report.check(under_label.lower() in browser.evaluate(shown).lower(), "...on that tile's element", f"{under_label!r} vs {browser.evaluate(shown)!r}")
+        browser.evaluate("document.getElementById('journal-close').click()")
+        time.sleep(0.3)
+        tiles_before = browser.evaluate("document.querySelectorAll('#workspace .tile').length")
+        report.check(tiles_before >= 1 and not browser.evaluate(dialog_open), "closing it leaves the board as it was")
+        browser.evaluate("document.getElementById('items').scrollTop = 0")
+        time.sleep(0.3)
+        item_name = browser.evaluate("document.querySelector('#items .item:not([hidden])').dataset.element")
+        x, y = center_of(browser, "#items .item:not([hidden])", 0)
+        browser.long_press(x, y)
+        time.sleep(0.8)
+        report.check(browser.evaluate(dialog_open), "holding an element in the list and letting go opens its page")
+        report.check(browser.evaluate("document.querySelectorAll('#workspace .tile').length") == tiles_before,
+                     "...without adding a tile")
+        report.check(item_name.lower() in browser.evaluate(shown).lower() or browser.evaluate(shown) != "",
+                     "...showing an element", browser.evaluate(shown))
+        browser.evaluate("document.getElementById('journal-close').click()")
+        time.sleep(0.3)
+        box = browser.evaluate("(() => { const r = document.getElementById('workspace').getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; })()")
+        x, y = center_of(browser, "#items .item:not([hidden])", 1)
+        browser.hold_drag(x, y, box[0] + box[2] * 0.5, box[1] + box[3] * 0.8)
+        time.sleep(0.8)
+        report.check(browser.evaluate("document.querySelectorAll('#workspace .tile').length") == tiles_before + 1,
+                     "holding an element and dragging it puts it on the board")
+        report.check(not browser.evaluate(dialog_open), "...without opening its page")
+        scroll_before = browser.evaluate("document.getElementById('items').scrollTop")
+        x, y = center_of(browser, "#items .item:not([hidden])", 3)
+        browser.swipe(x, y, x, y - 160)
+        time.sleep(0.5)
+        report.check(browser.evaluate("document.getElementById('items').scrollTop") > scroll_before and not browser.evaluate(dialog_open),
+                     "a quick swipe on the list still just scrolls it")
+        browser.evaluate("document.getElementById('items').scrollTop = 0")
+
+        print("\nemotes, sound, discovery moments and awards on a phone")
+        report.check(browser.evaluate("!document.getElementById('emote-open').hidden"), "a shared game has an emote button")
+        x, y = center_of(browser, "#emote-open")
+        browser.tap(x, y)
+        time.sleep(0.4)
+        report.check(browser.evaluate("document.querySelectorAll('#emote-picker button').length") >= 6, "tapping it lists the emotes")
+        x, y = center_of(browser, "#emote-picker button", 0)
+        browser.tap(x, y)
+        time.sleep(1.0)
+        report.check(browser.evaluate("document.getElementById('emote-picker').hidden"), "choosing one closes the list")
+        report.check(browser.evaluate("!!document.querySelector('#key li .emote')"), "the emote shows next to your name")
+        report.check(browser.evaluate("document.documentElement.scrollWidth - innerWidth") <= 1, "the header with the new buttons fits the phone")
+        x, y = center_of(browser, "#sound")
+        browser.tap(x, y)
+        time.sleep(0.3)
+        report.check(browser.evaluate("document.getElementById('sound').textContent") == "🔇"
+                     and browser.evaluate("localStorage.getItem('alchemy-sound')") == "off", "the sound button turns sound off and remembers it")
+        browser.tap(x, y)
+        time.sleep(0.3)
+        report.check(browser.evaluate("document.getElementById('sound').textContent") == "🔊", "...and back on")
+        browser.evaluate("discoveryMoment({emoji: '✨', label: 'Test element'}, 'epic', true)")
+        time.sleep(0.3)
+        report.check(browser.evaluate("!!document.querySelector('#workspace .moment.epic')"), "an epic find shows a banner over the board")
+        browser.screenshot(out / "phone-moment.png")
+        time.sleep(2.6)
+        report.check(browser.evaluate("!document.querySelector('#workspace .moment')"), "...which goes away by itself")
         browser.screenshot(out / "phone-portrait-after-combine.png")
 
         # ---- phone, landscape ----
@@ -498,6 +582,22 @@ def run(out: Path, chrome_path: str) -> int:
         report.check(info["overflowX"] <= 1, "nothing makes the page wider than the screen", f"{info['overflowX']}px too wide")
         report.check("Drag" in info["hint"], "the board still says drag, not tap", info["hint"][:50])
         report.check(browser.evaluate("!!document.querySelector('#key .report')"), "the report button is there on a desktop too")
+        # right-click on an element opens its journal page (and never the browser's own menu)
+        wanted = browser.evaluate("document.querySelector('#items .item:not([hidden])').dataset.search")
+        prevented = browser.evaluate("""(() => {
+          const item = document.querySelector('#items .item:not([hidden])');
+          const r = item.getBoundingClientRect();
+          const event = new MouseEvent('contextmenu', {bubbles: true, cancelable: true, button: 2, clientX: r.left + 5, clientY: r.top + 5});
+          item.dispatchEvent(event);
+          return event.defaultPrevented;
+        })()""")
+        time.sleep(0.8)
+        report.check(prevented, "right-clicking an element does not show the browser's menu")
+        report.check(browser.evaluate("document.getElementById('journal-dialog').open"), "...it opens the element's journal page")
+        report.check(wanted.lower() in browser.evaluate("(document.querySelector('#journal-detail h2') || {}).textContent || ''").lower(),
+                     "...for that element", wanted)
+        browser.evaluate("document.getElementById('journal-close').click()")
+        time.sleep(0.3)
         browser.screenshot(out / "desktop-game.png")
 
         # ---- the other pages, on a phone ----

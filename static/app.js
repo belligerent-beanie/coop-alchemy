@@ -4,6 +4,8 @@
 
 const MIN_GAP_MS = 40;        // minimum time between cursor / move updates
 const DRAG_THRESHOLD = 5;     // pixels before a press on the list counts as a drag
+const LONG_PRESS_MS = 400;    // a finger held still this long on a tile or an element is a long press
+const LONG_PRESS_SLOP = 10;   // pixels a finger may wander and still be holding
 
 const $ = (id) => document.getElementById(id);
 
@@ -834,7 +836,7 @@ function onItemPointerDown(e) {
 function onItemPointerMove(e) {
   const d = itemDrag;
   if (!d || e.pointerId !== d.pointerId) return;
-  if (e.pointerType === "touch") return; // a finger on the list scrolls it or taps; dragging out of the list is for a mouse
+  if (e.pointerType === "touch" && !d.lifted) return; // a finger on the list scrolls it or taps; it drags only once a long press has lifted the element
   if (!d.ghost) {
     if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < DRAG_THRESHOLD) return;
     d.ghost = makeFace(elements.get(d.id), "div");
@@ -853,8 +855,13 @@ function onItemPointerUp(e) {
   itemDrag = null;
   setTarget(null);
   if (d.ghost) d.ghost.remove();
+  e.currentTarget.classList.remove("lifted");
   if (e.type === "pointercancel") return;
-  if (e.pointerType === "touch" && Math.hypot(e.clientX - d.startX, e.clientY - d.startY) > 12) return; // a swipe, not a tap
+  if (d.lifted && !d.ghost) { // held, then let go without dragging: show this element's page
+    peekElement(d.id);
+    return;
+  }
+  if (e.pointerType === "touch" && !d.lifted && Math.hypot(e.clientX - d.startX, e.clientY - d.startY) > 12) return; // a swipe, not a tap
 
   if (!d.ghost) { // a plain click or tap: drop a new tile somewhere near the middle
     addNewTile(d.id, 0.3 + Math.random() * 0.4, 0.3 + Math.random() * 0.4);
@@ -926,9 +933,83 @@ for (const type of ["pointerup", "pointercancel"]) {
   });
 }
 
-// No long-press menu on tiles and elements (it would pop up while someone holds a tile to move it).
+// ---- an element's page: long press on a phone, right-click on a laptop -----------------------------------
+//
+// Both open the journal on that element. On a phone, holding a tile for a moment opens it. Holding an element in the list
+// "lifts" it: let go and its page opens, or keep going and drag it onto the board (the list scrolls only while you swipe).
+
+let press = null;          // the long press being timed: {timer, id, item, holder, x, y, pointerId, ready}
+let lastTouchAt = -Infinity;
+
+function peekElement(id) {
+  if (genieArmed || !id || !me.token) return;
+  tooltip.hidden = true;
+  openJournalFor(id);
+}
+
+function cancelPress() {
+  if (press && press.timer) clearTimeout(press.timer);
+  press?.holder.classList.remove("lifted");
+  press = null;
+}
+
+function onLongPress() {
+  const p = press;
+  if (!p) return;
+  p.timer = null;
+  if (p.item) {
+    if (!itemDrag || itemDrag.pointerId !== p.pointerId) { press = null; return; }
+    itemDrag.lifted = true;           // from here the finger drags the element instead of scrolling the list
+    p.holder.classList.add("lifted");
+    navigator.vibrate?.(15);
+    return;
+  }
+  if (drag && drag.pointerId === p.pointerId && !drag.started) drag = null;   // nothing was grabbed: just stop treating it as a click
+  else if (drag) { press = null; return; }                                    // a tile is already being dragged
+  p.ready = true;                    // the page opens when the finger lifts (opening it under a held finger would click through)
+  p.holder.classList.add("lifted");
+  navigator.vibrate?.(15);
+}
+
+document.addEventListener("pointerdown", (e) => {
+  if (e.pointerType !== "touch") return;
+  lastTouchAt = performance.now();
+  cancelPress();
+  const holder = e.target.closest?.(".tile, .item");
+  if (!holder || genieArmed) return;
+  press = {
+    id: holder.dataset.element, item: holder.classList.contains("item"), holder,
+    x: e.clientX, y: e.clientY, pointerId: e.pointerId, timer: setTimeout(onLongPress, LONG_PRESS_MS),
+  };
+});
+
+document.addEventListener("pointermove", (e) => {
+  if (!press || e.pointerId !== press.pointerId) return;
+  if (itemDrag?.lifted) return;       // already lifted: this movement is the drag
+  if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > LONG_PRESS_SLOP) cancelPress();
+});
+
+for (const type of ["pointerup", "pointercancel"]) {
+  document.addEventListener(type, (e) => {
+    if (!press || e.pointerId !== press.pointerId) return;
+    const open = press.ready && type === "pointerup" ? press.id : null;
+    cancelPress();
+    if (open) peekElement(open);
+  });
+}
+
+// Once an element is lifted the page must not scroll under the finger.
+document.addEventListener("touchmove", (e) => {
+  if (itemDrag?.lifted && e.cancelable) e.preventDefault();
+}, { passive: false });
+
 document.addEventListener("contextmenu", (e) => {
-  if (e.target.closest?.(".tile, .item")) e.preventDefault();
+  const holder = e.target.closest?.(".tile, .item");
+  if (!holder) return;
+  e.preventDefault();   // never the browser's own menu here
+  if (performance.now() - lastTouchAt < 1500) return;   // a touch long press is handled above; Android also sends this event
+  if (itemDrag || drag) return;
+  peekElement(holder.dataset.element);
 });
 
 // On a touch screen the board says how to play with fingers.

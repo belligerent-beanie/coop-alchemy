@@ -515,6 +515,8 @@ body.home { overflow: auto; }
   touch-action: none;
 }
 .item:hover { border-color: var(--accent); }
+.item, .tile { -webkit-touch-callout: none; }
+.item.lifted, .tile.lifted { transform: scale(1.06); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35); border-color: var(--accent); }
 .item { position: relative; }
 /* Touch screens: a swipe on the element list scrolls it and a tap adds the element (dragging out of the list is for a mouse). */
 @media (pointer: coarse) {
