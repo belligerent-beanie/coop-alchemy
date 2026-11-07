@@ -28,6 +28,7 @@ HTTP API
     GET  /images                        -> {"pictures": {element id: address}}   administrators only (every other page gets
                                            a picture's address with the element it belongs to, see pictures.py)
     GET  /pic/<token>.png               -> an element picture at its secret address
+    GET  /terms                         -> the terms of use page, with the --contact line filled in (also on /privacy)
     GET  /emotes                        -> {"emotes": [{"id", "label", "glyph"}]}   what players can send (see emotes.py)
     POST /solo/start                    -> {"id", "url"}   the caller's private solo game: the one running, or a new one
                                            that carries on from what they found before (saved after every discovery)
@@ -237,6 +238,7 @@ class AlchemyServer(ThreadingHTTPServer):
         self.registry = registry
         self.accounts = accounts
         self.drafts = drafts or DraftStore(None)  # draft recipes and promotion requests (memory only if no file)
+        self.contact = ""      # how to reach the person who runs this server, shown on /terms and /privacy (--contact)
         self.public_base = ""  # how other players reach this server, e.g. http://192.168.1.20:8000 (set by main)
         self.static_dir = Path(static_dir).resolve()
         self.login_throttle = Throttle(20, 60.0)    # password guesses per client address
@@ -354,7 +356,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/login":
                 self._static("login.html")
             elif path == "/privacy":
-                self._static("privacy.html")
+                self._page("privacy.html")
+            elif path == "/terms":
+                self._page("terms.html")
             elif path == "/ops":
                 self._static("ops.html")
             elif path == "/ops/status":
@@ -940,6 +944,32 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _contact_html(self) -> str:
+        """The administrator's contact line for the terms and privacy pages: an email or web address becomes a link."""
+        contact = self.server.contact
+        if not contact:
+            return "ask the person who gave you the address of this game."
+        shown = html.escape(contact)
+        if re.fullmatch(r"[^@\s<>\"']+@[^@\s<>\"']+\.[^@\s<>\"']+", contact):
+            return f'<a href="mailto:{shown}">{shown}</a>.'
+        if re.fullmatch(r"https?://[^\s<>\"']+", contact):
+            return f'<a href="{shown}" rel="noopener">{shown}</a>.'
+        return f"<strong>{shown}</strong>."
+
+    def _page(self, name: str) -> None:
+        """A page with the administrator's contact line filled in where it says {{contact}}."""
+        try:
+            text = (self.server.static_dir / name).read_text(encoding="utf-8")
+        except OSError:
+            raise GameError(404, "not found") from None
+        data = text.replace("{{contact}}", self._contact_html()).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        self.wfile.write(data)
+
     def _static(self, relative: str) -> None:
         root = self.server.static_dir
         try:
@@ -1049,6 +1079,9 @@ def main() -> int:
     parser.add_argument("--trusted-proxy", action="append", default=[], metavar="IP_OR_CIDR",
                         help="a reverse proxy in front of this server (repeatable, e.g. 127.0.0.1): its "
                              "X-Forwarded-For / X-Forwarded-Proto headers are believed, so rate limits see real client addresses")
+    parser.add_argument("--contact", default=os.environ.get("ALCHEMY_CONTACT", ""),
+                        help="an email or web address players can reach you at, shown on the terms and privacy pages "
+                             "(or set ALCHEMY_CONTACT)")
     parser.add_argument("--require-invite", action="store_true",
                         help="signup needs a single-use invite code (make them with accounts_admin.py invite create)")
     parser.add_argument("--invites-file", default=str(BASE_DIR / "invites.json"),
@@ -1174,6 +1207,7 @@ def main() -> int:
         print("note: the recipe file has no 'Djinn' element, so the Djinn feature is switched off.")
     print(f"{saves.purge()} saved game(s) in {args.saves_dir} (kept for 3 days).")
     server.public_base = f"{scheme}://{lan_ip()}:{args.port}"
+    server.contact = " ".join(args.contact.split())[:200]
     restored = restore_snapshot(args.snapshot_file, registry, accounts)
     if restored is not None:
         print(f"Reloaded: {restored[0]} running game(s) and {restored[1]} login(s) carried over.")

@@ -35,6 +35,7 @@ this file in the same commit (and add a line to the [change log](#change-log)).
 | `GET /create` | none | Create Recipes page (its data call needs a session). |
 | `GET /admin` | none | Recipe review page (its data calls need an admin session). |
 | `GET /ops` | none | The administrator's operations page (its data calls need an admin session). |
+| `GET /terms` | none | The terms of use page. The administrator's contact line (`--contact`) is filled in where it says so; `/privacy` has it too. |
 | `GET /privacy` | none | What the server stores about players and for how long, in plain language. |
 | `GET /race/<id>` | none | A race's lobby and results page. |
 | `GET /g/<id>` | none | The game page (a "game isn't running" page if the game has ended). |

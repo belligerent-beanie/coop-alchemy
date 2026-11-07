@@ -611,7 +611,7 @@ def run(out: Path, chrome_path: str) -> int:
         # ---- the other pages, on a phone ----
         print("\nother pages on a phone (390 x 844)")
         browser.emulate(390, 844, phone=True)
-        for name, path in (("home", "/"), ("create", "/create"), ("privacy", "/privacy"), ("login", "/login")):
+        for name, path in (("home", "/"), ("create", "/create"), ("privacy", "/privacy"), ("terms", "/terms"), ("login", "/login")):
             browser.navigate(base + path)
             time.sleep(0.8)
             wide = browser.evaluate("document.documentElement.scrollWidth - innerWidth")

@@ -8,7 +8,7 @@
 # image name (docker run ... coop-alchemy --trusted-proxy 172.16.0.0/12) or as `command:` in docker-compose.yml.
 FROM python:3.13-slim
 
-ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 ALCHEMY_DATA_DIR=/data
 WORKDIR /app
 RUN useradd --create-home --uid 10001 alchemy && mkdir /data && chown alchemy /data
 COPY --chown=alchemy . /app

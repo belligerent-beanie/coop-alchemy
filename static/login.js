@@ -20,6 +20,7 @@ function setMode(register) {
   $("auth-submit").textContent = register ? "Create account" : "Log in";
   $("username-hint").hidden = !register;
   $("password-hint").hidden = !register;
+  $("terms-hint").hidden = !register;
   $("password2").hidden = !register;
   $("password2-label").hidden = !register;
   $("password2").required = register;

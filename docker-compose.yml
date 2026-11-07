@@ -26,6 +26,9 @@ services:
       - "CF-Connecting-IP"
       - "--max-games"
       - "10"
+      - "--require-invite"
+      - "--contact"
+      - "${CONTACT_ADDRESS:-}"
     # Optional gates (see DEPLOYMENT.md): add "--turnstile-site-key", "<key>" above and uncomment the secret below.
     # environment:
     #   - TURNSTILE_SECRET_KEY=${TURNSTILE_SECRET_KEY}

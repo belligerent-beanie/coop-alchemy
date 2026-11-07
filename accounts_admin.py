@@ -86,13 +86,15 @@ def create_admin(store: AccountStore, username: str) -> int:
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Manage Co-op Alchemy accounts")
-    parser.add_argument("--file", default=str(BASE_DIR / "accounts.json"))
-    parser.add_argument("--saves-dir", default=str(BASE_DIR / "saves"))
-    parser.add_argument("--drafts-file", default=str(BASE_DIR / "drafts.json"))
-    parser.add_argument("--invites-file", default=str(BASE_DIR / "invites.json"))
-    parser.add_argument("--daily-file", default=str(BASE_DIR / "daily.json"))
-    parser.add_argument("--solo-file", default=str(BASE_DIR / "solo.json"))
-    parser.add_argument("--reports-file", default=str(BASE_DIR / "reports.json"))
+    # In the container the data lives in a volume: ALCHEMY_DATA_DIR (set by the Dockerfile) points every default there.
+    home = Path(os.environ.get("ALCHEMY_DATA_DIR") or BASE_DIR)
+    parser.add_argument("--file", default=str(home / "accounts.json"))
+    parser.add_argument("--saves-dir", default=str(home / "saves"))
+    parser.add_argument("--drafts-file", default=str(home / "drafts.json"))
+    parser.add_argument("--invites-file", default=str(home / "invites.json"))
+    parser.add_argument("--daily-file", default=str(home / "daily.json"))
+    parser.add_argument("--solo-file", default=str(home / "solo.json"))
+    parser.add_argument("--reports-file", default=str(home / "reports.json"))
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("list")
     sub.add_parser("reset").add_argument("username")
