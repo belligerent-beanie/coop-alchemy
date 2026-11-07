@@ -15,6 +15,7 @@ saves
 accounts.json
 drafts.json
 daily.json
+solo.json
 invites.json
 reports.json
 reload_snapshot.json*
