@@ -78,6 +78,7 @@ class GameRegistry:
         self.pictures = pictures   # None: no element has a picture
         self.visitors = visitors   # when Mr Alchemy visits public games; None: never
         self.profiles = profiles or ProfileStore(None)   # account-wide counters and achievements (profiles.py)
+        self.lobby_seen = float("-inf")   # when someone last looked at the list of games (a person on the home page): companions host only for them
         self.bots: Any = None      # the BotRunner (bots.py), set by the server when companions are switched on
         self.max_games = max_games
         self.idle_seconds = idle_seconds
@@ -110,11 +111,12 @@ class GameRegistry:
         if len(mine) >= self.max_per_account:
             raise GameError(409, f"you already have a game running ({mine[0].name}): join it, or end it first")
 
-    def create(self, raw_name: object, creator: str = "") -> GameState:
+    def create(self, raw_name: object, creator: str = "", reserve: int = 0) -> GameState:
+        """Start a public game. `reserve` keeps that many of the game slots free (a companion hosting a room leaves one for a person)."""
         name = clean_game_name(raw_name)
         with self._lock:
             self._expire()
-            if sum(1 for g in self._games.values() if not g.private) >= self.max_games:
+            if sum(1 for g in self._games.values() if not g.private) >= self.max_games - max(0, reserve):
                 raise GameError(409, f"{self.max_games} games are already running: join one, or wait for one "
                                      f"to end (a game closes {round(self.idle_seconds / 60)} minutes after "
                                      f"the last player leaves)")
@@ -412,6 +414,7 @@ class GameRegistry:
         """
         with self._lock:
             self._expire()
+            self.lobby_seen = self._clock()
             return [{**game.summary(), "recent": bool(username) and game.recently_left(username),
                      **({"private": True} if game.private else {})}
                     for game in self._games.values()

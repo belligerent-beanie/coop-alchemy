@@ -176,10 +176,13 @@ function renderGames(data) {
     const row = el("tr");
     const remove = el("td");
     remove.append(plainButton("Remove", () => Auth.fetch("/ops/bots/remove", { id: c.game, name: c.name })));
-    row.append(el("td", c.name), el("td", c.game_name), el("td", c.level === 0 ? "keeps a presence" : "plays like a beginner"),
+    row.append(el("td", c.name), el("td", c.game_name + (c.hosting ? " (hosting)" : "")),
+      el("td", c.level === 0 ? "keeps a presence" : "plays like a beginner"),
       el("td", `${c.minutes} min`), remove);
     crew.append(row);
   }
+  const slot = $("host-button-slot");
+  if (!slot.firstChild) slot.append(plainButton("Open a room with a companion", () => Auth.fetch("/ops/bots/host", {})));
   $("companions-table").hidden = mine.length === 0;
   $("no-companions").hidden = mine.length !== 0;
   $("companions-state").textContent = data.companions_on ? "(on)" : "(off: start the server with --bots on)";

@@ -97,6 +97,11 @@ There is one per game at most, and 3 across the server (`--bots-max`).
   empties, or after its stay. They are not counted as people (Mr Alchemy needs two real ones, an empty game still expires), are not saved,
   and are not in hot-reload snapshots. They show up in lists exactly like anyone else; administrators see them on the Operations page, where
   *Add a companion* and *Remove* are the quick way to try one.
+- **Hosting.** If a person is looking at the lobby (the home page is fetching the list of games) and there is nothing in it to join, then after 15 to
+  60 seconds a companion opens a public room with an ordinary random name and waits in it, only keeping a presence (no discoveries while it is alone),
+  so the lobby shows a room with someone in it. If nobody joins within 4 to 10 minutes it leaves and the room closes; if someone does, it starts to play
+  and stays a normal visit, and when the people go it goes and the room closes. Only one such room at a time, never the last free game slot, and no
+  other for 5 to 15 minutes after one opens. The room has no creator, so whoever is in it may save it. The Operations page can open one on demand.
 - Nobody can register under a name in the cast. The terms say some players may be computer-controlled.
 
 ### Mr Alchemy
@@ -336,6 +341,7 @@ python3 server.py [--host 0.0.0.0] [--port 8000]
 | `--blocklist-file` | none | Extra blocked words for usernames, game names and recipe names, one per line (the built-in list is `blocklist.txt`). |
 | `--reports-file` | `reports.json` next to `server.py` | Where player reports wait for the administrators, for 14 days at most. |
 | `--bots` | `off` | Companions: computer-controlled players that keep a lone player company in a public game (below). |
+| `--bots-host` | `on` | With `--bots on`: a companion opens a room when a person is looking at a lobby with nothing in it to join. |
 | `--bots-max` | `3` | The most companions playing at once, across all games. |
 | `--mr-alchemy` | `on` | Mr Alchemy, the once-per-game visitor of public games (below). `off` switches him off. |
 | `--mr-alchemy-chance` | `1` | The chance (0 to 1) that a game gets his visit at all. |

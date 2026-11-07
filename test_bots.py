@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import random
 import statistics
+import tempfile
 import unittest
 from typing import Any
 
@@ -13,6 +14,7 @@ from bots import ASPECT, TICK_SECONDS, Bot, BotPolicy, BotRunner, Personality, P
 from cast import CAST
 from games import GameRegistry
 from namefilter import NameFilter
+from saves import SaveStore
 from state import MAX_PLAYERS, GameError, GameState
 from test_coop import RECIPES, call, drain, load_recipes, login_as, serve
 from visitor import MR_ALCHEMY, is_reserved
@@ -455,6 +457,159 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(self.runner.active(), [])
 
 
+# ---- companions opening rooms --------------------------------------------------------------------------------------------
+
+class HostingTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.now = [1000.0]
+        self.registry = GameRegistry(load_recipes(RECIPES), clock=lambda: self.now[0], max_games=3)
+        self.policy = BotPolicy(enabled=True)
+        self.runner = BotRunner(self.registry, self.policy, clock=lambda: self.now[0], rng=random.Random(7))
+        self.registry.bots = self.runner
+
+    def advance(self, seconds: float, looking: bool = True, step: float = 1.0) -> None:
+        end = self.now[0] + seconds
+        while self.now[0] < end:
+            if looking:
+                self.registry.list()   # a person on the home page: the list of games is fetched
+            self.now[0] += step
+            self.runner.tick()
+
+    def hosted(self) -> list[Any]:
+        return [b for b in self.runner.active() if b.hosting]
+
+    def test_nobody_looking_means_no_room(self) -> None:
+        self.advance(300, looking=False)
+        self.assertEqual(self.registry.public_games(), [])
+
+    def test_a_person_looking_at_an_empty_lobby_gets_a_room_with_a_companion_waiting(self) -> None:
+        self.advance(14)
+        self.assertEqual(self.registry.public_games(), [], "not at once")
+        self.advance(50)
+        rooms = self.registry.public_games()
+        self.assertEqual(len(rooms), 1)
+        room = rooms[0]
+        self.assertEqual(room.creator, "", "nobody is its creator, so anyone may save it")
+        self.assertEqual((len(room.virtual_players()), room.people_count()), (1, 0))
+        bot = self.hosted()[0]
+        self.assertTrue(bot.waiting)
+        self.assertEqual(bot.level, 0, "while it waits alone it only keeps a presence")
+        entry = self.registry.list()[0]
+        self.assertEqual(entry["players"], 1, "the lobby shows someone in the room")
+        self.assertNotIn("hosting", entry)
+        self.assertNotIn("bot", entry)
+
+    def test_the_room_looks_like_any_other_in_the_list(self) -> None:
+        human = self.registry.create("Human room", "someone")
+        human.join("someone")
+        keys = set(self.registry.list()[0])
+        human.close("someone", False)
+        self.advance(80)
+        self.assertEqual(set(self.registry.list()[0]), keys)
+
+    def test_not_when_there_is_already_somewhere_to_join(self) -> None:
+        lobby = self.registry.create("Busy", "ann")
+        assert lobby.subscribe(lobby.join("ann").token)
+        self.advance(200)
+        self.assertEqual(self.hosted(), [])
+        self.assertEqual(len(self.registry.public_games()), 1)
+
+    def test_one_hosted_room_at_a_time_and_a_pause_before_the_next(self) -> None:
+        self.advance(80)
+        self.assertEqual(len(self.hosted()), 1)
+        self.advance(200)
+        self.assertEqual(len(self.registry.public_games()), 1, "the waiting room is somewhere to join, so no second one opens")
+        self.hosted()[0].leave_at = self.now[0] - 1          # the host gives up and goes
+        self.advance(30)
+        self.assertEqual(self.registry.public_games(), [], "an empty room does not stay on the list")
+        self.advance(240)
+        self.assertEqual(self.registry.public_games(), [], "and no new one opens for a good while")
+        opened_again = False
+        for _ in range(100):   # up to 1000 s more: it opens once the pause is over and someone is still looking (then waits and may give up)
+            self.advance(10)
+            opened_again = opened_again or bool(self.registry.public_games())
+        self.assertTrue(opened_again)
+
+    def test_a_host_nobody_joins_gives_up_and_closes_the_room(self) -> None:
+        self.advance(70)
+        room = self.registry.public_games()[0]
+        self.advance(700, looking=False)
+        self.assertTrue(room.ended)
+        self.assertEqual(self.registry.public_games(), [])
+
+    def test_alone_in_its_room_it_makes_no_discoveries(self) -> None:
+        self.advance(70)
+        room = self.registry.public_games()[0]
+        before = dict(room.discovered())
+        self.advance(150, looking=False)
+        self.assertEqual(room.discovered(), before)
+
+    def test_when_someone_joins_the_host_starts_to_play_and_stays_a_normal_while(self) -> None:
+        self.advance(70)
+        room = self.registry.public_games()[0]
+        bot = self.hosted()[0]
+        bot.play_level = 1
+        assert room.subscribe(room.join("Visitor").token)
+        self.advance(5, looking=False)
+        self.assertFalse(bot.waiting)
+        self.assertEqual(bot.level, 1)
+        self.assertGreaterEqual(bot.leave_at - self.now[0], self.policy.stay_min - 10)
+
+    def test_when_the_people_leave_the_host_leaves_and_the_room_closes(self) -> None:
+        self.advance(70)
+        room = self.registry.public_games()[0]
+        player = room.join("Visitor")
+        sub = room.subscribe(player.token)
+        assert sub
+        self.advance(5, looking=False)
+        room.unsubscribe(sub)
+        self.advance(60, looking=False)
+        self.assertEqual(room.virtual_players(), [])
+        self.assertTrue(room.ended)
+
+    def test_a_person_can_save_a_room_a_companion_opened(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = GameRegistry(load_recipes(RECIPES), clock=lambda: self.now[0], saves=SaveStore(tmp))
+            runner = BotRunner(registry, self.policy, clock=lambda: self.now[0], rng=random.Random(7))
+            room = registry.create("", "", reserve=1)
+            runner._spawn(room, self.now[0], level=0)
+            player = room.join("Visitor")
+            self.assertTrue(room.subscribe(player.token))
+            self.assertEqual(registry.end(room.slug, player.token, True), {"saved": True})   # the creator is "": anyone may
+            self.assertEqual(len(registry.find_saved("Visitor")), 1)
+
+    def test_it_never_takes_the_last_game_slot(self) -> None:
+        for name in ("A", "B"):
+            self.registry.create(name, name.lower())
+        with self.assertRaises(GameError):
+            self.registry.create("", "", reserve=1)       # 2 of 3 slots used: one must stay free
+        self.registry.create("C", "c")                    # a person still can
+        with self.assertRaises(GameError):
+            self.registry.create("D", "d")
+
+    def test_the_switches_work(self) -> None:
+        self.policy.host = False
+        self.advance(200)
+        self.assertEqual(self.registry.public_games(), [])
+        self.policy.host, self.policy.max_total = True, 0
+        self.advance(200)
+        self.assertEqual(self.registry.public_games(), [])
+        self.policy.max_total, self.policy.enabled = 3, False
+        self.advance(200)
+        self.assertEqual(self.registry.public_games(), [])
+
+    def test_an_administrator_can_open_a_room_now(self) -> None:
+        bot = self.runner.host_now()
+        self.assertTrue(bot.hosting and bot.waiting)
+        self.assertEqual(self.runner.listing()[0]["hosting"], True)
+        self.assertEqual(self.runner.remove(name=bot.name), 1)
+        self.assertEqual(self.registry.public_games(), [], "removing the host of an empty room closes it")
+        small = GameRegistry(load_recipes(RECIPES), max_games=1)
+        runner = BotRunner(small, BotPolicy(enabled=True))
+        with self.assertRaises(GameError):
+            runner.host_now()
+
+
 # ---- the administrators' controls over HTTP --------------------------------------------------------------------------------
 
 class HttpTests(unittest.TestCase):
@@ -493,6 +648,17 @@ class HttpTests(unittest.TestCase):
         self.assertFalse(overview["companions_on"])
         self.assertEqual(self.req("/ops/bots/remove", {"name": added["name"]}, self.ann)[0], 403)
         self.assertEqual(self.req("/ops/bots/remove", {"name": added["name"]}, self.admin), (200, {"removed": 1}))
+
+    def test_opening_a_room_over_http(self) -> None:
+        self.registry.bots = BotRunner(self.registry, BotPolicy(enabled=False))
+        self.assertEqual(self.req("/ops/bots/host", {}, self.ann)[0], 403)
+        status, data = self.req("/ops/bots/host", {}, self.admin)
+        self.assertEqual(status, 200)
+        self.assertIn(data["name"], CAST)
+        game = self.registry.get(data["id"])
+        assert game is not None
+        self.assertEqual((game.people_count(), len(game.virtual_players())), (0, 1))
+        self.registry.bots.remove(data["id"])
 
 
 if __name__ == "__main__":

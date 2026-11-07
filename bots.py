@@ -171,6 +171,9 @@ class Bot:
         self.leave_at = now + stay_seconds
         self.leaving = False
         self.manual = False                         # put there by an administrator: the --bots setting does not send it away
+        self.hosting = False                        # it opened this room
+        self.waiting = False                        # ...and nobody has joined yet: it only keeps a presence, and gives up after a while
+        self.play_level = level                     # how it plays once someone joins
         self.done = False
         self.errors = 0
         self.empty_since: float | None = None       # since when nobody else was in the room
@@ -423,6 +426,16 @@ class BotPolicy:
     stay_min: float = 360.0             # a companion stays this long at the least...
     stay_max: float = 1800.0            # ...and this long at the most
     presence_share: float = 0.3         # the share that only keep a presence (level 0) rather than play (level 1)
+    # hosting: when a person is looking at a lobby with nothing in it to join, a companion opens a public room and waits in it
+    host: bool = True
+    host_max: int = 1                   # companion-hosted rooms at once
+    host_delay_min: float = 15.0        # the lobby has been empty for a person this long (at the earliest...)
+    host_delay_max: float = 60.0        # ...and this long at the most, before a room opens
+    host_wait_min: float = 240.0        # a host that nobody joins gives up and closes the room after this long (at the least...)
+    host_wait_max: float = 600.0        # ...and this long at the most
+    host_cooldown_min: float = 300.0    # after opening a room, no other for this long (at the least...)
+    host_cooldown_max: float = 900.0    # ...and this long at the most
+    lobby_view_seconds: float = 60.0    # "someone is looking" means the lobby list was fetched this recently
 
 
 class BotRunner:
@@ -436,6 +449,8 @@ class BotRunner:
         self._bots: list[Bot] = []
         self._lonely: dict[str, tuple[float, float]] = {}   # game -> (since when one person has been alone, how long until one joins)
         self._cooldown: dict[str, float] = {}               # game -> no new companion before this time
+        self._host_due: float | None = None                 # when a room will open for the person looking at an empty lobby
+        self._host_cooldown = 0.0                           # no room opens before this time
         self._next_manage = 0.0
 
     # -- the loop
@@ -449,6 +464,16 @@ class BotRunner:
             bot.step(now)
             if bot.done:
                 self._bots.remove(bot)
+                self._after(bot)
+
+    def _after(self, bot: Bot) -> None:
+        """A host that has gone from an empty room closes it, so no empty room stays on the list."""
+        game = bot.game
+        if bot.hosting and not game.ended and game.people_count() == 0:
+            try:
+                self.registry.admin_end(game.slug)
+            except GameError:
+                pass
 
     def _manage(self, now: float) -> None:
         policy = self.policy
@@ -457,7 +482,11 @@ class BotRunner:
         self._bots = [b for b in self._bots if b.game.slug in live and not b.done]
         for bot in self._bots:
             people = bot.game.people_count()
-            if people == 0:
+            if bot.hosting and bot.waiting and people >= 1:   # someone came: the host starts to play, and stays for a normal visit
+                bot.waiting = False
+                bot.level = bot.play_level
+                bot.leave_at = now + self.rng.uniform(policy.stay_min, policy.stay_max)
+            if people == 0 and not bot.waiting:
                 bot.empty_since = bot.empty_since if bot.empty_since is not None else now
             else:
                 bot.empty_since = None
@@ -468,7 +497,9 @@ class BotRunner:
                     self._cooldown[bot.game.slug] = now + self.rng.uniform(300.0, 900.0)
         if not policy.enabled:
             self._lonely.clear()
+            self._host_due = None
             return
+        self._maybe_host(now, games)
         busy = {b.game.slug for b in self._bots}
         for game in games:
             slug = game.slug
@@ -480,6 +511,45 @@ class BotRunner:
             if now - since >= wait:
                 self._lonely.pop(slug, None)
                 self._spawn(game, now)
+
+    def _maybe_host(self, now: float, games: list[GameState]) -> None:
+        """Open a room for a person who is looking at a lobby with nothing in it to join (and wait there a few minutes for company)."""
+        policy = self.policy
+        if not policy.host:
+            self._host_due = None
+            return
+        looking = now - self.registry.lobby_seen <= policy.lobby_view_seconds
+        companions = {b.game.slug for b in self._bots}
+        joinable = any(not g.ended and (g.people_count() >= 1 or g.slug in companions) and g.summary()["players"] < MAX_PLAYERS - 1
+                       for g in games)
+        hosted = sum(1 for b in self._bots if b.hosting)
+        if not looking or joinable or hosted >= policy.host_max or len(self._bots) >= policy.max_total or now < self._host_cooldown:
+            self._host_due = None
+            return
+        if self._host_due is None:
+            self._host_due = now + self.rng.uniform(policy.host_delay_min, policy.host_delay_max)
+        elif now >= self._host_due:
+            self._host_due = None
+            self.host_now(now)
+
+    def host_now(self, now: float | None = None) -> Bot:
+        """Open a public room with a companion in it, waiting for someone to join (the schedule uses this; so does an administrator)."""
+        policy = self.policy
+        now = self.clock() if now is None else now
+        game = self.registry.create("", "", reserve=1)   # a random room name, nobody as its creator (anyone may save it), a slot kept free
+        bot = self._spawn(game, now, level=0)
+        if bot is None:
+            try:
+                self.registry.admin_end(game.slug)
+            except GameError:
+                pass
+            raise GameError(409, "no companion could host a room")
+        bot.hosting, bot.waiting = True, True
+        bot.play_level = 0 if self.rng.random() < policy.presence_share else 1
+        bot.leave_at = now + self.rng.uniform(policy.host_wait_min, policy.host_wait_max)
+        self._host_cooldown = now + self.rng.uniform(policy.host_cooldown_min, policy.host_cooldown_max)
+        log.info("companion %s opened room %s", bot.name, game.name)
+        return bot
 
     def _spawn(self, game: GameState, now: float, level: int | None = None, manual: bool = False) -> Bot | None:
         policy = self.policy
@@ -508,7 +578,7 @@ class BotRunner:
 
     def listing(self) -> list[dict[str, Any]]:
         now = self.clock()
-        return [{"game": b.game.slug, "game_name": b.game.name, "name": b.name, "level": b.level,
+        return [{"game": b.game.slug, "game_name": b.game.name, "name": b.name, "level": b.level, "hosting": b.hosting,
                  "minutes": int((now - b.joined_at) // 60)} for b in self._bots]
 
     def add(self, slug: str, level: int | None = None) -> str:
@@ -529,6 +599,7 @@ class BotRunner:
                 bot.game.remove_virtual(bot.token)
                 bot.done = True
                 self._bots.remove(bot)
+                self._after(bot)
                 gone += 1
         return gone
 

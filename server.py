@@ -752,6 +752,13 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(report_id, str):
                 raise GameError(400, "missing report id")
             return {"dismissed": server.reports.dismiss(report_id)}
+        if path == "/ops/bots/host":
+            runner = server.registry.bots
+            if runner is None:
+                raise GameError(409, "companions are not set up on this server")
+            bot = runner.host_now()
+            log.info("admin %s had companion %s open room %s", admin, bot.name, bot.game.slug)
+            return {"id": bot.game.slug, "name": bot.name}
         if path in ("/ops/bots/add", "/ops/bots/remove"):
             runner = server.registry.bots
             if runner is None:
@@ -1167,6 +1174,8 @@ def main() -> int:
                         help="at the latest, minutes of two or more players together before he comes (default 15)")
     parser.add_argument("--bots", choices=("on", "off"), default="off",
                         help="companions: computer-controlled players that keep a lone player company in a public game (default off)")
+    parser.add_argument("--bots-host", choices=("on", "off"), default="on",
+                        help="with --bots on: a companion opens a room when a person is looking at a lobby with nothing in it to join (default on)")
     parser.add_argument("--bots-max", type=int, default=3,
                         help="the most companions playing at once, across all games (default 3)")
     parser.add_argument("--require-invite", action="store_true",
@@ -1301,7 +1310,8 @@ def main() -> int:
     print(f"{saves.purge()} saved game(s) in {args.saves_dir} (kept for 3 days).")
     server.public_base = f"{scheme}://{lan_ip()}:{args.port}"
     server.contact = " ".join(args.contact.split())[:200]
-    registry.bots = BotRunner(registry, BotPolicy(enabled=args.bots == "on", max_total=max(0, args.bots_max)))
+    registry.bots = BotRunner(registry, BotPolicy(enabled=args.bots == "on", max_total=max(0, args.bots_max),
+                                                                   host=args.bots_host == "on"))
     restored = restore_snapshot(args.snapshot_file, registry, accounts)
     if restored is not None:
         print(f"Reloaded: {restored[0]} running game(s) and {restored[1]} login(s) carried over.")

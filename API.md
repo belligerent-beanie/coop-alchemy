@@ -181,6 +181,7 @@ and names, never password hashes, email addresses, login tokens or client addres
 | `GET /ops/invites` | session + admin | `{"enabled", "codes": [{"id", "note", "created", "used_by", "used_at"}]}`. Codes are stored hashed, so they cannot be shown again. |
 | `POST /ops/invites/create` | session + admin | `{"count"?, "note"?}` → `{"codes": [...]}`, shown only now. `409` if invite codes are not switched on (`--require-invite`). |
 | `POST /ops/invites/revoke` | session + admin | `{"id"}` → `{"revoked": n}`: deletes an unused code. |
+| `POST /ops/bots/host` | session + admin | `{}` → `{"id", "name"}`: a companion opens a public room now and waits in it (the room has a random name and no creator, so anyone in it may save it). `409` if no game slot can be spared (one is always kept free for people) or no companion could host. |
 | `POST /ops/bots/add` | session + admin | `{"id", "level"?}` → `{"name"}`: puts a companion (0 keeps a presence, 1 plays like a beginner; random if left out) in a running public game. `409` if no seat can be spared, `404` if the game is not a running public game. |
 | `POST /ops/bots/remove` | session + admin | `{"id"?, "name"?}` → `{"removed"}`: takes companions out at once: those of one game, one by name, or all. |
 | `POST /ops/games/visit` | session + admin | `{"id"}` → `{"gave": [labels]}`: sends Mr Alchemy to a running public game now, whatever the schedule and the number of players. `404` if it is not running, `409` for a private game or one with nothing left to find. |
@@ -200,6 +201,7 @@ checks that every option the server accepts appears in the README.
 
 Newest first. Add a line whenever an endpoint, event, status code or option is added, changed or removed.
 
+- **2026-11 (hosting)**: `POST /ops/bots/host`; the `companions` entries of `GET /ops/games` have `hosting`; option `--bots-host`.
 - **2026-11 (profile)**: `GET /profile`.
 - **2026-11 (achievements)**: `GET /achievements`; the `achievement` event now also reaches players in shared games, daily challenges and races (to the one who earned it); option `--profile-file`; `profile` in the account-deletion summary.
 - **2026-11 (load)**: `load` in the `GET /ops/status` response, and the `lobby_full` counter in `since_start`.

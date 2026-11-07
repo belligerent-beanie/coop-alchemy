@@ -785,6 +785,28 @@ def run(out: Path, chrome_path: str) -> int:
         report.check(browser.evaluate("document.querySelectorAll('#workspace .tile').length") == tiles_before,
                      "...without adding an element by accident")
         report.check("Tap" in browser.evaluate("document.getElementById('hint').textContent"), "the Create page explains tapping")
+
+        print("\na room opened by a companion, on a phone")
+        status, hosted = api.call("POST", "/ops/bots/host", {}, sessions["phonea"])
+        report.check(status == 200 and hosted.get("id"), "an administrator can have a companion open a room", str(hosted))
+        status, listing = api.call("GET", "/games", None, sessions["phonea"])
+        entry = next((g for g in listing["games"] if g["id"] == hosted["id"]), None)
+        report.check(entry is not None and entry["players"] == 1, "the lobby lists it with someone in it", str(entry))
+        browser.navigate(f"{base}/g/{hosted['id']}")
+        join_by_touch()
+        time.sleep(1.0)
+        keys = browser.evaluate("[...document.querySelectorAll('#key li')].map(li => li.querySelector('span:nth-child(2)').textContent)")
+        report.check(hosted["name"] in keys and len(keys) == 2, "joining it, the host is in the player list next to you", str(keys))
+        seen = False
+        for _ in range(40):
+            time.sleep(0.5)
+            if browser.evaluate("[...document.querySelectorAll('#cursor-layer .cursor-name')].some(n => n.textContent === %s)" % json.dumps(hosted["name"])):
+                seen = True
+                break
+        report.check(seen, "...and its cursor wanders the board")
+        report.check(browser.evaluate("document.documentElement.scrollWidth - innerWidth") <= 1, "...on a page that fits the screen")
+        browser.screenshot(out / "phone-hosted-room.png")
+        api.call("POST", "/ops/bots/remove", {"id": hosted["id"]}, sessions["phonea"])
     finally:
         try:
             stream_b.close()

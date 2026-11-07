@@ -53,7 +53,7 @@ the exact commands and a check are in [LAUNCH.md](LAUNCH.md). Tick as you go.
       confirmation (against your minimal-data rule).
 - [ ] **Companions are built but OFF.** Add `"--bots"`, `"on"` to the `alchemy` command in `docker-compose.yml` when you want lobbies to have
       company, and watch the first few on the Operations page (*Add a companion* and *Remove* are there for trying one). Look at the cast in
-      `cast.py` and veto any names. Mr Alchemy is built and ON by default (`--mr-alchemy off` to stop him).
+      `cast.py` and veto any names. With them on, a companion also opens a room when someone is looking at an empty lobby (`--bots-host off` stops that). Mr Alchemy is built and ON by default (`--mr-alchemy off` to stop him).
 - [ ] The terms now say some players may be computer-controlled. Keep or reword that line (`static/terms.html`).
 
 ## 7. Later
