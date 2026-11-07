@@ -29,6 +29,8 @@ HTTP API
                                            a picture's address with the element it belongs to, see pictures.py)
     GET  /pic/<token>.png               -> an element picture at its secret address
     GET  /terms                         -> the terms of use page, with the --contact line filled in (also on /privacy)
+    GET  /achievements                  -> {"solo": [...], "multiplayer": [...], "challenges": [...]}   every achievement for the caller, with when
+                                           it was earned (see achievements.py and profiles.py)
     GET  /emotes                        -> {"emotes": [{"id", "label", "glyph"}]}   what players can send (see emotes.py)
     POST /solo/start                    -> {"id", "url"}   the caller's private solo game: the one running, or a new one
                                            that carries on from what they found before (saved after every discovery)
@@ -104,12 +106,14 @@ from accounts import AccountStore, clean_email, key_of
 from captcha import ORIGIN as TURNSTILE_ORIGIN
 from captcha import Turnstile
 from achievements import describe as describe_achievements
+from achievements import describe_badges
 from daily import DailyStore
 from emotes import emote_list
 from bots import BotPolicy, BotRunner, bot_loop
 from cast import CAST
 from metrics import Metrics, metrics_loop
 from pictures import PictureIndex
+from profiles import ProfileStore, profile_loop
 from visitor import VisitorPolicy, is_reserved
 from solo import SoloStore
 from drafts import DraftStore
@@ -423,6 +427,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"games": self.server.registry.find_saved(self._user())})
             elif path == "/solo":
                 self._json(200, self._solo_status())
+            elif path == "/achievements":
+                username = self._user()
+                registry = self.server.registry
+                self._json(200, {"solo": describe_achievements(registry.solo.achievements(username)),
+                                 **describe_badges(registry.profiles.achievements(username))})
             elif path == "/emotes":
                 self._user()
                 self._json(200, {"emotes": emote_list()})
@@ -794,7 +803,7 @@ class Handler(BaseHTTPRequestHandler):
         registry = server.registry
         summary = erase_account(username, accounts=accounts, saves=registry.saves, drafts=server.drafts,
                                 daily=registry.daily, invites=server.invites, reports=server.reports,
-                                solo=registry.solo)
+                                solo=registry.solo, profiles=registry.profiles)
         server.bump("accounts_deleted")
         return {"deleted": summary.as_json()}
 
@@ -822,7 +831,7 @@ class Handler(BaseHTTPRequestHandler):
         registry = self.server.registry
         summary = erase_account(username, accounts=accounts, saves=registry.saves, drafts=self.server.drafts,
                                 daily=registry.daily, invites=self.server.invites, reports=self.server.reports,
-                                solo=registry.solo)
+                                solo=registry.solo, profiles=registry.profiles)
         self.server.bump("accounts_deleted")
         log.info("account deleted client=%s user=%s", client, username)
         self._json(200, {"deleted": summary.as_json()})
@@ -1156,6 +1165,8 @@ def main() -> int:
                         help="where draft recipes and promotion requests are kept (default: ./drafts.json)")
     parser.add_argument("--solo-file", default=str(BASE_DIR / "solo.json"),
                         help="where each account's solo-mode progress is kept (default: ./solo.json)")
+    parser.add_argument("--profile-file", default=str(BASE_DIR / "profiles.json"),
+                        help="where each account's achievement counters are kept (default: ./profiles.json)")
     parser.add_argument("--daily-file", default=str(BASE_DIR / "daily.json"),
                         help="where the daily challenge's targets and scores are kept (default: ./daily.json)")
     parser.add_argument("--snapshot-file", default=str(BASE_DIR / "reload_snapshot.json"),
@@ -1190,6 +1201,7 @@ def main() -> int:
                                                    min_seconds=max(0.0, args.mr_alchemy_min) * 60,
                                                    max_seconds=max(0.0, args.mr_alchemy_max) * 60),
                             daily=DailyStore(args.daily_file, book), solo=SoloStore(args.solo_file),
+                            profiles=ProfileStore(args.profile_file),
                             max_per_account=max(0, args.max_games_per_account))
     accounts = AccountStore(args.accounts_file)
     listen_fd = int(os.environ.pop("ALCHEMY_LISTEN_FD")) if "ALCHEMY_LISTEN_FD" in os.environ else None
@@ -1293,6 +1305,7 @@ def run(server: AlchemyServer, registry: GameRegistry, accounts: AccountStore, a
         signal.signal(signal.SIGUSR1, lambda *_: wanted.set())
     threading.Thread(target=visitor_loop, args=(registry,), daemon=True, name="mr-alchemy").start()   # a reload re-runs main, so this restarts
     threading.Thread(target=metrics_loop, args=(server.metrics, registry), daemon=True, name="load-samples").start()
+    threading.Thread(target=profile_loop, args=(registry.profiles,), daemon=True, name="profile-saves").start()
     if registry.bots is not None:
         threading.Thread(target=bot_loop, args=(registry.bots,), daemon=True, name="companions").start()
     try:
@@ -1312,6 +1325,7 @@ def run(server: AlchemyServer, registry: GameRegistry, accounts: AccountStore, a
     except KeyboardInterrupt:
         print("\nStopping.")
     finally:
+        registry.profiles.flush()
         server.server_close()
         try:
             info = json.loads(Path(args.pid_file).read_text(encoding="utf-8"))
@@ -1343,6 +1357,7 @@ def reload_in_place(server: AlchemyServer, registry: GameRegistry, accounts: Acc
     Same process id and same listening socket; the new copy restores the snapshot at startup.
     Only returns (by raising) if the snapshot could not be written.
     """
+    registry.profiles.flush()   # the counters are written every few seconds; do not lose the latest to the reload
     write_snapshot(args.snapshot_file, registry, accounts)
     fd = server.socket.fileno()
     os.set_inheritable(fd, True)

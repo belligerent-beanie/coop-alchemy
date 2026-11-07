@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DATA_FILES = ("accounts.json", "daily.json", "drafts.json", "invites.json", "solo.json")
+DATA_FILES = ("accounts.json", "daily.json", "drafts.json", "invites.json", "solo.json", "profiles.json")
 DATA_DIRS = ("saves",)
 KEEP_REGULAR = 14
 KEEP_LABELLED = 10

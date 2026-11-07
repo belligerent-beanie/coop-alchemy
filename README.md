@@ -112,6 +112,17 @@ vanishes. Click *Skip* to get the elements at once. For anyone who has asked the
   way to see the cutscene. `--mr-alchemy off` switches him off; `--mr-alchemy-chance` makes some games miss out.
 - His look (a 🎩 glyph) is a placeholder: the cutscene's pieces are in `static/app.js` (`MR_ALCHEMY`, `playVisitor`) and `static/style.css`.
 
+### Achievements
+
+There are three lists, one on each tab of the home page: **Solo** (12, from a solo game's progress), **Multiplayer** (11) and **Challenges** (8). Earning one
+shows a banner and a chime in the game, to that player only. The Multiplayer and Challenges ones come from a few counters kept per account
+(`profiles.py`, `achievements.py`): elements you discovered in shared games (and epic ones), shared games played with others, being in a full game,
+being there when Mr Alchemy visits, emotes sent, daily challenges finished (hard ones, and runs of days in a row) and races finished and won. Elements
+found by companions or Mr Alchemy are not yours, and neither counter nor achievement is awarded in Solo mode (that has its own list).
+
+To add one, put a line in `BADGES` (or `ACHIEVEMENTS` for solo) in `achievements.py` with a test on the counters; an account that already meets it earns
+it the next time that counter changes. The counters are written to `profiles.json` every few seconds, not on every discovery.
+
 ### Solo mode
 
 **Solo** on the home page starts your own private game: just you, with the Djinn like any game, **one hint a day**, and no invite link. Your
@@ -327,6 +338,7 @@ python3 server.py [--host 0.0.0.0] [--port 8000]
 | `--idle-minutes` | `10` | How long an empty game stays open. |
 | `--drafts-file` | `drafts.json` next to `server.py` | Players' draft recipes and promotion proposals. |
 | `--daily-file` | `daily.json` next to `server.py` | The daily challenge's targets, routes, attempts used and scores (the last 400 days). |
+| `--profile-file` | `profiles.json` next to `server.py` | Each account's achievement counters and the achievements earned in shared games, daily challenges and races. |
 | `--solo-file` | `solo.json` next to `server.py` | Each account's solo-mode progress and whether it has found everything (which opens Create Recipes). |
 | `--snapshot-file` | `reload_snapshot.json` next to `server.py` | Where running games are parked during a reload. |
 | `--pid-file` | `alchemy.pid` next to `server.py` | Lets `reload.py` find the running server. |

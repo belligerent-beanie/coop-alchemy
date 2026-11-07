@@ -324,6 +324,29 @@ window.addEventListener("pageshow", loadRaces);
 loadDaily();
 setInterval(loadDaily, 15000);
 
+/** An achievements list: the earned ones with their icon, the rest locked, and "earned / all" beside the heading. */
+function renderAchievements(listId, countId, items) {
+  const earned = items.filter((a) => a.earned_at !== null).length;
+  $(countId).textContent = `${earned} / ${items.length}`;
+  $(listId).replaceChildren(...items.map((a) => {
+    const row = el("li", a.earned_at === null ? "achievement locked" : "achievement");
+    row.append(el("span", "ach-icon", a.earned_at === null ? "🔒" : a.icon));
+    const text = el("span", "ach-text");
+    text.append(el("strong", "", a.title), el("span", "muted", ` ${a.description}`));
+    row.append(text);
+    return row;
+  }));
+}
+
+/** The achievements of the Multiplayer and Challenges tabs (the Solo tab gets its own with its progress). */
+async function loadAchievements() {
+  try {
+    const all = await Auth.fetch("/achievements");
+    renderAchievements("achievements-multiplayer", "achievement-count-multiplayer", all.multiplayer);
+    renderAchievements("achievements-challenges", "achievement-count-challenges", all.challenges);
+  } catch (_) { /* the rest of the page still works */ }
+}
+
 // ---- solo mode ----
 async function loadSolo() {
   try {
@@ -335,16 +358,7 @@ async function loadSolo() {
     bar.setAttribute("aria-valuemax", String(s.total || 1));
     bar.setAttribute("aria-valuenow", String(s.found));
     $("solo-start").textContent = s.found > 4 ? "Continue solo" : "Play solo";
-    const earned = s.achievements.filter((a) => a.earned_at !== null).length;
-    $("achievement-count").textContent = `${earned} / ${s.achievements.length}`;
-    $("achievements").replaceChildren(...s.achievements.map((a) => {
-      const row = el("li", a.earned_at === null ? "achievement locked" : "achievement");
-      row.append(el("span", "ach-icon", a.earned_at === null ? "🔒" : a.icon));
-      const text = el("span", "ach-text");
-      text.append(el("strong", "", a.title), el("span", "muted", ` ${a.description}`));
-      row.append(text);
-      return row;
-    }));
+    renderAchievements("achievements", "achievement-count", s.achievements);
     $("create-link").textContent = s.may_create ? "Create recipes" : "Create recipes 🔒";
     if (!s.may_create) $("create-blurb").textContent = "Finish Solo mode (find every element) to unlock a playground where you can invent new combinations and promote them to the admins.";
   } catch (_) { /* the rest of the page still works */ }
@@ -358,7 +372,8 @@ $("solo-start").addEventListener("click", async () => {
   }
 });
 loadSolo();
-window.addEventListener("pageshow", loadSolo);
+loadAchievements();
+window.addEventListener("pageshow", () => { loadSolo(); loadAchievements(); });
 window.addEventListener("pageshow", loadDaily);  // coming back with the browser's back button
 
 refresh();

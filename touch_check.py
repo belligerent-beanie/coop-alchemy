@@ -690,6 +690,19 @@ def run(out: Path, chrome_path: str) -> int:
         x, y = center_of(browser, "#home-tab-solo")
         browser.tap(x, y)
         time.sleep(0.4)
+        report.check(browser.evaluate("document.querySelectorAll('#achievements-multiplayer .achievement').length") == 11
+                     and browser.evaluate("document.querySelectorAll('#achievements-challenges .achievement').length") == 8,
+                     "the Multiplayer and Challenges tabs list their achievements")
+        report.check(browser.evaluate("document.querySelectorAll('#achievements-multiplayer .achievement:not(.locked)').length") >= 1,
+                     "...and playing with another person has already earned Good company")
+        browser.evaluate("document.getElementById('home-tab-multiplayer').click()")
+        time.sleep(0.4)
+        browser.evaluate("document.getElementById('achievements-multiplayer').scrollIntoView({block: 'start'})")
+        time.sleep(0.3)
+        report.check(browser.evaluate("document.documentElement.scrollWidth - innerWidth") <= 1, "...and the Multiplayer tab still fits the screen")
+        browser.screenshot(out / "phone-achievements.png")
+        browser.evaluate("document.getElementById('home-tab-solo').click()")
+        time.sleep(0.3)
         report.check(browser.evaluate("document.querySelectorAll('#achievements .achievement').length") >= 10,
                      "the Solo tab lists the achievements")
         report.check(browser.evaluate("document.documentElement.scrollWidth - innerWidth") <= 1, "...and fits the phone screen")

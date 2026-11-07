@@ -116,7 +116,7 @@ def server_command(server_dir: Path, port: int, folder: Path, batch: float | Non
                  "--drafts-file", str(folder / "d.json"), "--daily-file", str(folder / "daily.json"),
                  "--snapshot-file", str(folder / "s.json"), "--pid-file", str(folder / "p.pid"),
                  "--invites-file", str(folder / "i.json"), "--reports-file", str(folder / "r.json"),
-                 "--solo-file", str(folder / "solo.json"), "--mr-alchemy", "off", "--bots", "off"]   # off: a visit would change what the scratch games hold
+                 "--solo-file", str(folder / "solo.json"), "--profile-file", str(folder / "profiles.json"), "--mr-alchemy", "off", "--bots", "off"]   # off: a visit would change what the scratch games hold
     if batch is None:
         return [sys.executable, str(server_dir / "server.py"), *arguments]
     # Same server, but with the cursor batching window set from outside (the constant is not a command-line option).

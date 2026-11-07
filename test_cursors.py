@@ -72,6 +72,7 @@ class CursorStreamTests(unittest.TestCase):
         stream = SSEClient(self.port, slug, players[1]["token"])
         self.addCleanup(stream.close)
         stream.until("snapshot")
+        stream.until("achievement")   # two people in a room: the watcher is told they earned "Good company", which is not what these tests look at
         return slug, players[0], players[1], stream
 
     def move(self, slug: str, who: dict[str, Any], x: float | None, y: float | None = 0.5) -> None:

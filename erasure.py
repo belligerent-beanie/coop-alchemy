@@ -7,6 +7,7 @@ they can never disagree about what deletion means:
   - its recipe drafts and promotion proposals
   - its daily-challenge scores and attempt counts
   - its solo-mode progress (which elements it found, and whether it finished)
+  - its achievement counters and the achievements earned in shared games, daily challenges and races
   - saved games: ones nobody else played are deleted; in shared ones the name is replaced by "deleted player" and the game
     stays for the others
   - its name on the invite code it used (replaced by a placeholder)
@@ -25,6 +26,7 @@ from daily import DailyStore
 from drafts import DraftStore
 from invites import InviteStore
 from reports import ReportStore
+from profiles import ProfileStore
 from saves import SaveStore
 from solo import SoloStore
 
@@ -38,6 +40,7 @@ class ErasureSummary:
     invite_codes: int
     reports: int = 0
     solo: int = 0
+    profile: int = 0
 
     def as_json(self) -> dict[str, int]:
         return asdict(self)
@@ -45,7 +48,7 @@ class ErasureSummary:
 
 def erase_account(username: str, *, accounts: AccountStore, saves: SaveStore, drafts: DraftStore, daily: DailyStore,
                   invites: InviteStore | None = None, reports: ReportStore | None = None,
-                  solo: SoloStore | None = None) -> ErasureSummary:
+                  solo: SoloStore | None = None, profiles: ProfileStore | None = None) -> ErasureSummary:
     """Delete `username` everywhere. Raises GameError(404) first, touching nothing, if there is no such account."""
     accounts.delete(username)  # the 404 for an unknown account happens here, before anything else is changed
     deleted, rewritten = saves.anonymize_player(username)
@@ -57,4 +60,5 @@ def erase_account(username: str, *, accounts: AccountStore, saves: SaveStore, dr
         invite_codes=invites.forget_user(username) if invites is not None else 0,
         reports=reports.delete_user(username) if reports is not None else 0,
         solo=solo.delete_user(username) if solo is not None else 0,
+        profile=profiles.delete_user(username) if profiles is not None else 0,
     )

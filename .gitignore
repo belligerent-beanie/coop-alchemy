@@ -6,6 +6,7 @@ saves/
 drafts.json
 daily.json
 solo.json
+profiles.json
 reload_snapshot.json*
 alchemy.pid
 progress.json

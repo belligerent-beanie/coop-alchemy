@@ -103,6 +103,7 @@ class Challenge:
     reference: int | None = None   # elements unlocked by the game's own route, to show as a number to beat
     on_finish: Callable[[str, int], None] | None = None
     tier: str = "medium"           # easy, medium or hard
+    streak: Callable[[str], int] | None = None   # the account's best run of days with a finished challenge, for achievements
 
 
 @dataclass(frozen=True)
@@ -164,8 +165,11 @@ class GameState:
                  solo: Callable[[dict[str, Any], int, int, bool, set[str]], list[str]] | None = None,
                  today: Callable[[], str] | None = None,
                  pictures: PictureIndex | None = None,
-                 visitors: VisitorPolicy | None = None) -> None:
+                 visitors: VisitorPolicy | None = None,
+                 profile: Callable[[str, dict[str, int], dict[str, int]], list[str]] | None = None) -> None:
         self.book = book
+        # profiles.py: called as profile(username, add, best) to count something for an account; returns the account-wide achievements it earned
+        self.profile = profile
         self.visitors = visitors   # None: Mr Alchemy never visits this game (see visitor.py)
         self.pictures = pictures   # the address of each element's picture, sent only with that element's data
         self._today = today or (lambda: time.strftime("%Y-%m-%d", time.gmtime()))   # the day a solo hint is counted against
@@ -201,6 +205,9 @@ class GameState:
         self._stats: dict[str, dict[str, int]] = {}        # casefolded player name -> {"tries", "misses"}, for the awards
         self._first_finder: str | None = None              # who made the game's first discovery
         self._emote_at: dict[str, float] = {}              # pid -> when they last sent an emote
+        self._counted: set[str] = set()                    # people already counted as having played this game with others
+        self._counted_full: set[str] = set()               # ...and as having been in it when it was full
+        self._race_counted = False                         # this racer's finish has been counted
         self._virtual: dict[str, Player] = {}              # token -> a computer-controlled player (bots.py): seated, but never a "person"
         self._visited = False                              # Mr Alchemy has been (or is not coming): once per game
         self._together = 0.0                               # seconds two or more people have played together
@@ -308,6 +315,47 @@ class GameState:
                 sub.dead = True
                 self._subs.remove(sub)
 
+    def _publish_to(self, name: str, event: str, data: Any) -> None:
+        """Send an event only to the connections of one player (an achievement is nobody else's business)."""
+        message = format_event(event, data)
+        for sub in list(self._subs):
+            if sub.player.name == name:
+                try:
+                    sub.messages.put_nowait(message)
+                except queue.Full:
+                    sub.dead = True
+                    self._subs.remove(sub)
+
+    def _account(self, name: str, add: dict[str, int] | None = None, best: dict[str, int] | None = None) -> None:
+        """Count something for an account (see profiles.py) and tell the player about any achievement it earns. Never breaks the game."""
+        if self.profile is None or not name:
+            return
+        try:
+            earned = self.profile(name, add or {}, best or {})
+        except Exception as exc:
+            print(f"warning: could not count for an achievement: {exc}", file=sys.stderr)
+            return
+        for achievement in earned:
+            self._publish_to(name, "achievement", achievement_json(achievement))
+
+    def _note_company(self) -> None:
+        """When two or more people are in a shared game, each is counted once for playing with others, and once more if it is full."""
+        if self.profile is None or self.private:
+            return
+        people = self._people()
+        if len(people) < 2:
+            return
+        for person in people:
+            key, add = person.name.casefold(), {}
+            if key not in self._counted:
+                self._counted.add(key)
+                add["games"] = 1
+            if len(people) >= MAX_PLAYERS and key not in self._counted_full:
+                self._counted_full.add(key)
+                add["full_room"] = 1
+            if add:
+                self._account(person.name, add)
+
     def _forget(self, token: str) -> None:
         player = self._players.pop(token, None)
         self._virtual.pop(token, None)
@@ -392,6 +440,8 @@ class GameState:
             self._discovered[r] = player.name
         if new and self._first_finder is None and player.name != MR_ALCHEMY:
             self._first_finder = player.name
+        if new and not self.private and player.token not in self._virtual and player.name not in ("", MR_ALCHEMY):
+            self._account(player.name, {"finds": len(new), "epic_finds": sum(1 for e in new if self._rarity(e) == "epic")})
         if self._djinn in new and self._genie_unlocked_at is None:
             self._genie_unlocked_at = len(self._discovered)
         if self.challenge is not None and self._result is None and self.challenge.target in new:
@@ -401,15 +451,27 @@ class GameState:
                     self.challenge.on_finish(player.name, self._result)
                 except Exception as exc:  # a score that cannot be stored must not break the game
                     print(f"warning: could not record the challenge score: {exc}", file=sys.stderr)
+                streak = 0
+                try:
+                    streak = self.challenge.streak(player.name) if self.challenge.streak is not None else 0
+                except Exception as exc:
+                    print(f"warning: could not work out the daily streak: {exc}", file=sys.stderr)
+                self._account(player.name, {"daily_done": 1, **({"daily_hard": 1} if self.challenge.tier == "hard" else {})},
+                              {"daily_streak": streak})
         if self.race is not None and new:
             count = len(self._discovered)
             reached = (self.race.target in self._discovered) if self.race.goal == "target" \
                 else count >= self.race.goal_count
+            won = False
             try:
-                if self.race.report(count, reached):
+                won = bool(self.race.report(count, reached))
+                if won:
                     self._won = True
             except Exception as exc:  # the race must not break the game
                 print(f"warning: could not report race progress: {exc}", file=sys.stderr)
+            if reached and not self._race_counted:
+                self._race_counted = True
+                self._account(player.name, {"race_done": 1, **({"race_wins": 1} if won else {})})
         return new
 
     def _announce(self, player: Player, new: list[str], base: int) -> None:
@@ -576,6 +638,7 @@ class GameState:
             self._subs.append(sub)  # before the snapshot, so the player list includes them
             sub.messages.put_nowait(format_event("snapshot", self._snapshot(player)))
             self._publish("players", {"players": self._online_players()}, exclude=sub)
+            self._note_company()
             return sub
 
     def unsubscribe(self, sub: Subscriber) -> None:
@@ -1021,6 +1084,8 @@ class GameState:
             announced = {"name": MR_ALCHEMY, "elements": [self._element_json(e, with_by=True) for e in gift],
                          "found": len(self._discovered), "total": self.total, "before": base}
             self._publish("visitor", announced)
+            for person in self._people():
+                self._account(person.name, {"struck": 1})
             return announced
 
     # ---- awards ---------------------------------------------------------------
@@ -1090,6 +1155,7 @@ class GameState:
                 raise GameError(429, "one emote a second, please")
             self._emote_at[player.pid] = now
             self._publish("emote", {"pid": player.pid, "name": player.name, "emote": emote})
+            self._account(player.name, {"emotes": 1})
             return {}
 
     # ---- hints ----------------------------------------------------------------

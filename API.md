@@ -79,6 +79,7 @@ this file in the same commit (and add a line to the [change log](#change-log)).
 | Endpoint | Auth | Description |
 |---|---|---|
 | `GET /solo` | session | `{"found", "total", "complete", "may_create", "achievements": [{"id", "icon", "title", "description", "earned_at"}]}`: the caller's solo-mode progress, whether Create Recipes is open to them (administrators and bot accounts always may), and every achievement (`earned_at` is a unix time, or null). |
+| `GET /achievements` | session | `{"solo": [...], "multiplayer": [...], "challenges": [...]}`: every achievement for the caller, each `{"id", "icon", "title", "description", "earned_at"}` (`earned_at` is a unix time, or null). The solo ones are the same as in `GET /solo`; the others are earned in shared games, the daily challenge and races. |
 | `GET /emotes` | session | `{"emotes": [{"id", "label", "glyph"}]}`: what players can send with `POST /g/<id>/emote` (the list lives in `emotes.py`). |
 | `POST /solo/start` | session | `{}` → `{"id", "url"}`: the caller's private solo game (the one running, or a new one that carries on from what they found; saved after every discovery). |
 | `GET /daily` | session | Today's three challenges (easy, medium, hard) with the caller's results, streak and the weekly board (see `daily.py`). |
@@ -136,7 +137,7 @@ A ticket works once, so after a dropped connection a page asks for a fresh ticke
 | `discovered` | `{"id", "label", "emoji", "credit"?, "by", "rarity", "pid", "found", "total"}` (plus `"unlocked"` for Time, with `pid` null). `rarity` is `common`, `uncommon`, `rare` or `epic`: how far the element is from the starting elements compared with all the others. |
 | `visitor` | `{"name": "Mr Alchemy", "elements": [element with "by" and "rarity"], "found", "total", "before"}`: Mr Alchemy has visited and the elements are already unlocked for the room. Pages play a cutscene and reveal them one at a time; a player who joins during it simply gets them in the snapshot. Public games only, once per game. |
 | `emote` | `{"pid", "name", "emote"}`: someone sent an emote (an `id` from `GET /emotes`); everyone in the game gets it, the sender too. |
-| `achievement` | `{"id", "icon", "title", "description"}`: the solo player earned an achievement (solo games only). |
+| `achievement` | `{"id", "icon", "title", "description"}`: the player earned an achievement. Sent only to that player's own connections, in solo games, shared games, daily challenges and races. |
 | `genie` | `{"status", "used_by"}` |
 | `cursor` | `{"pid", "x", "y"}` (null `x`, `y`: hidden). |
 | `tile_added` | `{"tile": {"id", "element", "x", "y", "held_by"}}` |
@@ -198,6 +199,7 @@ checks that every option the server accepts appears in the README.
 
 Newest first. Add a line whenever an endpoint, event, status code or option is added, changed or removed.
 
+- **2026-11 (achievements)**: `GET /achievements`; the `achievement` event now also reaches players in shared games, daily challenges and races (to the one who earned it); option `--profile-file`; `profile` in the account-deletion summary.
 - **2026-11 (load)**: `load` in the `GET /ops/status` response, and the `lobby_full` counter in `since_start`.
 - **2026-11 (companions)**: `POST /ops/bots/add` and `POST /ops/bots/remove`; `companions` and `companions_on` in the `GET /ops/games` response; `POST /register` answers `409` for the cast's names too; options `--bots`, `--bots-max`. Companions appear in `players` and the `snapshot` exactly like people (the same `pid`, `name`, `color`).
 - **2026-11 (Mr Alchemy)**: the `visitor` event and `POST /ops/games/visit`; `POST /register` answers `409` "that username is taken" for any spelling of the name Mr Alchemy; options `--mr-alchemy`, `--mr-alchemy-chance`, `--mr-alchemy-min`, `--mr-alchemy-max`.

@@ -75,6 +75,11 @@
       <p id="no-saved" class="muted" hidden>You have no saved games.</p>
       <p id="saved-msg" class="error" role="alert"></p>
     </section>
+
+    <section>
+      <h2>Achievements <span id="achievement-count-multiplayer" class="muted"></span></h2>
+      <ul id="achievements-multiplayer" class="achievements"></ul>
+    </section>
     </div>
 
     <div class="home-panel" id="panel-challenges" role="tabpanel" aria-labelledby="home-tab-challenges" hidden>
@@ -97,6 +102,11 @@
         <summary>Past days</summary>
         <div id="history-body" class="muted">Loading…</div>
       </details>
+    </section>
+
+    <section>
+      <h2>Achievements <span id="achievement-count-challenges" class="muted"></span></h2>
+      <ul id="achievements-challenges" class="achievements"></ul>
     </section>
 
     <section id="races">
@@ -140,7 +150,7 @@
     </form>
     <div id="delete-box">
       <h2>Delete my account</h2>
-      <p class="muted">This removes your account, your recipe drafts, daily scores and Solo progress, and saved games nobody else played; your
+      <p class="muted">This removes your account, your recipe drafts, daily scores, achievements and Solo progress, and saved games nobody else played; your
         name in shared saved games becomes "deleted player". It cannot be undone.
         <a href="/privacy">What is stored</a></p>
       <form id="delete-form" autocomplete="off">

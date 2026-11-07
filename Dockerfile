@@ -23,7 +23,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 ENTRYPOINT ["python", "server.py", "--host", "0.0.0.0", "--port", "8000", \
             "--accounts-file", "/data/accounts.json", "--daily-file", "/data/daily.json", "--drafts-file", "/data/drafts.json", \
-            "--invites-file", "/data/invites.json", "--reports-file", "/data/reports.json", "--solo-file", "/data/solo.json", "--saves-dir", "/data/saves", \
+            "--invites-file", "/data/invites.json", "--reports-file", "/data/reports.json", "--solo-file", "/data/solo.json", "--profile-file", "/data/profiles.json", "--saves-dir", "/data/saves", \
             "--snapshot-file", "/data/reload_snapshot.json", "--pid-file", "/data/alchemy.pid", \
             "--log-file", "/data/live.log", "--log-days", "14"]
 CMD []
