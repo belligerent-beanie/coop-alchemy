@@ -26,7 +26,7 @@ import json
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 MAX_ID_LEN = 64
 
@@ -201,9 +201,13 @@ def load_recipes(path: str | Path) -> RecipeBook:
     return parse_recipes(data)
 
 
-def depths(book: RecipeBook) -> dict[str, int]:
-    """Minimum number of combination steps needed to obtain each reachable element."""
+def depths(book: RecipeBook, free: Iterable[str] = ()) -> dict[str, int]:
+    """Minimum number of combination steps needed to obtain each reachable element.
+
+    `free` are elements the game hands out without a recipe (Time), counted like starters: recipes that need them are reachable.
+    """
     depth = {s: 0 for s in book.starters}
+    depth.update({e: 0 for e in free if e in book.elements})
     changed = True
     while changed:
         changed = False

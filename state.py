@@ -179,13 +179,14 @@ class GameState:
         self._touched = clock()                   # last join / connect / disconnect, for idle expiry
         self._last_active: dict[str, float] = {}  # token -> when they joined or last disconnected
         self._connected_once: set[str] = set()    # tokens that have opened an event stream
-        self._depth = depths(book)  # fewest steps to make each reachable element
         self._lock = threading.RLock()
         self._discovered: dict[str, str | None] = {s: None for s in book.starters}  # id -> discoverer
         self._time = find_element(book, TIME)  # id of the element that unlocks at TIME_UNLOCK_AT, if any
         self._djinn = find_element(book, DJINN)  # id of the element that unlocks the genie, if any
         if challenge is not None or race is not None:  # a challenge or a race is a plain puzzle: no free elements, no wishes
             self._time = self._djinn = None
+        # fewest steps to make each reachable element; Time is handed out free, so what needs Time counts as reachable
+        self._depth = depths(book, [self._time] if self._time else [])
         self.total = len(self._collectable())  # what can be found in all: reachable elements, and Time if the game adds it
         depth_ranking = sorted(self._depth.values())
         self._rarity_at = tuple(depth_ranking[min(len(depth_ranking) - 1, int(len(depth_ranking) * q))]

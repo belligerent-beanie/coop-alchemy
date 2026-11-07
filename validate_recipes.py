@@ -20,7 +20,9 @@ import json
 import sys
 from pathlib import Path
 
+from hints import find_element
 from recipes import depths, find_problems, parse_recipes
+from state import TIME
 
 
 def main(argv: list[str]) -> int:
@@ -39,7 +41,8 @@ def main(argv: list[str]) -> int:
         return 1
 
     book = parse_recipes(data)
-    depth = depths(book)
+    time_id = find_element(book, TIME)   # Time is handed out free in the game, so what needs it is reachable
+    depth = depths(book, [time_id] if time_id else [])
     produced = {r for results in book.lookup.values() for r in results}
     used = {x for pair in book.lookup for x in pair}
 

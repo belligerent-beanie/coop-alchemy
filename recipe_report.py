@@ -16,7 +16,9 @@ import json
 import sys
 from pathlib import Path
 
+from hints import find_element
 from recipes import depths, find_problems, parse_recipes
+from state import TIME
 
 # (text found in a structural message, suggested change)
 STRUCTURAL_ADVICE = (
@@ -50,7 +52,8 @@ def build_report(data: object) -> tuple[list[str], int]:
         return lines, len(problems)
 
     book = parse_recipes(data)  # type: ignore[arg-type]
-    depth = depths(book)
+    time_id = find_element(book, TIME)   # Time is handed out free in the game, so what needs it is reachable
+    depth = depths(book, [time_id] if time_id else [])
     produced: dict[str, list[tuple[str, str]]] = {}
     for (a, b), results in book.lookup.items():
         for r in results:

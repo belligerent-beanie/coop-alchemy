@@ -110,6 +110,17 @@ class SoloGameTests(unittest.TestCase):
         self.assertIs(fresh.start_solo("Alice"), restored)
 
 
+class FreeElementTests(unittest.TestCase):
+    def test_elements_that_need_time_count_towards_the_total(self) -> None:
+        """Time is handed out free at 100 elements, and ruins and archeologist are made from it: they must be findable."""
+        book = load_recipes(Path(__file__).resolve().parent / "recipes.json")
+        game = GameState(book)
+        self.assertEqual(game.total, len(book.elements))
+        self.assertTrue({"time", "ruins", "archeologist"} <= game._collectable())
+        # a challenge or a race has no Time, so it neither counts Time nor what needs it
+        self.assertLess(GameState(book, challenge=object()).total, game.total)  # type: ignore[arg-type]
+
+
 class SoloHttpTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
