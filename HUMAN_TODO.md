@@ -51,7 +51,10 @@ the exact commands and a check are in [LAUNCH.md](LAUNCH.md). Tick as you go.
 - [ ] **Sound defaults to on.** Keep that, or start muted?
 - [ ] **Signup:** invite-only is the default. If you ever want open signup, the choices are Turnstile (a few clicks in Cloudflare) or email
       confirmation (against your minimal-data rule).
-- [ ] **Bots and Mr Alchemy** (see the plan I wrote in chat; the questions are at its end). Nothing is built yet.
+- [ ] **Companions are built but OFF.** Add `"--bots"`, `"on"` to the `alchemy` command in `docker-compose.yml` when you want lobbies to have
+      company, and watch the first few on the Operations page (*Add a companion* and *Remove* are there for trying one). Look at the cast in
+      `cast.py` and veto any names. Mr Alchemy is built and ON by default (`--mr-alchemy off` to stop him).
+- [ ] The terms now say some players may be computer-controlled. Keep or reword that line (`static/terms.html`).
 
 ## 7. Later
 
