@@ -371,6 +371,12 @@ What it says:
 
 Re-run with `python bench_load.py` (takes a few minutes; `--scenarios 10x5,solo50` for particular ones).
 
+**Watching it live.** The Operations page has a *Load* table: players, public rooms and CPU (percent of one core), now and as 24-hour peaks, next to
+the points where one process stops being pleasant (CPU 60%, 50 players, 10 rooms), plus how many times the lobby said "full". It is sampled
+every 30 seconds in memory (`metrics.py`) and starts again when the server restarts. **When to think about scaling:** a peak that reaches a limit,
+cursor delay above about 100 ms (run `bench_cursor.py` on the real server), the lobby regularly full, or invite requests backing up. The cheap
+steps come first: a faster core, a lower cursor rate, then fewer threads; a multi-process redesign is the last resort.
+
 ### Data, backups and storage
 State is in `accounts.json`, `drafts.json`, `daily.json` and `saves/`. Writes are atomic (temp file plus
 `os.replace`) but there is no backup. Run a nightly copy off the machine (the files are small) and test a restore.

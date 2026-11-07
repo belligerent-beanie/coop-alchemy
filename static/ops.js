@@ -97,6 +97,7 @@ function renderStatus(s) {
     stat("server errors", since.server_errors || 0),
     stat("open reports", s.reports.open),
   );
+  renderLoad(s.load, since.lobby_full || 0);
   const gates = [];
   if (s.signup.invite_required) gates.push("invite code");
   if (s.signup.email_required) gates.push("confirmed email");
@@ -104,6 +105,33 @@ function renderStatus(s) {
   $("signup-line").textContent = "Sign-up needs: " + (gates.length ? gates.join(", ") : "nothing (open)") +
     (s.signup.behind_proxy ? ". Behind a reverse proxy." : ". Not behind a reverse proxy.") +
     " Counters restart with the server.";
+}
+
+/** The load table: current values, the peaks, and a flag where a peak has reached the point to think about scaling. */
+function renderLoad(load, lobbyFull) {
+  const body = $("load-table").querySelector("tbody");
+  body.replaceChildren();
+  if (!load || !load.samples) {
+    $("load-span").textContent = "";
+    $("load-table").hidden = true;
+    $("load-note").textContent = "No samples yet: the first one is taken within half a minute of the server starting.";
+    return;
+  }
+  $("load-table").hidden = false;
+  $("load-span").textContent = `(${load.hours} hours of samples)`;
+  for (const row of load.watch) {
+    const tr = el("tr");
+    tr.append(el("td", row.label), el("td", String(row.now)), el("td", String(row.peak)), el("td", String(row.limit)),
+      el("td", row.hit ? "⚠ reached" : "fine"));
+    body.append(tr);
+  }
+  const hit = load.watch.filter((row) => row.hit);
+  const notes = [];
+  notes.push(hit.length ? `Reached: ${hit.map((row) => row.label).join(", ")}. Time to read the scaling notes in DEPLOYMENT.md.`
+    : "Nothing is near its limit.");
+  notes.push(lobbyFull ? `The lobby said "full" ${lobbyFull} time${lobbyFull === 1 ? "" : "s"} since the server started: that is real demand.`
+    : "The lobby has not been full since the server started.");
+  $("load-note").textContent = notes.join(" ");
 }
 
 // ---- reports ------------------------------------------------------------------------------------

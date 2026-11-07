@@ -62,6 +62,8 @@ the exact commands and a check are in [LAUNCH.md](LAUNCH.md). Tick as you go.
 - [ ] The hardening backlog (DEPLOYMENT.md, "Remaining hardening"): move the session token to an HttpOnly cookie, a breached-password check, an
       absolute session lifetime, drop `unsafe-inline` from the CSP.
 - [ ] Pin the `cloudflare/cloudflared` image to a version once it works, so an update never surprises you.
+- [ ] Glance at the **Load** table on the Operations page now and then (players, rooms and CPU, with 24-hour peaks). If a peak reaches its limit,
+      or the "lobby was full" count climbs, that is the trigger to start on capacity (DEPLOYMENT.md, "Watching it live").
 - [ ] Decide when to switch off the Windows live server for good.
 
 ## What I can do when you say go

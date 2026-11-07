@@ -21,6 +21,17 @@
     </section>
 
     <section>
+      <h2>Load <span id="load-span" class="muted"></span></h2>
+      <p class="muted">Sampled every 30 seconds. The limits are where one server process stops being pleasant (see DEPLOYMENT.md, "Capacity").
+        Peaks since the server started, up to 24 hours back.</p>
+      <table id="load-table" class="ops-table">
+        <thead><tr><th>Measure</th><th>Now</th><th>Peak</th><th>Think about scaling at</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="load-note" class="muted"></p>
+    </section>
+
+    <section>
       <h2>Reports</h2>
       <p class="muted">Players tell you about each other here. A report does not say who sent it, and it disappears after 14 days or
         when you dismiss it.</p>

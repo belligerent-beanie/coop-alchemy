@@ -171,7 +171,7 @@ and names, never password hashes, email addresses, login tokens or client addres
 
 | Endpoint | Auth | Description |
 |---|---|---|
-| `GET /ops/status` | session + admin | `{"uptime_seconds", "accounts": {"total", "pending", "disabled", "admins"}, "sessions", "games": {"running", "max", "private", "players"}, "since_start": {"logins", "login_failures", "registrations", "throttled", "accounts_deleted", "server_errors", "reports"}, "reports": {"open"}, "signup": {"invite_required", "email_required", "human_check", "behind_proxy"}}`. Counters are in memory and reset when the server restarts. |
+| `GET /ops/status` | session + admin | `{"uptime_seconds", "accounts": {"total", "pending", "disabled", "admins"}, "sessions", "games": {"running", "max", "private", "players"}, "since_start": {"logins", "login_failures", "registrations", "throttled", "accounts_deleted", "server_errors", "reports"}, "load": {"samples", "hours", "now": {"players", "rooms", "cpu"}, "peak": {"players", "rooms", "cpu", "..._at"}, "watch": [{"id", "label", "now", "peak", "limit", "hit"}]}, "reports": {"open"}, "signup": {"invite_required", "email_required", "human_check", "behind_proxy"}}`. `load` is sampled every 30 seconds and covers up to 24 hours (`cpu` is the percent of one core); `since_start` also counts `lobby_full` (a game could not be started because the lobby was full). Counters and samples are in memory and reset when the server restarts. |
 | `GET /ops/accounts` | session + admin | `{"accounts": [{"name", "admin", "bot", "pending", "disabled", "created"}]}`, by name. |
 | `GET /ops/games` | session + admin | `{"games": [{"id", "name", "players", "max_players", "found", "total", "genie", "kind", "private"}], "max_games"}`; `kind` is `game`, `daily` or `race`. |
 | `GET /ops/reports` | session + admin | `{"reports": [{"id", "user", "reason", "note", "game", "count", "first", "at"}]}`, most reported first. Reports are merged per player and reason; there is no reporter in them. They are deleted after 14 days. |
@@ -198,6 +198,7 @@ checks that every option the server accepts appears in the README.
 
 Newest first. Add a line whenever an endpoint, event, status code or option is added, changed or removed.
 
+- **2026-11 (load)**: `load` in the `GET /ops/status` response, and the `lobby_full` counter in `since_start`.
 - **2026-11 (companions)**: `POST /ops/bots/add` and `POST /ops/bots/remove`; `companions` and `companions_on` in the `GET /ops/games` response; `POST /register` answers `409` for the cast's names too; options `--bots`, `--bots-max`. Companions appear in `players` and the `snapshot` exactly like people (the same `pid`, `name`, `color`).
 - **2026-11 (Mr Alchemy)**: the `visitor` event and `POST /ops/games/visit`; `POST /register` answers `409` "that username is taken" for any spelling of the name Mr Alchemy; options `--mr-alchemy`, `--mr-alchemy-chance`, `--mr-alchemy-min`, `--mr-alchemy-max`.
 - **2026-11 (pictures)**: element pictures are no longer served by file name (`/static/elements/...` is `404`) and `GET /images` is no longer public or a list of names: it is `{"pictures": {id: address}}` for administrators only. Pictures are at `GET /pic/<token>.png`; each element's data (`snapshot`, `discovered`, the journal, hints, `GET /create/data`) carries `"pic"` when it has one.

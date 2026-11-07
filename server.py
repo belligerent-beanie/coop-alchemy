@@ -108,6 +108,7 @@ from daily import DailyStore
 from emotes import emote_list
 from bots import BotPolicy, BotRunner, bot_loop
 from cast import CAST
+from metrics import Metrics, metrics_loop
 from pictures import PictureIndex
 from visitor import VisitorPolicy, is_reserved
 from solo import SoloStore
@@ -254,6 +255,7 @@ class AlchemyServer(ThreadingHTTPServer):
         self.email_throttle = Throttle(3, 3600.0)    # verification emails per mailbox
         self.csp = build_csp(False)
         self.started = time.time()
+        self.metrics = Metrics()   # players, rooms and CPU over the last 24 hours, for the operations page (metrics.py)
         self.stats: Counter[str] = Counter()  # things that happened since the server started, for the operations page
         self._stats_lock = threading.Lock()
         self.names = NameFilter.load()               # blocked words in usernames, game names and recipe names (--blocklist-file adds more)
@@ -504,7 +506,12 @@ class Handler(BaseHTTPRequestHandler):
                 if isinstance(raw_name, str) and raw_name.strip():
                     self.server.names.check(raw_name, "game name")
                 self._limit_game_starts(user)
-                game = self.server.registry.create(raw_name, user)
+                try:
+                    game = self.server.registry.create(raw_name, user)
+                except GameError as exc:
+                    if exc.status == 409 and "are already running" in exc.message:
+                        self.server.bump("lobby_full")   # someone wanted to play and the server said the lobby is full: demand
+                    raise
                 self._json(200, {"id": game.slug, "name": game.name, "url": f"/g/{game.slug}"})
                 return
             if path == "/solo/start":
@@ -704,6 +711,7 @@ class Handler(BaseHTTPRequestHandler):
             "games": {"running": len(public), "max": server.registry.max_games, "private": len(games) - len(public),
                       "players": sum(int(g["players"]) for g in games)},
             "since_start": dict(server.stats),
+            "load": server.metrics.summary(),
             "reports": {"open": server.reports.count()},
             "signup": {"invite_required": server.invites is not None, "email_required": server.mailer is not None,
                        "human_check": server.captcha is not None, "behind_proxy": bool(server.trusted_proxies)},
@@ -1284,6 +1292,7 @@ def run(server: AlchemyServer, registry: GameRegistry, accounts: AccountStore, a
     if hasattr(signal, "SIGUSR1"):
         signal.signal(signal.SIGUSR1, lambda *_: wanted.set())
     threading.Thread(target=visitor_loop, args=(registry,), daemon=True, name="mr-alchemy").start()   # a reload re-runs main, so this restarts
+    threading.Thread(target=metrics_loop, args=(server.metrics, registry), daemon=True, name="load-samples").start()
     if registry.bots is not None:
         threading.Thread(target=bot_loop, args=(registry.bots,), daemon=True, name="companions").start()
     try:

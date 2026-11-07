@@ -259,7 +259,7 @@ class AccountEndpointTests(unittest.TestCase):
         self.user()
         status, data = call(self.port, "GET", "/ops/status")
         self.assertEqual(status, 200)
-        self.assertEqual(set(data), {"uptime_seconds", "accounts", "sessions", "games", "since_start", "reports", "signup"})
+        self.assertEqual(set(data), {"uptime_seconds", "accounts", "sessions", "games", "since_start", "load", "reports", "signup"})
         self.assertGreaterEqual(data["accounts"]["total"], 2)
         self.assertGreaterEqual(data["since_start"].get("logins", 0), 1)
         text = json.dumps(data) + json.dumps(call(self.port, "GET", "/ops/accounts")[1])
