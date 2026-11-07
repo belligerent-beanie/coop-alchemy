@@ -12,6 +12,72 @@
     <p class="who">Logged in as <strong id="who"></strong> · <button type="button" id="account-open" class="link">Account</button> ·
       <button type="button" id="logout" class="link">Log out</button></p>
 
+    <div class="home-tabs" role="tablist" aria-label="Ways to play">
+      <button type="button" class="home-tab" id="home-tab-solo" role="tab" data-tab="solo">Solo</button>
+      <button type="button" class="home-tab" id="home-tab-multiplayer" role="tab" data-tab="multiplayer">Multiplayer</button>
+      <button type="button" class="home-tab" id="home-tab-challenges" role="tab" data-tab="challenges">Challenges</button>
+    </div>
+
+    <div class="home-panel" id="panel-solo" role="tabpanel" aria-labelledby="home-tab-solo" hidden>
+    <section id="solo" hidden>
+      <h2>Solo <span id="solo-count" class="muted"></span></h2>
+      <p class="muted">Your own private game, saved as you go. Find every element to unlock Create recipes.</p>
+      <div class="journal-bar" role="progressbar" aria-label="Solo progress" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0"><div id="solo-bar-fill"></div></div>
+      <p class="home-links">
+        <button type="button" id="solo-start" class="btn">Play solo</button>
+        <span id="solo-error" class="error" role="alert"></span>
+      </p>
+      <h3 class="daily-sub">Achievements <span id="achievement-count" class="muted"></span></h3>
+      <ul id="achievements" class="achievements"></ul>
+      <p class="muted">One hint a day in Solo: use it wisely.</p>
+    </section>
+
+    <section>
+      <h2>Create recipes</h2>
+      <p id="create-blurb" class="muted">A solo playground with every element unlocked. Invent new combinations and, if you like one,
+        promote it so the admins can add it to the game, with your name as credit.</p>
+      <p class="home-links">
+        <a class="btn" id="create-link" href="/create">Create recipes</a>
+        <a id="admin-link" class="btn" href="/admin" hidden>Review proposals <span id="admin-pending" class="pill" hidden></span></a>
+        <a id="ops-link" class="btn" href="/ops" hidden>Operations</a>
+      </p>
+    </section>
+
+    </div>
+
+    <div class="home-panel" id="panel-multiplayer" role="tabpanel" aria-labelledby="home-tab-multiplayer" hidden>
+    <section id="recent-section" hidden>
+      <h2>Recently joined</h2>
+      <p class="muted">Games you left that are still running.</p>
+      <ul id="recent"></ul>
+    </section>
+
+    <section>
+      <h2>Running games <span id="game-count" class="muted"></span></h2>
+      <ul id="games"></ul>
+      <p id="no-games" class="muted" hidden>No games are running. Start one below!</p>
+    </section>
+
+    <section>
+      <h2>Start a new game</h2>
+      <form id="new-game" autocomplete="off">
+        <input id="new-name" maxlength="30" placeholder="Game name (optional: random if blank)" aria-label="Game name">
+        <button type="submit" id="create">Create game</button>
+      </form>
+      <p id="create-error" class="error" role="alert"></p>
+    </section>
+
+    <section>
+      <h2>Saved games</h2>
+      <p class="muted">Games you played in that were ended with saving. Saves are kept for 3 days and don't count
+        towards the limit of running games.</p>
+      <ul id="saved-games"></ul>
+      <p id="no-saved" class="muted" hidden>You have no saved games.</p>
+      <p id="saved-msg" class="error" role="alert"></p>
+    </section>
+    </div>
+
+    <div class="home-panel" id="panel-challenges" role="tabpanel" aria-labelledby="home-tab-challenges" hidden>
     <section id="daily" hidden>
       <h2>Daily challenge <span id="daily-date" class="muted"></span> <span id="daily-streak" class="streak" hidden></span></h2>
       <p class="muted">Start with the basic elements and discover a target while unlocking as few elements as you
@@ -51,46 +117,8 @@
       <p id="race-empty" class="muted">No races are waiting for racers.</p>
     </section>
 
-    <section>
-      <h2>Create recipes</h2>
-      <p class="muted">A solo playground with every element unlocked. Invent new combinations and, if you like one,
-        promote it so the admins can add it to the game, with your name as credit.</p>
-      <p class="home-links">
-        <a class="btn" href="/create">Create recipes</a>
-        <a id="admin-link" class="btn" href="/admin" hidden>Review proposals <span id="admin-pending" class="pill" hidden></span></a>
-        <a id="ops-link" class="btn" href="/ops" hidden>Operations</a>
-      </p>
-    </section>
+    </div>
 
-    <section id="recent-section" hidden>
-      <h2>Recently joined</h2>
-      <p class="muted">Games you left that are still running.</p>
-      <ul id="recent"></ul>
-    </section>
-
-    <section>
-      <h2>Running games <span id="game-count" class="muted"></span></h2>
-      <ul id="games"></ul>
-      <p id="no-games" class="muted" hidden>No games are running. Start one below!</p>
-    </section>
-
-    <section>
-      <h2>Start a new game</h2>
-      <form id="new-game" autocomplete="off">
-        <input id="new-name" maxlength="30" placeholder="Game name (optional: random if blank)" aria-label="Game name">
-        <button type="submit" id="create">Create game</button>
-      </form>
-      <p id="create-error" class="error" role="alert"></p>
-    </section>
-
-    <section>
-      <h2>Saved games</h2>
-      <p class="muted">Games you played in that were ended with saving. Saves are kept for 3 days and don't count
-        towards the limit of running games.</p>
-      <ul id="saved-games"></ul>
-      <p id="no-saved" class="muted" hidden>You have no saved games.</p>
-      <p id="saved-msg" class="error" role="alert"></p>
-    </section>
     <p class="muted"><a href="/privacy">Privacy</a></p>
   </main>
 
@@ -112,7 +140,7 @@
     </form>
     <div id="delete-box">
       <h2>Delete my account</h2>
-      <p class="muted">This removes your account, your recipe drafts and daily scores, and saved games nobody else played; your
+      <p class="muted">This removes your account, your recipe drafts, daily scores and Solo progress, and saved games nobody else played; your
         name in shared saved games becomes "deleted player". It cannot be undone.
         <a href="/privacy">What is stored</a></p>
       <form id="delete-form" autocomplete="off">

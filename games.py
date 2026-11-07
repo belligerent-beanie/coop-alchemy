@@ -26,6 +26,7 @@ from daily import MAX_ATTEMPTS, TIERS, DailyStore, reference_sizes, target_pools
 from race import GOALS, RaceRoom
 from recipes import RecipeBook, depths
 from saves import SaveStore
+from solo import SoloStore
 from state import Challenge, GameError, GameState
 
 MAX_GAMES = 3
@@ -61,11 +62,13 @@ class GameRegistry:
                  clock: Callable[[], float] = time.monotonic,
                  saves: SaveStore | None = None,
                  daily: DailyStore | None = None,
+                 solo: SoloStore | None = None,
                  max_per_account: int = 0) -> None:
         self.book = book
         self.max_per_account = max_per_account  # running public games one account may have started (0 = no limit)
         self.saves = saves or SaveStore(None)
         self.daily = daily or DailyStore(None, book)
+        self.solo = solo or SoloStore(None)
         self.max_games = max_games
         self.idle_seconds = idle_seconds
         self._clock = clock
@@ -115,11 +118,41 @@ class GameRegistry:
             self._games[slug] = game
             return game
 
+    # ---- solo mode ----------------------------------------------------------------
+
+    def start_solo(self, username: str) -> GameState:
+        """The account's solo game: the one running, or a new one that carries on from what the account found before.
+
+        Solo games are private, do not count towards the limit on running games, and save after every discovery.
+        """
+        with self._lock:
+            self._expire()
+            for game in self._games.values():
+                if game.solo is not None and key_of(game.creator) == key_of(username):
+                    return game
+            slug = next(s for s in (f"solo-{secrets.token_hex(4)}" for _ in range(100)) if s not in self._games)
+            game = GameState(self.book, name=f"Solo: {username}", slug=slug, creator=username, clock=self._clock,
+                             solo=self._solo_saver(username))
+            game.restore(self.solo.load(username))
+            game.report_solo()   # so the status is right before the first discovery
+            self._games[slug] = game
+            return game
+
+    def _solo_saver(self, username: str) -> Callable[[dict[str, Any], int, int, bool, set[str]], list[str]]:
+        def save(export: dict[str, Any], found: int, total: int, complete: bool, earned: set[str]) -> list[str]:
+            return self.solo.record(username, export, found, total, complete, earned)
+        return save
+
+    def solo_status(self, username: str) -> dict[str, Any]:
+        """{"found", "total", "complete"}: the account's solo progress. A running game is more up to date than the file."""
+        return self.solo.status(username)
+
     def overview(self) -> list[dict[str, Any]]:
         """Every running game for the administrator: its summary, its kind (game, daily or race) and whether it is private."""
         with self._lock:
             self._expire()
-            return [{**game.summary(), "kind": "daily" if game.challenge is not None else "race" if game.race is not None else "game",
+            return [{**game.summary(), "kind": "daily" if game.challenge is not None else "race" if game.race is not None
+                     else "solo" if game.solo is not None else "game",
                      "private": game.private} for game in self._games.values()]
 
     def admin_end(self, slug: str) -> None:
@@ -139,6 +172,8 @@ class GameRegistry:
             player = game.authorize(token)
             if save and game.challenge is not None:
                 raise GameError(400, "a daily challenge attempt cannot be saved")
+            if game.solo is not None:
+                save = False   # a solo game keeps its progress by itself, after every discovery
             if save and game.creator and key_of(player.name) != key_of(game.creator):
                 raise GameError(403, f"only {game.creator}, who started this game, can save it")
             if save:
@@ -318,8 +353,9 @@ class GameRegistry:
                         continue
                     challenge = self._challenge(day, tier, target, reference if isinstance(reference, int)
                                                 and not isinstance(reference, bool) else None)
+                solo = self._solo_saver(creator) if data.get("solo") is True and creator else None
                 game = GameState(self.book, name=name, slug=slug, creator=creator, clock=self._clock,
-                                 challenge=challenge)
+                                 challenge=challenge, solo=solo)
                 game.live_restore(data)
                 self._games[slug] = game
                 restored += 1

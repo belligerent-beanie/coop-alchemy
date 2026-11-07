@@ -23,6 +23,11 @@ HTTP API
                                            the caller's own daily attempt is listed with "private": true)
     POST /games         {"name"}        -> {"id", "name", "url"}      (409 if 3 games are running)
     GET  /saved                         -> {"games": [...]}  saved games this account played in
+    GET  /solo                          -> {"found", "total", "complete", "may_create", "achievements"}   the caller's solo
+                                           progress; "may_create" is whether Create Recipes is open to them (see solo.py)
+    GET  /emotes                        -> {"emotes": [{"id", "label", "glyph"}]}   what players can send (see emotes.py)
+    POST /solo/start                    -> {"id", "url"}   the caller's private solo game: the one running, or a new one
+                                           that carries on from what they found before (saved after every discovery)
     GET  /daily                         -> today's three challenges (easy, medium, hard) with the caller's results,
                                            their streak and the weekly board   (see daily.py)
     GET  /daily/history                 -> {"days": [...]}   the latest days: targets, the caller's best, the winner
@@ -94,7 +99,10 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from accounts import AccountStore, clean_email, key_of
 from captcha import ORIGIN as TURNSTILE_ORIGIN
 from captcha import Turnstile
+from achievements import describe as describe_achievements
 from daily import DailyStore
+from emotes import emote_list
+from solo import SoloStore
 from drafts import DraftStore
 from erasure import erase_account
 from games import IDLE_CLOSE_SECONDS, MAX_GAMES, GameRegistry
@@ -115,7 +123,7 @@ MAX_DRAIN = 65536  # an unread request body up to this size is read and thrown a
 KEEPALIVE_SECONDS = 3  # a closed browser is noticed on the second failed write, so about 6 s
 CURSOR_BATCH_SECONDS = 0.03  # after a cursor update, the stream waits this long to send the room's pointer moves together
 
-ACTIONS = ("/end", "/combine", "/cursor", "/genie", "/hint", "/journal", "/tile/add", "/tile/grab", "/tile/move",
+ACTIONS = ("/end", "/combine", "/cursor", "/emote", "/genie", "/hint", "/journal", "/tile/add", "/tile/grab", "/tile/move",
            "/tile/drop", "/tile/remove", "/tiles/clear")
 GAME_PATH = re.compile(r"^/g/([a-z0-9-]+)(/[a-z/]*)?$")
 RACE_PATH = re.compile(r"^/races/([a-z0-9-]+)(/(?:join|leave|start))?$")
@@ -144,6 +152,8 @@ def run_action(state: GameState, path: str, token: str, body: dict[str, Any]) ->
         return state.remove_tile(token, body.get("tile"))
     if path == "/tiles/clear":
         return state.clear_tiles(token)
+    if path == "/emote":
+        return state.emote(token, body.get("emote"))
     if path == "/hint":
         return state.hint(token, body.get("kind"), body.get("target"))
     if path == "/journal":
@@ -395,6 +405,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, self._game_list())
             elif path == "/saved":
                 self._json(200, {"games": self.server.registry.find_saved(self._user())})
+            elif path == "/solo":
+                self._json(200, self._solo_status())
+            elif path == "/emotes":
+                self._user()
+                self._json(200, {"emotes": emote_list()})
             elif path == "/daily":
                 self._json(200, self.server.registry.daily_status(self._user()))
             elif path == "/daily/history":
@@ -473,6 +488,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._limit_game_starts(user)
                 game = self.server.registry.create(raw_name, user)
                 self._json(200, {"id": game.slug, "name": game.name, "url": f"/g/{game.slug}"})
+                return
+            if path == "/solo/start":
+                game = self.server.registry.start_solo(self._user())
+                self._json(200, {"id": game.slug, "url": f"/g/{game.slug}"})
                 return
             if path == "/daily/start":
                 body = self._read_json()
@@ -721,7 +740,8 @@ class Handler(BaseHTTPRequestHandler):
             return {"temporary_password": temporary}
         registry = server.registry
         summary = erase_account(username, accounts=accounts, saves=registry.saves, drafts=server.drafts,
-                                daily=registry.daily, invites=server.invites, reports=server.reports)
+                                daily=registry.daily, invites=server.invites, reports=server.reports,
+                                solo=registry.solo)
         server.bump("accounts_deleted")
         return {"deleted": summary.as_json()}
 
@@ -748,7 +768,8 @@ class Handler(BaseHTTPRequestHandler):
             raise
         registry = self.server.registry
         summary = erase_account(username, accounts=accounts, saves=registry.saves, drafts=self.server.drafts,
-                                daily=registry.daily, invites=self.server.invites, reports=self.server.reports)
+                                daily=registry.daily, invites=self.server.invites, reports=self.server.reports,
+                                solo=registry.solo)
         self.server.bump("accounts_deleted")
         log.info("account deleted client=%s user=%s", client, username)
         self._json(200, {"deleted": summary.as_json()})
@@ -786,9 +807,25 @@ class Handler(BaseHTTPRequestHandler):
             raise GameError(403, "only admins can do that")
         return name
 
-    def _create_data(self) -> dict[str, Any]:
-        """Everything the Create Recipes page needs: every real element, plus this account's drafts."""
+    def _may_create(self, username: str) -> bool:
+        """Creating and proposing recipes is for accounts that found every element in Solo mode, and for administrators
+        and bot accounts (who never play it). Everyone else would learn the whole recipe book from the playground."""
+        accounts = self.server.accounts
+        return accounts.is_admin(username) or accounts.is_bot(username) or self.server.registry.solo.is_complete(username)
+
+    def _solo_status(self) -> dict[str, Any]:
         username = self._user()
+        return {**self.server.registry.solo_status(username), "may_create": self._may_create(username),
+                "achievements": describe_achievements(self.server.registry.solo.achievements(username))}
+
+    def _create_data(self) -> dict[str, Any]:
+        """Everything the Create Recipes page needs: every real element, plus this account's drafts.
+
+        Until the account may create, it gets only its solo progress: not one element or recipe leaves the server.
+        """
+        username = self._user()
+        if not self._may_create(username):
+            return {"username": username, "locked": True, "solo": self.server.registry.solo_status(username)}
         book = self.server.registry.book
         mine = self.server.drafts.view(username, book)
         return {
@@ -806,6 +843,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/admin/reopen":
             return drafts.reopen(self._admin(), body.get("id"))
         username = self._user()
+        if not self._may_create(username):
+            raise GameError(403, "Create Recipes opens once you have found every element in Solo mode")
         if path == "/create/combine":
             return {"results": drafts.combine(username, book, body.get("a"), body.get("b"))}
         if path == "/create/recipe":
@@ -1009,6 +1048,8 @@ def main() -> int:
     parser.add_argument("--tls-key", help="private key file (PEM) for --tls-cert")
     parser.add_argument("--drafts-file", default=str(BASE_DIR / "drafts.json"),
                         help="where draft recipes and promotion requests are kept (default: ./drafts.json)")
+    parser.add_argument("--solo-file", default=str(BASE_DIR / "solo.json"),
+                        help="where each account's solo-mode progress is kept (default: ./solo.json)")
     parser.add_argument("--daily-file", default=str(BASE_DIR / "daily.json"),
                         help="where the daily challenge's targets and scores are kept (default: ./daily.json)")
     parser.add_argument("--snapshot-file", default=str(BASE_DIR / "reload_snapshot.json"),
@@ -1038,7 +1079,8 @@ def main() -> int:
 
     saves = SaveStore(args.saves_dir)
     registry = GameRegistry(book, max_games=max(1, args.max_games), idle_seconds=args.idle_minutes * 60, saves=saves,
-                            daily=DailyStore(args.daily_file, book), max_per_account=max(0, args.max_games_per_account))
+                            daily=DailyStore(args.daily_file, book), solo=SoloStore(args.solo_file),
+                            max_per_account=max(0, args.max_games_per_account))
     accounts = AccountStore(args.accounts_file)
     listen_fd = int(os.environ.pop("ALCHEMY_LISTEN_FD")) if "ALCHEMY_LISTEN_FD" in os.environ else None
     try:

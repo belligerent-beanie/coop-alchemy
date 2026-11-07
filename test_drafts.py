@@ -328,6 +328,8 @@ class HttpTests(unittest.TestCase):
         cls.admin = login_as(cls.port, "Rooty")
         cls.server.accounts.set_admin("Rooty", True)
         cls.ann = login_as(cls.port, "Annie")
+        cls.server.registry.solo.record("Annie", {}, 1, 1, True)   # Create Recipes is open only after Solo mode
+        cls.newbie = login_as(cls.port, "Newbie")
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -343,6 +345,17 @@ class HttpTests(unittest.TestCase):
         for method, path in (("GET", "/create/data"), ("POST", "/create/combine"), ("GET", "/admin/queue"), ("GET", "/admin/approved"), ("POST", "/admin/reopen"),
                              ("POST", "/admin/handle")):
             self.assertEqual(self.req("", method, path, {} if method == "POST" else None)[0], 401, path)
+
+    def test_create_is_locked_until_solo_mode_is_complete(self) -> None:
+        status, data = self.req(self.newbie, "GET", "/create/data")
+        self.assertEqual(status, 200)
+        self.assertEqual(set(data), {"username", "locked", "solo"})   # not one element or recipe
+        self.assertTrue(data["locked"])
+        for path, body in (("/create/combine", {"a": "water", "b": "fire"}), ("/create/recipe", {"a": "air", "b": "air", "name": "Gale"}),
+                           ("/create/delete", {"id": "x"}), ("/create/promote", {"id": "x"})):
+            self.assertEqual(self.req(self.newbie, "POST", path, body)[0], 403, path)
+        self.assertIn("elements", self.req(self.admin, "GET", "/create/data")[1])   # administrators are exempt
+        self.assertIn("elements", self.req(self.ann, "GET", "/create/data")[1])
 
     def test_me_reports_admins(self) -> None:
         self.assertEqual(self.req(self.admin, "GET", "/me")[1], {"username": "Rooty", "admin": True, "must_change_password": False})

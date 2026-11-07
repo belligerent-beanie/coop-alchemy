@@ -411,9 +411,26 @@ function askPromote(r) {
 
 // ---- start --------------------------------------------------------------------------------------
 
+/** Until Solo mode is finished the server sends no elements at all: this page only says how far along the account is. */
+function showLocked(solo) {
+  const box = document.getElementById("workspace");
+  const found = solo && solo.total ? ` You have found ${solo.found} of ${solo.total}.` : "";
+  const message = document.createElement("p");
+  message.id = "hint";
+  message.textContent = `Create Recipes opens once you have found every element in Solo mode.${found}`;
+  const link = document.createElement("a");
+  link.className = "btn";
+  link.href = "/";
+  link.textContent = "Back to the home page to play Solo";
+  box.replaceChildren(message, link);
+  document.getElementById("sidebar").hidden = true;
+  document.getElementById("clear").hidden = true;
+}
+
 async function start() {
   try {
     const data = await call("/create/data");
+    if (data.locked) { showLocked(data.solo); return; }
     for (const el of data.elements) addElement(el);
     syncDrafts(data.drafts);
     loadImageNames(() => {

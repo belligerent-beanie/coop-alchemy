@@ -325,6 +325,8 @@ def run(out: Path, chrome_path: str) -> int:
     report = Report()
     tmp = tempfile.TemporaryDirectory()
     port = free_port()
+    # "phonea" has already finished Solo mode, so the Create Recipes checks below see the real page
+    (Path(tmp.name) / "solo.json").write_text(json.dumps({"version": 1, "users": {"phonea": {"complete": True, "found": 1, "total": 1}}}), encoding="utf-8")
     server = subprocess.Popen(server_command(ROOT, port, Path(tmp.name), None), cwd=str(ROOT), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     browser: Chrome | None = None
     try:
@@ -507,6 +509,75 @@ def run(out: Path, chrome_path: str) -> int:
             wide = browser.evaluate("document.documentElement.scrollWidth - innerWidth")
             report.check(wide <= 1, f"{name} page fits the screen", f"{wide}px too wide")
             browser.screenshot(out / f"phone-{name}.png")
+
+        print("\nHome page tabs and Solo mode on a phone")
+        browser.navigate(base + "/#solo")
+        time.sleep(1.0)
+        report.check(browser.evaluate("[...document.querySelectorAll('.home-tab')].map(t => t.textContent).join()") == "Solo,Multiplayer,Challenges",
+                     "the home page has Solo, Multiplayer and Challenges tabs")
+        report.check(browser.evaluate("!document.getElementById('panel-solo').hidden && document.getElementById('panel-multiplayer').hidden"),
+                     "the address #solo opens the Solo tab", browser.evaluate("location.href + ' ' + [...document.querySelectorAll('.home-panel')].map(p => p.id + ':' + p.hidden).join()"))
+        x, y = center_of(browser, "#home-tab-challenges")
+        browser.tap(x, y)
+        time.sleep(0.4)
+        report.check(browser.evaluate("!document.getElementById('panel-challenges').hidden && document.getElementById('panel-solo').hidden"),
+                     "tapping a tab switches to it")
+        report.check(browser.evaluate("document.documentElement.scrollWidth - innerWidth") <= 1, "the Challenges tab fits the screen")
+        browser.screenshot(out / "phone-home-challenges.png")
+        x, y = center_of(browser, "#home-tab-solo")
+        browser.tap(x, y)
+        time.sleep(0.4)
+        report.check(browser.evaluate("document.querySelectorAll('#achievements .achievement').length") >= 10,
+                     "the Solo tab lists the achievements")
+        report.check(browser.evaluate("document.documentElement.scrollWidth - innerWidth") <= 1, "...and fits the phone screen")
+        browser.screenshot(out / "phone-home-solo.png")
+        x, y = center_of(browser, "#solo-start")
+        browser.tap(x, y)
+        for _ in range(40):
+            time.sleep(0.25)
+            if "/g/solo-" in browser.evaluate("location.pathname"):
+                break
+        report.check("/g/solo-" in browser.evaluate("location.pathname"), "Play solo opens a private solo game")
+        join_by_touch()
+        report.check(browser.evaluate("document.getElementById('invite').hidden"), "a solo game has no invite button")
+        report.check(browser.evaluate("document.getElementById('end').textContent") == "Leave", "a solo game says Leave, not End")
+        report.check(browser.evaluate("document.getElementById('emote-open').hidden"), "a solo game has no emote button")
+        report.check("1 hint" in browser.evaluate("document.getElementById('hints-left').textContent"), "a solo game says you have 1 hint today")
+        browser.evaluate("document.querySelector('#hints summary').click()")
+        time.sleep(0.3)
+        x, y = center_of(browser, '[data-hint="can_make"]')
+        browser.tap(x, y)
+        time.sleep(1.0)
+        report.check("used today's hint" in browser.evaluate("document.getElementById('hints-left').textContent"), "using it says the hint is used up")
+        report.check(browser.evaluate("document.querySelector('[data-hint=can_make]').disabled"), "...and the hint buttons are switched off")
+        # the end-of-game screen (this is the solo page, so closing its stream disturbs nothing that follows)
+        browser.evaluate("handlers.ended({by: 'phoneb', saved: false, awards: [{icon: '🥇', title: 'Most elements found', player: 'phonea', detail: '12 elements'}, "
+                         "{icon: '💎', title: 'Rarest find', player: 'phoneb', detail: 'a rare thing, only 1 way to make it'}]})")
+        time.sleep(0.4)
+        report.check(browser.evaluate("!document.getElementById('awards').hidden && document.querySelectorAll('#awards-list li').length === 2"),
+                     "the end-of-game screen lists the awards")
+        report.check(browser.evaluate("document.documentElement.scrollWidth - innerWidth") <= 1, "...and fits the phone screen")
+        browser.screenshot(out / "phone-awards.png")
+        browser.evaluate("document.getElementById('journal-open').click()")
+        time.sleep(0.8)
+        browser.evaluate("document.getElementById('journal-tab-grid').click()")
+        time.sleep(0.5)
+        report.check(browser.evaluate("document.querySelectorAll('#journal-grid .collection-tile.locked').length") > 100,
+                     "the Collection tab shows silhouettes for what is not found yet")
+        report.check(browser.evaluate("document.getElementById('journal-dialog').scrollWidth <= innerWidth"), "the Collection fits the phone screen")
+        browser.screenshot(out / "phone-collection.png")
+        browser.evaluate("document.getElementById('journal-close').click()")
+
+        print("\nCreate Recipes page is locked for an account that has not finished Solo")
+        status, other = api.call("POST", "/register", {"username": "phonec", "password": "touch-check-pass-1"})
+        browser.navigate(base + "/login")
+        browser.evaluate(f"localStorage.setItem('alchemy-session', {json.dumps(other['session'])}); localStorage.setItem('alchemy-user', 'phonec');")
+        browser.navigate(base + "/create")
+        time.sleep(1.0)
+        report.check(browser.evaluate("document.querySelectorAll('#items .item').length") == 0, "a locked Create page lists no elements")
+        report.check("Solo" in browser.evaluate("document.getElementById('hint').textContent"), "...and says to finish Solo mode")
+        browser.navigate(base + "/login")
+        browser.evaluate(f"localStorage.setItem('alchemy-session', {json.dumps(sessions['phonea'])}); localStorage.setItem('alchemy-user', 'phonea');")
 
         print("\nCreate Recipes page with a finger")
         browser.navigate(base + "/create")

@@ -76,6 +76,9 @@ this file in the same commit (and add a line to the [change log](#change-log)).
 
 | Endpoint | Auth | Description |
 |---|---|---|
+| `GET /solo` | session | `{"found", "total", "complete", "may_create", "achievements": [{"id", "icon", "title", "description", "earned_at"}]}`: the caller's solo-mode progress, whether Create Recipes is open to them (administrators and bot accounts always may), and every achievement (`earned_at` is a unix time, or null). |
+| `GET /emotes` | session | `{"emotes": [{"id", "label", "glyph"}]}`: what players can send with `POST /g/<id>/emote` (the list lives in `emotes.py`). |
+| `POST /solo/start` | session | `{}` → `{"id", "url"}`: the caller's private solo game (the one running, or a new one that carries on from what they found; saved after every discovery). |
 | `GET /daily` | session | Today's three challenges (easy, medium, hard) with the caller's results, streak and the weekly board (see `daily.py`). |
 | `GET /daily/history` | session | `{"days": [...]}`: the latest days with targets, the caller's best and the winner. |
 | `POST /daily/start` | session | `{"tier", "fresh"?}` → `{"id", "url"}`: the caller's attempt in that tier. The one in progress is free; a new one uses one of 3 attempts a day (always new with `"fresh": true`); `409` when none are left. |
@@ -109,8 +112,9 @@ Every request below carries `{"player": "<token>"}` except `/join` (which needs 
 | `POST /g/<id>/tile/remove` | player token | `{"tile"}` → `{}`. |
 | `POST /g/<id>/tiles/clear` | player token | `{}` → `{"cleared"}`. |
 | `POST /g/<id>/combine` | player token | `{"b": target tile, "a": held tile or "element": element id, "x", "y"}` → `{"results", "new", "tiles", "removed"}`. |
-| `POST /g/<id>/hint` | player token | `{"kind": "can_make" \| "try" \| "find", "target"}` → a private hint. |
-| `POST /g/<id>/journal` | player token | `{}` → `{"elements": [...]}`: every fully discovered element with the recipes that make it and use it. |
+| `POST /g/<id>/hint` | player token | `{"kind": "can_make" \| "try" \| "find", "target"}` → a private hint. In a solo game there is one hint a day (UTC): the answer also has `"hints_left"`, and a second hint gets `429`. A hint that found nothing does not use it up. |
+| `POST /g/<id>/emote` | player token | `{"emote": id}` → `{}`: shows an emote from `GET /emotes` next to your name for everyone in the game. `400` for an unknown id, `429` faster than one a second, `403` in solo, daily and race games. |
+| `POST /g/<id>/journal` | player token | `{}` → `{"elements": [...], "progress": {"found", "total", "locked"}}`: every fully discovered element with the recipes that make it and use it, and how many elements can be found in all. `locked` is only a count (the elements still to find are never named); Time counts although no recipe makes it. |
 | `POST /g/<id>/genie` | player token | `{"element"}` → `{"results", "new", "tiles", "genie"}`. |
 | `POST /g/<id>/report` | player token | `{"target": pid, "reason": "name", "behaviour" or "other", "note"?}` → `{}`: tells the administrators about another player in the game (`target` is a `pid` from `players`). The note is at most 140 characters. **Nothing records who sent it.** The same reporter reporting the same player again within a day is ignored without an error. `404` if the player is not in the game, `400` for yourself or a bad reason, `429` after 5 reports an hour from one account. |
 | `POST /g/<id>/end` | player token | `{"save": true \| false}` → `{"saved"}`: ends the game for everyone. Saving: `403` unless the caller created the game. |
@@ -125,9 +129,11 @@ A ticket works once, so after a dropped connection a page asks for a fresh ticke
 
 | Event | Payload |
 |---|---|
-| `snapshot` | `{"challenge", "race", "you": pid, "game": {"id", "name", "creator"}, "genie", "total", "elements": [...], "players": [...], "tiles": [...]}` |
+| `snapshot` | `{"challenge", "race", "you": pid, "game": {"id", "name", "creator", "solo", "hints_left"}, "genie", "total", "elements": [...], "players": [...], "tiles": [...]}` (`hints_left` is a number in a solo game and null elsewhere; each element has `"rarity"`). |
 | `players` | `{"players": [{"pid", "name", "color"}]}`: who is connected now. |
-| `discovered` | `{"id", "label", "emoji", "credit"?, "by", "pid", "found", "total"}` (plus `"unlocked"` for Time, with `pid` null). |
+| `discovered` | `{"id", "label", "emoji", "credit"?, "by", "rarity", "pid", "found", "total"}` (plus `"unlocked"` for Time, with `pid` null). `rarity` is `common`, `uncommon`, `rare` or `epic`: how far the element is from the starting elements compared with all the others. |
+| `emote` | `{"pid", "name", "emote"}`: someone sent an emote (an `id` from `GET /emotes`); everyone in the game gets it, the sender too. |
+| `achievement` | `{"id", "icon", "title", "description"}`: the solo player earned an achievement (solo games only). |
 | `genie` | `{"status", "used_by"}` |
 | `cursor` | `{"pid", "x", "y"}` (null `x`, `y`: hidden). |
 | `tile_added` | `{"tile": {"id", "element", "x", "y", "held_by"}}` |
@@ -138,13 +144,13 @@ A ticket works once, so after a dropped connection a page asks for a fresh ticke
 | `tiles_cleared` | `{"pid", "name"}`: who sent the cat. |
 | `race_won` | `{"name"}` |
 | `challenge_done` | `{"score", "reference", "target"}` |
-| `ended` | `{"by", "saved"}` |
+| `ended` | `{"by", "saved", "awards": [{"id", "icon", "title", "player", "detail"}]}`: minor awards for a shared game (empty in solo, daily and race games). |
 
 ## Creating recipes and reviewing them
 
 | Endpoint | Auth | Description |
 |---|---|---|
-| `GET /create/data` | session | `{"username", "elements": [...], "drafts": [...]}`: what the Create Recipes page needs. |
+| `GET /create/data` | session | `{"username", "elements": [...], "drafts": [...]}`: what the Create Recipes page needs. For an account that has not found every element in solo mode it is `{"username", "locked": true, "solo": {"found", "total", "complete"}}` and nothing else: no element, no recipe. All the `/create/...` actions below answer `403` to such an account. |
 | `POST /create/combine` | session | `{"a", "b"}` → `{"results": [...]}`: what two elements make, counting this account's drafts. |
 | `POST /create/recipe` | session | `{"a", "b", "name"}` → the new draft (`400` if the name contains a blocked word). |
 | `POST /create/delete` | session | `{"id"}` → the removed draft. |
@@ -186,6 +192,8 @@ checks that every option the server accepts appears in the README.
 
 Newest first. Add a line whenever an endpoint, event, status code or option is added, changed or removed.
 
+- **2026-11 (moments, awards, emotes, achievements)**: `rarity` on discovered elements and in the `discovered` event; `awards` in the `ended` event; `POST /g/<id>/emote`, `GET /emotes` and the `emote` event; the `achievement` event and `achievements` in `GET /solo`; one hint a day in solo games (`hints_left` in the hint answer and in the snapshot's `game`, `429` when used up).
+- **2026-11 (solo mode)**: `GET /solo` and `POST /solo/start`; `GET /create/data` answers `{"locked": true, ...}` and the `/create/...` actions `403` until the account has found every element in solo mode (administrators and bot accounts are exempt); `"solo": true` in the game object of the `snapshot` event; `POST /g/<id>/journal` also returns `progress`; unknown and undiscovered element ids now get the same `400` answer; `solo` in the account-deletion summary; option `--solo-file`.
 - **2026-11 (strangers' safety)**: `POST /g/<id>/report`; `GET /ops/reports` and `POST /ops/reports/dismiss`; `reports` in the `/ops/status` response and in the account-deletion summary; blocked-word checks (`400`) on usernames, game names and recipe names; one running game per account and 10 games an hour (`409`, `429`); options `--blocklist-file`, `--reports-file`, `--max-games-per-account`.
 - **2026-11 (phones)**: phones are no longer redirected to `/laptop` or refused with `403`; they get the same pages and API as every other browser. `GET /laptop` is gone.
 - **2026-11 (options)**: `--client-ip-header`, `--max-games`, `--log-file`, `--log-days` (README options table).

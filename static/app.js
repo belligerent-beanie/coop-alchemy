@@ -203,6 +203,7 @@ function appendItem(el) {
   node.querySelector(":scope > img.pic")?.remove();  // setFace ran before the slot existed
   applyImage(node, el);
   node.dataset.element = el.id;
+  node.dataset.rarity = el.rarity || "common";
   node.dataset.search = el.label.toLowerCase();
   if (el.credit) node.classList.add("player-made");   // a star in the corner; the tooltip says who proposed it
   node.addEventListener("pointerdown", onItemPointerDown);
@@ -219,7 +220,8 @@ function matchesFilter(node) {
 }
 
 function upsertElement(raw) {
-  const el = { id: raw.id, label: raw.label, emoji: raw.emoji, by: raw.by ?? null, credit: raw.credit || "" };
+  const el = { id: raw.id, label: raw.label, emoji: raw.emoji, by: raw.by ?? null, credit: raw.credit || "",
+               rarity: raw.rarity || "common" };
   const had = elements.has(el.id);
   elements.set(el.id, el);
   if (!had) appendItem(el);
@@ -299,6 +301,20 @@ function setChallenge(c) {
   $("end-save").hidden = true;
   $("end-nosave").textContent = "Leave";
   $("end-cancel").textContent = "Keep trying";
+}
+
+/** A solo game: private, saved after every discovery, so there is nothing to invite or to save. */
+let solo = false;
+function setSolo(on) {
+  solo = on;
+  if (!on) return;
+  $("invite").hidden = true;
+  $("end").textContent = "Leave";
+  $("end-title").textContent = "Leave solo mode?";
+  $("end-text").textContent = "Your progress is saved after every discovery. Solo carries on from here next time.";
+  $("end-save").hidden = true;
+  $("end-nosave").textContent = "Leave";
+  $("end-cancel").textContent = "Stay";
 }
 
 let shareStreak = 0;   // the player's streak, for the "Copy result" text
@@ -399,6 +415,7 @@ function setPlayers(list) {
     dot.style.setProperty("--c", p.color);
     const name = document.createElement("span");
     name.textContent = p.name;
+    li.dataset.pid = p.pid;
     li.append(dot, name);
     if (p.pid === me.pid) {
       const you = document.createElement("span");
@@ -416,6 +433,7 @@ function setPlayers(list) {
       li.append(flag);
     }
     key.appendChild(li);
+    if (shownEmotes.has(p.pid)) paintEmote(p.pid);
   }
 
   for (const [pid, node] of cursors) {
@@ -975,12 +993,16 @@ async function askHint(kind, target) {
   const buttons = $("hints").querySelectorAll("button");
   buttons.forEach((b) => { b.disabled = true; });
   try {
-    showHint(await api("/hint", { kind, target }));
+    const answer = await api("/hint", { kind, target });
+    if (typeof answer.hints_left === "number") hintsLeft = answer.hints_left;
+    showHint(answer);
   } catch (err) {
     hintResult.className = "error";
     hintResult.textContent = err.message;
+    if (/used today's hint/.test(err.message)) hintsLeft = 0;
   } finally {
     buttons.forEach((b) => { b.disabled = false; });
+    paintHintsLeft();
   }
 }
 
@@ -1133,8 +1155,161 @@ function catSweep(onPeak, message = "") {
   }, SMOKE_END_MS);
 }
 
+// ---- discovery moments: a sound and a flourish that grow with how rare the find is ---------------------------------
+
+let soundOn = true;
+try { soundOn = localStorage.getItem("alchemy-sound") !== "off"; } catch (_) { /* private window: sound stays on */ }
+let audioContext = null;
+
+/** A few quick notes (frequencies in Hz) from a synthesizer, so there are no sound files to download. */
+function playNotes(notes, volume = 0.07) {
+  if (!soundOn) return;
+  try {
+    audioContext = audioContext || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioContext.state === "suspended") audioContext.resume();
+    const start = audioContext.currentTime + 0.01;
+    notes.forEach((hz, i) => {
+      const osc = audioContext.createOscillator();
+      const amp = audioContext.createGain();
+      const at = start + i * 0.085;
+      osc.type = "triangle";
+      osc.frequency.value = hz;
+      amp.gain.setValueAtTime(0.0001, at);
+      amp.gain.exponentialRampToValueAtTime(volume, at + 0.02);
+      amp.gain.exponentialRampToValueAtTime(0.0001, at + 0.28);
+      osc.connect(amp).connect(audioContext.destination);
+      osc.start(at);
+      osc.stop(at + 0.3);
+    });
+  } catch (_) { /* no audio on this device: the flourish is silent */ }
+}
+
+const RARITY_NOTES = {
+  common: [660],
+  uncommon: [660, 880],
+  rare: [523, 659, 784],
+  epic: [523, 659, 784, 1047, 1319],
+};
+const RARITY_NAME = { uncommon: "Uncommon find", rare: "Rare find!", epic: "Epic find!!" };
+const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/** A banner over the board and a burst of sparks. `mine` is whether this player made the find. */
+function flourish(text, sub, rarity) {
+  if (reducedMotion()) return;
+  const box = document.createElement("div");
+  box.className = `moment ${rarity}`;
+  const title = document.createElement("div");
+  title.className = "moment-title";
+  title.textContent = text;
+  const small = document.createElement("div");
+  small.className = "moment-sub";
+  small.textContent = sub;
+  box.append(title, small);
+  const sparks = rarity === "epic" ? 22 : rarity === "rare" ? 14 : 8;
+  for (let i = 0; i < sparks; i++) {
+    const spark = document.createElement("span");
+    spark.className = "spark";
+    spark.style.setProperty("--a", `${(360 / sparks) * i}deg`);
+    spark.style.setProperty("--d", `${60 + Math.random() * 70}px`);
+    box.appendChild(spark);
+  }
+  workspace.appendChild(box);
+  setTimeout(() => box.remove(), 2600);
+}
+
+/** The sound and flourish for a find. You get the full treatment for your own; others' finds only when rare. */
+function discoveryMoment(el, rarity, mine) {
+  const big = rarity === "rare" || rarity === "epic";
+  if (!mine && !big) return;
+  playNotes(RARITY_NOTES[rarity] || RARITY_NOTES.common, mine ? 0.07 : 0.03);
+  if (rarity !== "common") flourish(`${el.emoji} ${el.label}`.trim(), RARITY_NAME[rarity], rarity);
+}
+
+$("sound").addEventListener("click", () => {
+  soundOn = !soundOn;
+  try { localStorage.setItem("alchemy-sound", soundOn ? "on" : "off"); } catch (_) { /* not remembered */ }
+  paintSound();
+  playNotes([880]);
+});
+function paintSound() {
+  $("sound").textContent = soundOn ? "🔊" : "🔇";
+  $("sound").setAttribute("aria-pressed", String(soundOn));
+}
+paintSound();
+
+// ---- emotes ------------------------------------------------------------------------------------------------------
+
+let emoteList = [];
+const shownEmotes = new Map();   // pid -> glyph currently shown next to that player's name
+
+async function loadEmotes() {
+  try {
+    emoteList = (await Auth.fetch("/emotes")).emotes;
+  } catch (_) { emoteList = []; }
+  const picker = $("emote-picker");
+  picker.replaceChildren(...emoteList.map((e) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.setAttribute("role", "menuitem");
+    button.title = e.label;
+    button.setAttribute("aria-label", e.label);
+    button.textContent = e.glyph;
+    button.addEventListener("click", () => sendEmote(e.id));
+    return button;
+  }));
+}
+
+function closeEmotePicker() {
+  $("emote-picker").hidden = true;
+  $("emote-open").setAttribute("aria-expanded", "false");
+}
+
+async function sendEmote(id) {
+  closeEmotePicker();
+  try {
+    await api("/emote", { emote: id });
+  } catch (err) {
+    if (!/a second/.test(err.message)) toast(err.message, "error");   // too fast: just ignore the extra tap
+  }
+}
+
+$("emote-open").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const picker = $("emote-picker");
+  picker.hidden = !picker.hidden;
+  $("emote-open").setAttribute("aria-expanded", String(!picker.hidden));
+});
+document.addEventListener("click", (e) => {
+  if (!$("emote-picker").hidden && !e.target.closest("#emote-picker")) closeEmotePicker();
+});
+
+function paintEmote(pid) {
+  const row = $("key").querySelector(`li[data-pid="${CSS.escape(pid)}"]`);
+  if (!row) return;
+  row.querySelector(".emote")?.remove();
+  const glyph = shownEmotes.get(pid);
+  if (!glyph) return;
+  const bubble = document.createElement("span");
+  bubble.className = "emote";
+  bubble.textContent = glyph;
+  row.appendChild(bubble);
+}
+
+// ---- the solo hint of the day --------------------------------------------------------------------------------------
+
+let hintsLeft = null;   // null: unlimited hints (a shared game); a number in a solo game
+
+function paintHintsLeft() {
+  const note = $("hints-left");
+  note.hidden = hintsLeft === null;
+  if (hintsLeft !== null) {
+    note.textContent = hintsLeft > 0 ? "You have 1 hint today." : "You have used today's hint. A new one comes tomorrow.";
+  }
+  $("hints").querySelectorAll("button").forEach((b) => { b.disabled = hintsLeft === 0; });
+}
+
 const handlers = {
-  ended({ by, saved }) {
+  ended({ by, saved, awards }) {
     gameEnded = true;
     if (source) source.close();
     forget();
@@ -1143,7 +1318,34 @@ const handlers = {
       ? "It was saved: you can bring it back from the home page for 3 days."
       : "It was not saved.");
     $("end-dialog").open && $("end-dialog").close();
+    const list = $("awards-list");
+    list.replaceChildren(...(awards || []).map((a) => {
+      const row = document.createElement("li");
+      const head = document.createElement("strong");
+      head.textContent = `${a.icon} ${a.title}: ${a.player}`;
+      const detail = document.createElement("span");
+      detail.className = "muted";
+      detail.textContent = ` ${a.detail}`;
+      row.append(head, detail);
+      return row;
+    }));
+    $("awards").hidden = !(awards && awards.length);
     $("ended").hidden = false;
+  },
+
+  emote(d) {
+    shownEmotes.set(d.pid, (emoteList.find((e) => e.id === d.emote) || {}).glyph || "");
+    paintEmote(d.pid);
+    setTimeout(() => {
+      shownEmotes.delete(d.pid);
+      paintEmote(d.pid);
+    }, 4000);
+  },
+
+  achievement(d) {
+    toast(`🏆 Achievement unlocked: ${d.icon} ${d.title}`);
+    playNotes([523, 659, 784, 1047], 0.08);
+    flourish(`${d.icon} ${d.title}`, "Achievement unlocked", "epic");
   },
   snapshot(s) {
     me.pid = s.you;
@@ -1154,6 +1356,11 @@ const handlers = {
     setGenie(s.genie);
     setChallenge(s.challenge);
     setRace(s.race);
+    setSolo(s.game.solo === true);
+    hintsLeft = typeof s.game.hints_left === "number" ? s.game.hints_left : null;
+    paintHintsLeft();
+    $("emote-open").hidden = !!(s.challenge || s.race || s.game.solo);   // emotes are for shared games
+    if (!$("emote-open").hidden && !emoteList.length) loadEmotes();
     clearAllTiles();
     elements.clear();
     itemEls.clear();
@@ -1187,6 +1394,7 @@ const handlers = {
     }
     const who = d.pid === me.pid ? "You" : players.get(d.pid)?.name ?? el.by ?? "Someone";
     toast(`${who} discovered ${el.emoji} ${el.label}!`.replace("  ", " "));
+    discoveryMoment(el, el.rarity, d.pid === me.pid);
     const item = itemEls.get(el.id);
     if (item) {
       item.classList.add("new");
@@ -1383,8 +1591,9 @@ async function endGame(save) {
   $("end-dialog").close();
   try {
     await api("/end", { save });
-    // The "ended" event shows the same message to everyone, including us.
-    if (!gameEnded) handlers.ended({ by: me.name, saved: save });
+    // The "ended" event shows the same message (and the awards) to everyone, including us; this is only a fallback for it
+    // not arriving.
+    setTimeout(() => { if (!gameEnded) handlers.ended({ by: me.name, saved: save }); }, 1200);
   } catch (err) {
     toast(err.message, "error");
   }
@@ -1392,8 +1601,8 @@ async function endGame(save) {
 
 $("end").addEventListener("click", () => {
   const maySave = !gameCreator || gameCreator.toLowerCase() === me.name.toLowerCase();
-  $("end-save").hidden = !maySave;
-  $("end-note").textContent = maySave ? "" : `Only ${gameCreator}, who started this game, can save it.`;
+  $("end-save").hidden = solo || !maySave;
+  $("end-note").textContent = solo ? "" : maySave ? "" : `Only ${gameCreator}, who started this game, can save it.`;
   $("end-dialog").showModal();
 });
 $("end-save").addEventListener("click", () => endGame(true));

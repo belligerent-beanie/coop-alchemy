@@ -235,7 +235,7 @@ class AccountEndpointTests(unittest.TestCase):
         self.assertEqual(self.as_user(session, "GET", "/me")[0], 200)  # still here
         status, data = self.as_user(session, "POST", "/account/delete", {"password": f"password-{name}"})
         self.assertEqual(status, 200)
-        self.assertEqual(set(data["deleted"]), {"saves_deleted", "saves_kept_anonymised", "drafts", "daily_entries", "invite_codes", "reports"})
+        self.assertEqual(set(data["deleted"]), {"saves_deleted", "saves_kept_anonymised", "drafts", "daily_entries", "invite_codes", "reports", "solo"})
         self.assertEqual(self.as_user(session, "GET", "/me")[0], 401)
         self.assertEqual(call(self.port, "POST", "/login", {"username": name, "password": f"password-{name}"},
                               headers={"X-Session": ""})[0], 401)

@@ -237,7 +237,9 @@ class SafetyOverHttpTests(unittest.TestCase):
         self.assertNotIn("fuck", data["error"])
         status, _ = call(self.port, "POST", "/register", {"username": self.name("friendly"), "password": "a-long-enough-pass"}, headers={"X-Session": ""})
         self.assertEqual(status, 200)
-        user = self.session(self.name("namer"))
+        namer = self.name("namer")
+        user = self.session(namer)
+        self.server.registry.solo.record(namer, {}, 1, 1, True)   # Create Recipes is open only after Solo mode
         self.assertEqual(call(self.port, "POST", "/games", {"name": "bitch club"}, headers=user)[0], 400)
         self.assertEqual(call(self.port, "POST", "/games", {"name": "Scunthorpe Wizards"}, headers=user)[0], 200)
         self.assertEqual(call(self.port, "POST", "/create/recipe", {"a": "air", "b": "air", "name": "Shit Storm"}, headers=user)[0], 400)

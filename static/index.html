@@ -36,9 +36,12 @@
       <span id="status" class="status" title="Connection"></span>
       <button id="end" class="end-btn" type="button" title="End this game for everyone">End game</button>
       <button id="journal-open" class="journal-btn" type="button" title="Everything you have discovered, and how elements connect">📖 Journal</button>
+      <button id="emote-open" class="emote-btn" type="button" title="Send an emote" aria-label="Send an emote" aria-haspopup="true" aria-expanded="false" hidden>😀</button>
+      <button id="sound" class="sound-btn" type="button" title="Sound on or off" aria-label="Sound" aria-pressed="true">🔊</button>
       <button id="cat" class="cat" type="button" title="Let the cat tidy up (clears the workspace for everyone)"
               aria-label="Clear the shared workspace">🐈</button>
     </header>
+    <div id="emote-picker" role="menu" aria-label="Emotes" hidden></div>
     <div id="challenge" class="challenge-bar" role="status" hidden>
       🎯 <span id="challenge-tier"></span> · Find <strong id="challenge-target"></strong> by unlocking as few elements as you can ·
       <span id="challenge-count"></span> <span id="challenge-ref" class="muted"></span>
@@ -63,6 +66,7 @@
             <input id="hint-target" maxlength="64" placeholder="How do I make…" aria-label="Element to find a recipe for">
             <button type="submit">Find</button>
           </form>
+          <p id="hints-left" class="muted" hidden></p>
           <div id="hint-result" aria-live="polite"></div>
         </details>
         <section id="genie" hidden>
@@ -127,21 +131,42 @@
       <a class="btn" href="/">Back to home</a>
     </div>
   </dialog>
-  <div id="ended" hidden><div><h2 id="ended-title"></h2><p id="ended-text"></p><a class="btn" href="/">Back to all games</a></div></div>
+  <div id="ended" hidden><div><h2 id="ended-title"></h2><p id="ended-text"></p>
+    <div id="awards" hidden><h3>Awards</h3><ul id="awards-list"></ul></div>
+    <a class="btn" href="/">Back to all games</a></div></div>
 
   <dialog id="journal-dialog" class="dialog">
     <div class="journal-head">
       <h2>📖 Journal</h2>
       <button type="button" id="journal-close" class="link" aria-label="Close the journal">Close</button>
     </div>
-    <div class="journal-body">
+    <div class="journal-progress">
+      <div class="journal-bar" role="progressbar" aria-label="Elements discovered" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0"><div id="journal-bar-fill"></div></div>
+      <span id="journal-count" class="muted"></span>
+    </div>
+    <div class="journal-tabs" role="tablist">
+      <button type="button" id="journal-tab-list" class="journal-tab selected" role="tab" aria-selected="true">List</button>
+      <button type="button" id="journal-tab-grid" class="journal-tab" role="tab" aria-selected="false">Collection</button>
+    </div>
+    <div class="journal-body" id="journal-list-view">
       <div class="journal-side">
         <input id="journal-filter" type="search" placeholder="Search the journal…" aria-label="Search the journal" autocomplete="off">
         <div id="journal-list" role="listbox" aria-label="Discovered elements"></div>
       </div>
       <div id="journal-detail" aria-live="polite"></div>
     </div>
-    <p class="muted journal-foot">Only recipes you have fully discovered are listed.</p>
+    <div id="journal-grid-view" hidden>
+      <div class="journal-grid-tools">
+        <select id="journal-grid-filter" aria-label="Show">
+          <option value="all">All</option>
+          <option value="mine">Found by me</option>
+          <option value="others">Found by others</option>
+          <option value="locked">Not found yet</option>
+        </select>
+      </div>
+      <div id="journal-grid" role="list"></div>
+    </div>
+    <p class="muted journal-foot">Only recipes you have fully discovered are listed. Elements not found yet are shown as silhouettes.</p>
   </dialog>
 
   <div id="tooltip" hidden></div>

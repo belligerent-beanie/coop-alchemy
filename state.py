@@ -25,6 +25,9 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from achievements import Progress, earned_ids
+from achievements import one as achievement_json
+from emotes import EMOTE_GAP_SECONDS, EMOTE_IDS
 from hints import find_element, hint_can_make, hint_recipe, hint_try
 from recipes import RecipeBook, depths
 
@@ -36,6 +39,8 @@ MAX_PLAYERS = 5
 # (keeping the same colour) as long as the seat and name are still free.
 JOIN_GRACE_SECONDS = 30.0
 MAX_TILES = 300
+SOLO_HINTS_PER_DAY = 1    # a solo game's hints: this many a day, per account
+RARITY_CUTS = (0.5, 0.8, 0.95)   # an element is uncommon / rare / epic from these fractions of the depth ranking up
 QUEUE_SIZE = 256
 
 # The genie is unlocked when the Djinn element is discovered. The element is found by
@@ -153,8 +158,14 @@ class GameState:
                  clock: Callable[[], float] = time.monotonic,
                  grace: float = JOIN_GRACE_SECONDS,
                  rng: random.Random | None = None,
-                 challenge: Challenge | None = None, race: Race | None = None) -> None:
+                 challenge: Challenge | None = None, race: Race | None = None,
+                 solo: Callable[[dict[str, Any], int, int, bool, set[str]], list[str]] | None = None,
+                 today: Callable[[], str] | None = None) -> None:
         self.book = book
+        self._today = today or (lambda: time.strftime("%Y-%m-%d", time.gmtime()))   # the day a solo hint is counted against
+        # Solo mode (see solo.py): called as solo(export, found, total, complete, earned) after every discovery, so progress
+        # is kept; it returns the achievements that are new, which are announced to the player.
+        self.solo = solo
         self.challenge = challenge
         self.race = race
         self._won = False                # this racer has just won the race
@@ -169,13 +180,20 @@ class GameState:
         self._last_active: dict[str, float] = {}  # token -> when they joined or last disconnected
         self._connected_once: set[str] = set()    # tokens that have opened an event stream
         self._depth = depths(book)  # fewest steps to make each reachable element
-        self.total = len(self._depth)
         self._lock = threading.RLock()
         self._discovered: dict[str, str | None] = {s: None for s in book.starters}  # id -> discoverer
         self._time = find_element(book, TIME)  # id of the element that unlocks at TIME_UNLOCK_AT, if any
         self._djinn = find_element(book, DJINN)  # id of the element that unlocks the genie, if any
         if challenge is not None or race is not None:  # a challenge or a race is a plain puzzle: no free elements, no wishes
             self._time = self._djinn = None
+        self.total = len(self._collectable())  # what can be found in all: reachable elements, and Time if the game adds it
+        depth_ranking = sorted(self._depth.values())
+        self._rarity_at = tuple(depth_ranking[min(len(depth_ranking) - 1, int(len(depth_ranking) * q))]
+                                for q in RARITY_CUTS) if depth_ranking else (1, 1, 1)
+        self._hints = {"day": "", "used": 0, "total": 0}   # a solo game's hint of the day
+        self._stats: dict[str, dict[str, int]] = {}        # casefolded player name -> {"tries", "misses"}, for the awards
+        self._first_finder: str | None = None              # who made the game's first discovery
+        self._emote_at: dict[str, float] = {}              # pid -> when they last sent an emote
         self._genie_unlocked_at: int | None = None  # number of discoveries when the genie unlocked
         self._genie_used = 0
         self._players: dict[str, Player] = {}         # token -> player
@@ -196,7 +214,16 @@ class GameState:
             out["credit"] = el.credit
         if with_by:
             out["by"] = self._discovered[eid]
+            out["rarity"] = self._rarity(eid)
         return out
+
+    def _rarity(self, eid: str) -> str:
+        """common, uncommon, rare or epic: how far from the starting elements it is, compared with the other elements."""
+        depth = self._depth.get(eid, 0)
+        if depth == 0:
+            return "common"
+        uncommon, rare, epic = self._rarity_at
+        return "epic" if depth >= epic else "rare" if depth >= rare else "uncommon" if depth >= uncommon else "common"
 
     def _assign_color(self, pid: str) -> None:
         if pid in self._colors:
@@ -233,15 +260,16 @@ class GameState:
 
     @property
     def private(self) -> bool:
-        """A private game belongs to one account: a daily challenge attempt or a racer's world."""
-        return self.challenge is not None or self.race is not None
+        """A private game belongs to one account: a daily challenge attempt, a racer's world or a solo game."""
+        return self.challenge is not None or self.race is not None or self.solo is not None
 
     def _snapshot(self, player: Player) -> dict[str, Any]:
         return {
             "challenge": self._challenge_json(),
             "race": self._race_json(),
             "you": player.pid,
-            "game": {"id": self.slug, "name": self.name, "creator": self.creator},
+            "game": {"id": self.slug, "name": self.name, "creator": self.creator, "solo": self.solo is not None,
+                     "hints_left": self._hints_left() if self.solo is not None else None},
             "genie": self._genie_status(),
             "total": self.total,
             "elements": [self._element_json(eid, with_by=True) for eid in self._discovered],
@@ -302,9 +330,9 @@ class GameState:
         return player
 
     def _require_discovered(self, element: object) -> str:
-        if not isinstance(element, str) or element not in self.book.elements:
-            raise GameError(400, "unknown element")
-        if element not in self._discovered:
+        # One answer for "no such element" and "not found yet": two answers would let a script from the browser
+        # console tell which guessed names exist in the book.
+        if not isinstance(element, str) or element not in self._discovered:
             raise GameError(400, "that element has not been discovered yet")
         return element
 
@@ -325,6 +353,8 @@ class GameState:
         new = [r for r in results if r not in self._discovered]
         for r in new:
             self._discovered[r] = player.name
+        if new and self._first_finder is None:
+            self._first_finder = player.name
         if self._djinn in new and self._genie_unlocked_at is None:
             self._genie_unlocked_at = len(self._discovered)
         if self.challenge is not None and self._result is None and self.challenge.target in new:
@@ -354,12 +384,37 @@ class GameState:
                 "total": self.total,
             })
         self._unlock_time()
+        self.report_solo()
         if self._won:
             self._won = False
             self._publish("race_won", {"name": player.name})
         if self.challenge is not None and self._result is not None and self.challenge.target in new:
             self._publish("challenge_done", {"score": self._result, "reference": self.challenge.reference,
                                              "target": self._element_json(self.challenge.target)})
+
+    def _collectable(self) -> set[str]:
+        """Every element a player can end up with: what recipes can make, and Time, which is unlocked for free."""
+        return set(self._depth) | ({self._time} if self._time else set())
+
+    def report_solo(self) -> None:
+        """Hand a solo game's progress to its store (call with the lock held). A failure must not break the game."""
+        if self.solo is None:
+            return
+        collectable = self._collectable()
+        found = len(self._discovered.keys() & collectable)
+        complete = collectable <= self._discovered.keys()
+        progress = Progress(
+            discovered=len(self._discovered) - len(self.book.starters), complete=complete,
+            deepest=max((self._depth.get(e, 0) for e in self._discovered), default=0),
+            djinn=self._genie_unlocked_at is not None, wishes=self._genie_used,
+            time=self._time is not None and self._time in self._discovered, hints=self._hints["total"])
+        try:
+            new = self.solo(self.export(), found, len(collectable), complete, earned_ids(progress))
+        except Exception as exc:
+            print(f"warning: could not save solo progress: {exc}", file=sys.stderr)
+            return
+        for achievement in new or []:
+            self._publish("achievement", achievement_json(achievement))
 
     def _unlock_time(self) -> None:
         """Add Time to the book once the room has found TIME_UNLOCK_AT elements, if nobody has made it yet."""
@@ -614,6 +669,7 @@ class GameState:
                 "discovered": dict(self._discovered),
                 "genie": {"unlocked_at": self._genie_unlocked_at, "used": self._genie_used},
                 "players": list(self._player_names),
+                **({"hints": dict(self._hints)} if self.solo is not None else {}),
             }
 
     def restore(self, data: dict[str, Any]) -> None:
@@ -634,6 +690,13 @@ class GameState:
                 used = used if isinstance(used, int) and not isinstance(used, bool) else 0
                 self._genie_used = max(0, min(used, total))
             self._unlock_time()  # a saved room that already has enough elements
+            hints = data.get("hints")
+            if isinstance(hints, dict):
+                day, used, total = hints.get("day"), hints.get("used"), hints.get("total")
+
+                def count(n: object) -> int:
+                    return n if isinstance(n, int) and not isinstance(n, bool) and n >= 0 else 0
+                self._hints = {"day": day if isinstance(day, str) else "", "used": count(used), "total": count(total)}
             names = data.get("players")
             if isinstance(names, list):
                 self._player_names = [n[:MAX_NAME_LEN] for n in names if isinstance(n, str) and n.strip()][:50]
@@ -650,6 +713,9 @@ class GameState:
         with self._lock:
             now = self._clock()
             data = self.export()
+            if self.solo is not None:
+                data["solo"] = True
+            data["awards"] = {"stats": {k: dict(v) for k, v in self._stats.items()}, "first": self._first_finder}
             if self.challenge is not None:
                 data["challenge"] = {"date": self.challenge.date, "tier": self.challenge.tier,
                                      "target": self.challenge.target,
@@ -669,6 +735,16 @@ class GameState:
         Restored players count as just-joined, so each has JOIN_GRACE_SECONDS to reconnect.
         """
         self.restore(data)
+        saved_awards = data.get("awards") if isinstance(data.get("awards"), dict) else {}
+        stats = saved_awards.get("stats")
+        if isinstance(stats, dict):
+            for key, value in stats.items():
+                if isinstance(key, str) and isinstance(value, dict):
+                    self._stats[key[:MAX_NAME_LEN * 2]] = {
+                        k: value[k] for k in ("tries", "misses")
+                        if isinstance(value.get(k), int) and not isinstance(value.get(k), bool) and value[k] >= 0}
+        first = saved_awards.get("first")
+        self._first_finder = first if isinstance(first, str) else None
         live = data.get("live") if isinstance(data.get("live"), dict) else {}
         with self._lock:
             saved = data.get("challenge")
@@ -727,7 +803,7 @@ class GameState:
         """Tell everyone connected that the game has ended, then close their streams."""
         with self._lock:
             self.ended = True
-            self._publish("ended", {"by": by, "saved": saved})
+            self._publish("ended", {"by": by, "saved": saved, "awards": [] if self.private else self.awards()})
             for sub in list(self._subs):
                 try:
                     sub.messages.put_nowait(None)
@@ -800,7 +876,81 @@ class GameState:
                     "made_from": sorted(made_from[eid], key=lambda p: (label(p[0]), label(p[1]))),
                     "used_in": sorted(used_in[eid], key=lambda p: (label(p[1]), label(p[0]))),
                 })
-            return {"elements": entries}
+            # Only the number of elements still to find is sent, never which: the silhouettes in the collection
+            # view are drawn from this count. Time is unlocked for free, so it counts although no recipe makes it.
+            collectable = self._collectable()
+            found = len(have.keys() & collectable)
+            return {"elements": entries,
+                    "progress": {"found": found, "total": len(collectable), "locked": len(collectable) - found}}
+
+    # ---- awards ---------------------------------------------------------------
+
+    def awards(self) -> list[dict[str, Any]]:
+        """Minor awards for the end of a shared game. Each is {"id", "icon", "title", "player", "detail"}.
+
+        Only awards that mean something are given: "most found" needs at least two players, and nobody is named for an
+        element that was unlocked for free rather than made.
+        """
+        with self._lock:
+            made = {eid: by for eid, by in self._discovered.items() if by}   # found by a player, not a starter or a gift
+            out: list[dict[str, Any]] = []
+
+            def label(eid: str) -> str:
+                el = self.book.elements[eid]
+                return f"{el.emoji} {el.label}".strip()
+
+            if len({self._key(n) for n in self._player_names}) >= 2 and made:
+                counts = Counter(made.values())
+                best = max(counts.values())
+                leaders = sorted(n for n, c in counts.items() if c == best)
+                out.append({"id": "most_found", "icon": "🥇", "title": "Most elements found", "player": " & ".join(leaders),
+                            "detail": f"{best} element{'s' if best != 1 else ''}"})
+            if made:
+                deepest = max(made, key=lambda e: (self._depth.get(e, 0), e))
+                if self._depth.get(deepest, 0) > 0:
+                    out.append({"id": "longest_chain", "icon": "⛓️", "title": "Longest chain", "player": made[deepest],
+                                "detail": f"{label(deepest)}, {self._depth[deepest]} steps from the starting elements"})
+                ways: Counter[str] = Counter()
+                for results in self.book.lookup.values():
+                    for r in results:
+                        ways[r] += 1
+                rarest = min((e for e in made if e != deepest), key=lambda e: (ways[e], -self._depth.get(e, 0), e), default=None)
+                if rarest is not None:
+                    n = ways[rarest]
+                    out.append({"id": "rarest_find", "icon": "💎", "title": "Rarest find", "player": made[rarest],
+                                "detail": f"{label(rarest)}, only {n} way{'s' if n != 1 else ''} to make it"})
+            if self._first_finder:
+                out.append({"id": "first_find", "icon": "⚡", "title": "First off the mark", "player": self._first_finder,
+                            "detail": "made the game's first discovery"})
+            misses = {n: s.get("misses", 0) for n, s in self._stats.items()}
+            if misses and max(misses.values()) >= 5:
+                top = max(misses, key=lambda n: misses[n])
+                name = next((p for p in self._player_names if self._key(p) == top), top)
+                out.append({"id": "persistent", "icon": "🔨", "title": "Never gives up", "player": name,
+                            "detail": f"{misses[top]} combinations that did nothing"})
+            return out
+
+    @staticmethod
+    def _key(name: str) -> str:
+        return name.casefold()
+
+    # ---- emotes ---------------------------------------------------------------
+
+    def emote(self, token: str, emote: object) -> dict[str, Any]:
+        """Show everyone in the game one of the emotes in emotes.py next to the sender's name. Only ids from that list work."""
+        with self._lock:
+            player = self._require_player(token)
+            if self.private:
+                raise GameError(403, "emotes are for shared games")
+            if not isinstance(emote, str) or emote not in EMOTE_IDS:
+                raise GameError(400, "unknown emote")
+            now = self._clock()
+            last = self._emote_at.get(player.pid)
+            if last is not None and now - last < EMOTE_GAP_SECONDS:
+                raise GameError(429, "one emote a second, please")
+            self._emote_at[player.pid] = now
+            self._publish("emote", {"pid": player.pid, "name": player.name, "emote": emote})
+            return {}
 
     # ---- hints ----------------------------------------------------------------
 
@@ -813,30 +963,58 @@ class GameState:
         """
         with self._lock:
             self._require_player(token)
-            if self.private:
+            if self.private and self.solo is None:   # a solo game is private but is allowed its hints
                 raise GameError(403, "hints are switched off in the daily challenge and in races")
-            have = self._discovered
-            if kind == "can_make":
-                result = hint_can_make(self.book, have, self._rng)
-                return {"kind": kind, "result": None if result is None else self._element_json(result)}
-            if kind == "try":
-                pair = hint_try(self.book, have, self._rng)
-                return {"kind": kind, "pair": None if pair is None else [self._element_json(e) for e in pair]}
-            if kind == "find":
-                if not isinstance(target, str) or not target.strip() or len(target) > 200:
-                    raise GameError(400, "type the name of an element")
-                eid = find_element(self.book, target)
-                if eid is None:
-                    raise GameError(404, f"there is no element called {' '.join(target.split())!r}")
-                starter = eid in self.book.starters
-                recipe = None
-                if not starter:
-                    pair = hint_recipe(self.book, have, self._depth, eid)
-                    if pair:
-                        recipe = [{**self._element_json(e), "known": e in have} for e in pair]
-                return {"kind": kind, "target": self._element_json(eid), "have": eid in have,
-                        "starter": starter, "recipe": recipe}
-            raise GameError(400, "unknown hint type")
+            if self.solo is not None and self._hints_left() <= 0:
+                raise GameError(429, "you have used today's hint in Solo: a new one comes tomorrow")
+            answer = self._hint(kind, target)
+            if self.solo is not None:
+                if answer.pop("useful"):   # a hint that found nothing does not use up the day's hint
+                    self._use_hint()
+                answer["hints_left"] = self._hints_left()
+            else:
+                answer.pop("useful")
+            return answer
+
+    def _hints_left(self) -> int:
+        """Solo hints still available today (the count starts again each day, UTC)."""
+        used = self._hints["used"] if self._hints["day"] == self._today() else 0
+        return max(0, SOLO_HINTS_PER_DAY - used)
+
+    def _use_hint(self) -> None:
+        today = self._today()
+        if self._hints["day"] != today:
+            self._hints["day"], self._hints["used"] = today, 0
+        self._hints["used"] += 1
+        self._hints["total"] += 1
+        self.report_solo()
+
+    def _hint(self, kind: object, target: object) -> dict[str, Any]:
+        """The hint itself, with `useful` saying whether it told the player anything (call with the lock held)."""
+        have = self._discovered
+        if kind == "can_make":
+            result = hint_can_make(self.book, have, self._rng)
+            return {"kind": kind, "result": None if result is None else self._element_json(result),
+                    "useful": result is not None}
+        if kind == "try":
+            pair = hint_try(self.book, have, self._rng)
+            return {"kind": kind, "pair": None if pair is None else [self._element_json(e) for e in pair],
+                    "useful": pair is not None}
+        if kind == "find":
+            if not isinstance(target, str) or not target.strip() or len(target) > 200:
+                raise GameError(400, "type the name of an element")
+            eid = find_element(self.book, target)
+            if eid is None:
+                raise GameError(404, f"there is no element called {' '.join(target.split())!r}")
+            starter = eid in self.book.starters
+            recipe = None
+            if not starter:
+                pair = hint_recipe(self.book, have, self._depth, eid)
+                if pair:
+                    recipe = [{**self._element_json(e), "known": e in have} for e in pair]
+            return {"kind": kind, "target": self._element_json(eid), "have": eid in have,
+                    "starter": starter, "recipe": recipe, "useful": recipe is not None}
+        raise GameError(400, "unknown hint type")
 
     def combine(self, token: str, target_tile: object, *, tile: object = None, element: object = None,
                 x: object = None, y: object = None) -> dict[str, Any]:
@@ -871,7 +1049,10 @@ class GameState:
                 element_a = self._require_discovered(element)
 
             results = self.book.combine(element_a, b.element)
+            stat = self._stats.setdefault(player.name.casefold(), {})
+            stat["tries"] = stat.get("tries", 0) + 1
             if not results:
+                stat["misses"] = stat.get("misses", 0) + 1
                 if a is not None:
                     if x is not None and y is not None:
                         a.x, a.y = clamp01(x), clamp01(y)

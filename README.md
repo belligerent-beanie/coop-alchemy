@@ -39,7 +39,7 @@ cause: allow incoming connections for Python on the port you chose.
    account*: a unique username and a password. The username is also your name in
    games, and nobody else can use it (capitals are ignored: `Ann` and `ann` are
    the same name).
-2. **Home page.** Shows the games that are running, lets you start a new one, and
+2. **Home page.** Three tabs: **Solo** (your private saved game, and Create recipes), **Multiplayer** (running, recent and saved games, and starting one) and **Challenges** (the daily challenge and races). The multiplayer tab shows the games that are running, lets you start a new one, and
    lists your saved games. If you left a game that is still running (within the last
    30 minutes), it appears under **Recently joined** with a *Rejoin* button.
 3. **Games.** Each game has its own address, `/g/<game-name>`. Press **🔗 Invite** in a
@@ -71,9 +71,30 @@ cause: allow incoming connections for Python on the port you chose.
    It shows "Unlocked for free" in its tooltip. Without a Time element in the
    recipes nothing happens.
 
+### Discovery moments, awards and emotes
+
+- **Discovery moments.** Every element has a rarity (common, uncommon, rare, epic) from how far it is from the starting elements
+  compared with all the others. Finding one plays a short sound and, from uncommon up, a banner and sparks over the board; other
+  players' finds only do this when rare or epic. 🔊 in the header turns the sound off (remembered per browser), and the banner is
+  skipped for anyone who has asked their system for reduced motion. Rarity also colours the list, the journal and its Collection.
+- **Awards.** When a shared game ends, everyone sees minor awards: *Most elements found* (two or more players), *Longest chain*
+  (the element furthest from the starting elements), *Rarest find* (fewest ways to make it), *First off the mark*, and *Never
+  gives up* (five or more combinations that did nothing). Solo, daily and race games have none.
+- **Emotes.** 😀 in the header of a shared game sends an emote that shows next to your name for everyone, at most one a second. Players
+  can only send ids from `emotes.py`, never free text. The glyphs there are placeholders: change them in that one file.
+
+### Solo mode
+
+**Solo** on the home page starts your own private game: just you, with the Djinn like any game, **one hint a day**, and no invite link. Your
+progress is saved after every discovery, so you can leave at any time and the next **Solo** carries on where you stopped. The
+📖 Journal's *Collection* tab shows how many elements are left to find. Solo also keeps a list of **achievements** (shown on the Solo tab: elements found, long chains, the Djinn, Time and more; the
+list is in `achievements.py`) and gives you **one hint a day**; the day's hint is used up by the first hint that tells you something. Find every element and Solo is complete for good,
+which opens Create Recipes (below). Administrators and bot accounts do not need to finish it.
+
 ### Create Recipes and promotions
 
-**Create recipes** on the home page opens a solo playground where every element is
+**Create recipes** on the home page opens once you have completed Solo mode; until then it only shows your progress. It is a
+solo playground where every element is
 unlocked. Drag two elements together:
 
 - If the pair already has a recipe, you get its result as usual.
@@ -245,7 +266,7 @@ python3 server.py [--host 0.0.0.0] [--port 8000]
                   [--saves-dir saves] [--accounts-file accounts.json]
                   [--tls-cert cert.pem --tls-key key.pem]
                   [--idle-minutes 10]
-                  [--drafts-file drafts.json] [--daily-file daily.json]
+                  [--drafts-file drafts.json] [--daily-file daily.json] [--solo-file solo.json]
                   [--snapshot-file reload_snapshot.json] [--pid-file alchemy.pid]
 ```
 
@@ -271,6 +292,7 @@ python3 server.py [--host 0.0.0.0] [--port 8000]
 | `--idle-minutes` | `10` | How long an empty game stays open. |
 | `--drafts-file` | `drafts.json` next to `server.py` | Players' draft recipes and promotion proposals. |
 | `--daily-file` | `daily.json` next to `server.py` | The daily challenge's targets, routes, attempts used and scores (the last 400 days). |
+| `--solo-file` | `solo.json` next to `server.py` | Each account's solo-mode progress and whether it has found everything (which opens Create Recipes). |
 | `--snapshot-file` | `reload_snapshot.json` next to `server.py` | Where running games are parked during a reload. |
 | `--pid-file` | `alchemy.pid` next to `server.py` | Lets `reload.py` find the running server. |
 

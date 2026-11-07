@@ -323,6 +323,42 @@ window.addEventListener("pageshow", loadRaces);
 
 loadDaily();
 setInterval(loadDaily, 15000);
+
+// ---- solo mode ----
+async function loadSolo() {
+  try {
+    const s = await Auth.fetch("/solo");
+    $("solo").hidden = false;
+    $("solo-count").textContent = s.total ? `${s.found} / ${s.total} found${s.complete ? " ✓" : ""}` : "";
+    $("solo-bar-fill").style.width = s.total ? `${Math.min(100, (s.found / s.total) * 100)}%` : "0%";
+    const bar = document.querySelector("#solo .journal-bar");
+    bar.setAttribute("aria-valuemax", String(s.total || 1));
+    bar.setAttribute("aria-valuenow", String(s.found));
+    $("solo-start").textContent = s.found > 4 ? "Continue solo" : "Play solo";
+    const earned = s.achievements.filter((a) => a.earned_at !== null).length;
+    $("achievement-count").textContent = `${earned} / ${s.achievements.length}`;
+    $("achievements").replaceChildren(...s.achievements.map((a) => {
+      const row = el("li", a.earned_at === null ? "achievement locked" : "achievement");
+      row.append(el("span", "ach-icon", a.earned_at === null ? "🔒" : a.icon));
+      const text = el("span", "ach-text");
+      text.append(el("strong", "", a.title), el("span", "muted", ` ${a.description}`));
+      row.append(text);
+      return row;
+    }));
+    $("create-link").textContent = s.may_create ? "Create recipes" : "Create recipes 🔒";
+    if (!s.may_create) $("create-blurb").textContent = "Finish Solo mode (find every element) to unlock a playground where you can invent new combinations and promote them to the admins.";
+  } catch (_) { /* the rest of the page still works */ }
+}
+$("solo-start").addEventListener("click", async () => {
+  $("solo-error").textContent = "";
+  try {
+    location.href = (await Auth.fetch("/solo/start", {})).url;
+  } catch (err) {
+    $("solo-error").textContent = err.message;
+  }
+});
+loadSolo();
+window.addEventListener("pageshow", loadSolo);
 window.addEventListener("pageshow", loadDaily);  // coming back with the browser's back button
 
 refresh();
@@ -393,3 +429,31 @@ async function loadAdmin() {
 }
 loadAdmin();
 setInterval(loadAdmin, 30000);
+
+// ---- the three ways to play: Solo, Multiplayer, Challenges ----
+const HOME_TABS = ["solo", "multiplayer", "challenges"];
+function showHomeTab(name, remember = true) {
+  if (!HOME_TABS.includes(name)) name = "multiplayer";
+  for (const tab of HOME_TABS) {
+    $(`panel-${tab}`).hidden = tab !== name;
+    const button = $(`home-tab-${tab}`);
+    button.classList.toggle("selected", tab === name);
+    button.setAttribute("aria-selected", String(tab === name));
+  }
+  if (remember) {
+    try { sessionStorage.setItem("home-tab", name); } catch (_) { /* private window: the tab is just not remembered */ }
+  }
+}
+for (const tab of HOME_TABS) $(`home-tab-${tab}`).addEventListener("click", () => {
+  showHomeTab(tab);
+  history.replaceState(null, "", `#${tab}`);
+});
+{
+  let wanted = location.hash.slice(1);
+  if (!HOME_TABS.includes(wanted)) {
+    try { wanted = sessionStorage.getItem("home-tab") || ""; } catch (_) { wanted = ""; }
+  }
+  showHomeTab(wanted, false);
+}
+// A link such as /#challenges followed while this page is open switches the tab too.
+window.addEventListener("hashchange", () => { if (HOME_TABS.includes(location.hash.slice(1))) showHomeTab(location.hash.slice(1)); });

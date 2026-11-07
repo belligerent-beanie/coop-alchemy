@@ -580,7 +580,7 @@ class JournalTests(unittest.TestCase):
         for e in entries:
             self.assertTrue(e["starter"])
             self.assertEqual((e["made_from"], e["used_in"]), ([], []))
-            self.assertEqual(set(e), {"id", "label", "emoji", "by", "starter", "made_from", "used_in"})
+            self.assertEqual(set(e), {"id", "label", "emoji", "by", "rarity", "starter", "made_from", "used_in"})
 
     def test_a_discovery_links_its_ingredients_and_result(self) -> None:
         self.make("water", "fire")
@@ -602,6 +602,30 @@ class JournalTests(unittest.TestCase):
         self.make("water", "water")
         self.assertEqual(self.entry("puddle")["made_from"], [["water", "water"]])
         self.assertEqual(self.entry("water")["used_in"], [["water", "puddle"]])
+
+    def test_progress_counts_what_is_left_without_naming_it(self) -> None:
+        start = self.state.journal(self.alice.token)["progress"]
+        self.assertEqual(start["found"], 4)
+        self.assertEqual(start["found"] + start["locked"], start["total"])
+        self.assertGreater(start["locked"], 0)
+        self.make("water", "fire")
+        later = self.state.journal(self.alice.token)["progress"]
+        self.assertEqual((later["found"], later["total"], later["locked"]), (5, start["total"], start["locked"] - 1))
+        self.assertEqual(set(later), {"found", "total", "locked"})
+
+    def test_a_console_cannot_learn_undiscovered_elements_from_the_journal_or_errors(self) -> None:
+        raw = json.dumps(self.state.journal(self.alice.token))
+        book = self.state.book
+        for eid in book.elements:
+            if eid not in self.state.discovered():
+                self.assertNotIn(f'"{eid}"', raw)
+                self.assertNotIn(book.elements[eid].label, raw)
+        messages = set()
+        for guess in ("mud", "no-such-element-at-all"):  # one exists in the book but is not found, one does not exist
+            with self.assertRaises(GameError) as caught:
+                self.state.add_tile(self.alice.token, guess, 0.5, 0.5)
+            messages.add((caught.exception.status, str(caught.exception)))
+        self.assertEqual(len(messages), 1)
 
     def test_the_journal_is_private_and_needs_a_player(self) -> None:
         self.state.journal(self.alice.token)
@@ -1590,6 +1614,7 @@ class ServerTests(unittest.TestCase):
         status, data = self.post(slug, who, "/journal")
         self.assertEqual(status, 200)
         self.assertEqual(sorted(e["id"] for e in data["elements"]), ["air", "earth", "fire", "water"])
+        self.assertEqual(data["progress"]["found"], 4)
         self.assertEqual(call(self.port, "POST", f"/g/{slug}/journal", {"player": "zzz"})[0], 403)
         self.assertEqual(call(self.port, "POST", f"/g/{slug}/journal", {})[0], 400)  # no token
         for name in ("journal.js",):
@@ -1674,7 +1699,9 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.post(slug, a, "/end")[0], 400)  # must say whether to save
         self.assertEqual(self.post(slug, {"token": "bad"}, "/end", save=False)[0], 403)
         self.assertEqual(self.post(slug, a, "/end", save=False), (200, {"saved": False}))
-        self.assertEqual(stream.until("ended"), {"by": "Ann", "saved": False})
+        ended = stream.until("ended")
+        self.assertEqual((ended["by"], ended["saved"]), ("Ann", False))
+        self.assertIsInstance(ended["awards"], list)
         with self.assertRaises(EOFError):
             stream.next()
         stream.close()
