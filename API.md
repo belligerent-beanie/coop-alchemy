@@ -47,7 +47,8 @@ this file in the same commit (and add a line to the [change log](#change-log)).
 | `GET /healthz` | none | `{"ok": true}` when the server is working. Used by the watchdog and deploy checks. |
 | `GET /auth-config` | none | `{"invite_required", "email_required", "turnstile_site_key"}`: what signing up needs (`turnstile_site_key` is null when there is no human check). |
 | `GET /version` | none | `{"version"}`: changes whenever a page, script or stylesheet changes (pages offer a reload). |
-| `GET /images` | none | `{"images": [names]}`: element pictures that exist, so pages only ask for those. |
+| `GET /images` | admin | `{"pictures": {element id: address}}`: every element's picture address, for the administrators' pages. `403` for anyone else. |
+| `GET /pic/<token>.png` | none | An element picture at its secret address (a keyed hash of the file name, new for each run of the server). Every element's own data carries its address as `"pic"`; the game sends an element only once it is found, so an unfound element's picture cannot be found or guessed. `404` for anything else. |
 | `GET /lan` | session | `{"base"}`: the address other players use, for invite links. |
 
 ## Accounts
@@ -192,6 +193,7 @@ checks that every option the server accepts appears in the README.
 
 Newest first. Add a line whenever an endpoint, event, status code or option is added, changed or removed.
 
+- **2026-11 (pictures)**: element pictures are no longer served by file name (`/static/elements/...` is `404`) and `GET /images` is no longer public or a list of names: it is `{"pictures": {id: address}}` for administrators only. Pictures are at `GET /pic/<token>.png`; each element's data (`snapshot`, `discovered`, the journal, hints, `GET /create/data`) carries `"pic"` when it has one.
 - **2026-11 (moments, awards, emotes, achievements)**: `rarity` on discovered elements and in the `discovered` event; `awards` in the `ended` event; `POST /g/<id>/emote`, `GET /emotes` and the `emote` event; the `achievement` event and `achievements` in `GET /solo`; one hint a day in solo games (`hints_left` in the hint answer and in the snapshot's `game`, `429` when used up).
 - **2026-11 (solo mode)**: `GET /solo` and `POST /solo/start`; `GET /create/data` answers `{"locked": true, ...}` and the `/create/...` actions `403` until the account has found every element in solo mode (administrators and bot accounts are exempt); `"solo": true` in the game object of the `snapshot` event; `POST /g/<id>/journal` also returns `progress`; unknown and undiscovered element ids now get the same `400` answer; `solo` in the account-deletion summary; option `--solo-file`.
 - **2026-11 (strangers' safety)**: `POST /g/<id>/report`; `GET /ops/reports` and `POST /ops/reports/dismiss`; `reports` in the `/ops/status` response and in the account-deletion summary; blocked-word checks (`400`) on usernames, game names and recipe names; one running game per account and 10 games an hour (`409`, `429`); options `--blocklist-file`, `--reports-file`, `--max-games-per-account`.

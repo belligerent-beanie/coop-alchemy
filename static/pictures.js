@@ -4,18 +4,12 @@
 // (or, failing that, its label) in lower case with every run of other characters turned
 // into "-": "Alarm Clock" -> alarm-clock.png. Elements with no picture keep their emoji.
 // Shared by the game page and the Create Recipes page.
-let imageNames = new Set();   // picture names the server has (see GET /images)
-
-function slugify(text) {
-  return String(text ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase().replace(/['\u2019]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-}
+// The server sends an element's picture address (`pic`) with the element itself, so a page only learns about the pictures of
+// elements it is allowed to see. Only the administrators' page asks for the whole list (see loadPictureMap).
+let pictureMap = {};   // element id -> address, for the administrators' page
 
 function imageUrl(el) {
-  for (const name of [slugify(el.id), slugify(el.label)]) {
-    if (name && imageNames.has(name)) return `/static/elements/${name}.png`;
-  }
-  return null;
+  return (el && (el.pic || pictureMap[el.id])) || null;
 }
 
 /** Show (or remove) the element's picture inside `node`'s .art slot, or in `node` itself if it has none. */
@@ -41,12 +35,10 @@ function applyImage(node, el) {
   node.classList.add("has-pic");
 }
 
-/** Fetch the list of pictures, then call `refresh` so the page can apply them. */
-async function loadImageNames(refresh) {
+/** Administrators only: fetch every element's picture address, then call `refresh` so the page can apply them. */
+async function loadPictureMap(refresh) {
   try {
-    const res = await fetch("/images");
-    if (!res.ok) return;
-    imageNames = new Set((await res.json()).images || []);
+    pictureMap = (await Auth.fetch("/images")).pictures || {};
   } catch (_) { return; /* no pictures: the emoji stay */ }
   refresh();
 }

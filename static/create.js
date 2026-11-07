@@ -433,10 +433,6 @@ async function start() {
     if (data.locked) { showLocked(data.solo); return; }
     for (const el of data.elements) addElement(el);
     syncDrafts(data.drafts);
-    loadImageNames(() => {
-      for (const [id, node] of itemEls) applyImage(node, elements.get(id));
-      for (const tile of tiles.values()) applyImage(tile.node, elements.get(tile.element));
-    });
   } catch (err) {
     toast(err.message, true);
   }

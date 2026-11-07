@@ -29,6 +29,7 @@ from achievements import Progress, earned_ids
 from achievements import one as achievement_json
 from emotes import EMOTE_GAP_SECONDS, EMOTE_IDS
 from hints import find_element, hint_can_make, hint_recipe, hint_try
+from pictures import PictureIndex
 from recipes import RecipeBook, depths
 
 MAX_NAME_LEN = 24
@@ -160,8 +161,10 @@ class GameState:
                  rng: random.Random | None = None,
                  challenge: Challenge | None = None, race: Race | None = None,
                  solo: Callable[[dict[str, Any], int, int, bool, set[str]], list[str]] | None = None,
-                 today: Callable[[], str] | None = None) -> None:
+                 today: Callable[[], str] | None = None,
+                 pictures: PictureIndex | None = None) -> None:
         self.book = book
+        self.pictures = pictures   # the address of each element's picture, sent only with that element's data
         self._today = today or (lambda: time.strftime("%Y-%m-%d", time.gmtime()))   # the day a solo hint is counted against
         # Solo mode (see solo.py): called as solo(export, found, total, complete, earned) after every discovery, so progress
         # is kept; it returns the achievements that are new, which are announced to the player.
@@ -213,6 +216,9 @@ class GameState:
         out: dict[str, Any] = {"id": eid, "label": el.label, "emoji": el.emoji}
         if el.credit:
             out["credit"] = el.credit
+        url = self.pictures.url_for(eid) if self.pictures is not None else None
+        if url:
+            out["pic"] = url
         if with_by:
             out["by"] = self._discovered[eid]
             out["rarity"] = self._rarity(eid)

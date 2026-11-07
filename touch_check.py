@@ -518,6 +518,14 @@ def run(out: Path, chrome_path: str) -> int:
                      "a quick swipe on the list still just scrolls it")
         browser.evaluate("document.getElementById('items').scrollTop = 0")
 
+        print("\nelement pictures")
+        pics = browser.evaluate("[...document.querySelectorAll('#items .item img.pic')].map(i => i.getAttribute('src'))")
+        report.check(len(pics) > 5 and all(p.startswith("/pic/") for p in pics), "pictures show at their secret addresses", str(pics[:3]))
+        report.check(browser.evaluate("[...document.querySelectorAll('#items .item img.pic')].every(i => i.complete && i.naturalWidth > 0)"),
+                     "...and they load")
+        report.check(api.call("GET", "/static/elements/air.png", None, sessions["phonea"])[0] == 404, "the picture folder is not served by file name")
+        report.check(api.call("GET", "/images", None, sessions["phonea"])[0] == 403, "the picture list is closed to players")
+        report.check("/static/elements/" not in browser.evaluate("document.documentElement.outerHTML"), "no page mentions the picture folder")
         print("\nemotes, sound, discovery moments and awards on a phone")
         report.check(browser.evaluate("!document.getElementById('emote-open').hidden"), "a shared game has an emote button")
         x, y = center_of(browser, "#emote-open")

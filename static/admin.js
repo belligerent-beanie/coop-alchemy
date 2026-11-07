@@ -209,7 +209,7 @@ $("copy").addEventListener("click", async () => {
   setTimeout(() => { $("copy").textContent = "Copy snippet"; }, 1500);
 });
 
-loadImageNames(() => { if (deck.length) render(); });
+loadPictureMap(() => { if (deck.length) render(); });
 loadQueue();
 loadApproved();
 setInterval(() => { if (!document.hidden && !busy) loadQueue(); }, 15000);

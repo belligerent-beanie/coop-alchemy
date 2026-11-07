@@ -25,6 +25,9 @@ HTTP API
     GET  /saved                         -> {"games": [...]}  saved games this account played in
     GET  /solo                          -> {"found", "total", "complete", "may_create", "achievements"}   the caller's solo
                                            progress; "may_create" is whether Create Recipes is open to them (see solo.py)
+    GET  /images                        -> {"pictures": {element id: address}}   administrators only (every other page gets
+                                           a picture's address with the element it belongs to, see pictures.py)
+    GET  /pic/<token>.png               -> an element picture at its secret address
     GET  /emotes                        -> {"emotes": [{"id", "label", "glyph"}]}   what players can send (see emotes.py)
     POST /solo/start                    -> {"id", "url"}   the caller's private solo game: the one running, or a new one
                                            that carries on from what they found before (saved after every discovery)
@@ -102,6 +105,7 @@ from captcha import Turnstile
 from achievements import describe as describe_achievements
 from daily import DailyStore
 from emotes import emote_list
+from pictures import PictureIndex
 from solo import SoloStore
 from drafts import DraftStore
 from erasure import erase_account
@@ -426,7 +430,11 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/version":
                 self._json(200, {"version": self._static_version()})
             elif path == "/images":
-                self._json(200, {"images": self._image_names()})
+                self._admin()
+                pictures = self.server.registry.pictures
+                self._json(200, {"pictures": pictures.all_urls() if pictures is not None else {}})
+            elif path.startswith("/pic/") and path.endswith(".png"):
+                self._picture(path[len("/pic/"):-len(".png")])
             elif path.startswith("/static/"):
                 self._static(unquote(path[len("/static/"):]))
             else:
@@ -828,9 +836,11 @@ class Handler(BaseHTTPRequestHandler):
             return {"username": username, "locked": True, "solo": self.server.registry.solo_status(username)}
         book = self.server.registry.book
         mine = self.server.drafts.view(username, book)
+        pictures = self.server.registry.pictures
         return {
             "username": username,
-            "elements": [{"id": e.id, "label": e.label, "emoji": e.emoji, "draft": False}
+            "elements": [{"id": e.id, "label": e.label, "emoji": e.emoji, "draft": False,
+                          **({"pic": url} if pictures is not None and (url := pictures.url_for(e.id)) else {})}
                          for e in book.elements.values()],
             "drafts": mine,
         }
@@ -913,19 +923,29 @@ class Handler(BaseHTTPRequestHandler):
             pass
         return digest.hexdigest()[:12]
 
-    def _image_names(self) -> list[str]:
-        """File names (without .png) in static/elements, so the page only asks for pictures that exist."""
-        folder = self.server.static_dir / "elements"
+    def _picture(self, token: str) -> None:
+        """An element picture by its secret address (see pictures.py). Anything else is the same 404."""
+        pictures = self.server.registry.pictures
+        target = pictures.path_for(token) if pictures is not None else None
         try:
-            return sorted(p.stem for p in folder.glob("*.png") if p.is_file())
+            data = target.read_bytes() if target is not None else None
         except OSError:
-            return []
+            data = None
+        if data is None:
+            raise GameError(404, "no such picture")
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "private, max-age=3600")
+        self.end_headers()
+        self.wfile.write(data)
 
     def _static(self, relative: str) -> None:
         root = self.server.static_dir
         try:
             target = (root / relative).resolve()
-            ok = target.is_relative_to(root) and target.is_file()
+            # pictures are served only at their secret addresses (pictures.py), never by file name
+            ok = target.is_relative_to(root) and not target.is_relative_to(root / "elements") and target.is_file()
         except (OSError, ValueError):
             ok = False
         if not ok:
@@ -1079,6 +1099,7 @@ def main() -> int:
 
     saves = SaveStore(args.saves_dir)
     registry = GameRegistry(book, max_games=max(1, args.max_games), idle_seconds=args.idle_minutes * 60, saves=saves,
+                            pictures=PictureIndex(BASE_DIR / "static" / "elements", book),
                             daily=DailyStore(args.daily_file, book), solo=SoloStore(args.solo_file),
                             max_per_account=max(0, args.max_games_per_account))
     accounts = AccountStore(args.accounts_file)

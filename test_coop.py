@@ -1708,25 +1708,13 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(call(self.port, "GET", f"/g/{slug}")[0], 404)
         self.assertEqual(self.post(slug, a, "/end", save=False)[0], 404)
 
-    def test_element_pictures_are_listed_and_served(self) -> None:
-        status, data = call(self.port, "GET", "/images")
-        self.assertEqual(status, 200)
-        names = data["images"]
-        self.assertEqual(names, sorted(names))
+    def test_element_pictures_are_not_served_or_listed_by_name(self) -> None:
+        # see test_pictures.py for the secret addresses; here: the old public ways in are closed
+        self.assertEqual(call(self.port, "GET", "/images")[0], 403)   # the signed-in test user is not an administrator
         folder = BASE_DIR / "static" / "elements"
-        self.assertEqual(names, sorted(p.stem for p in folder.glob("*.png")))
+        names = sorted(p.stem for p in folder.glob("*.png"))
         if names:  # the folder holds whatever pictures the project has
-            conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
-            try:
-                conn.request("GET", f"/static/elements/{names[0]}.png")
-                res = conn.getresponse()
-                body = res.read()
-            finally:
-                conn.close()
-            self.assertEqual(res.status, 200)
-            self.assertEqual(res.getheader("Content-Type"), "image/png")
-            self.assertTrue(body.startswith(b"\x89PNG"))
-            self.assertIn("max-age", res.getheader("Cache-Control"))
+            self.assertEqual(call(self.port, "GET", f"/static/elements/{names[0]}.png")[0], 404)
         self.assertEqual(call(self.port, "GET", "/static/elements/../server.py")[0], 404)
 
     def test_lan_address_for_invite_links(self) -> None:

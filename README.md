@@ -422,8 +422,9 @@ changed to `-` and apostrophes dropped. `Alarm Clock` uses `alarm-clock.png`,
 the 60×60 slot in the list and shows small on tiles in the workspace. Pictures are
 128×128 PNGs with a transparent background today, and any square size works.
 
-The server lists the folder (`GET /images`), so adding a file only needs a page reload,
-not a restart. To see which elements have no picture and which files match nothing:
+The folder is not served by file name: each picture gets a secret address, which the server sends with the element's own
+data (so a player only ever learns the pictures of elements they have found). It looks at the folder every few seconds, so adding a file
+needs neither a restart nor more than a page reload. The secret changes each time the server starts. To see which elements have no picture and which files match nothing:
 
 ```
 python3 image_check.py recipes.json

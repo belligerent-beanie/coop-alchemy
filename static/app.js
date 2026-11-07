@@ -175,15 +175,6 @@ function makeFace(el, tag) {
   return node;
 }
 
-function loadImages() {
-  loadImageNames(() => {
-    for (const [id, node] of itemEls) applyImage(node, elements.get(id));
-    for (const t of tiles.values()) applyImage(t.el, elements.get(t.data.element));
-  });
-}
-
-loadImages();
-
 function setFace(node, el) {
   applyImage(node, el);
   const glyph = node.querySelector(".emoji");
@@ -223,7 +214,7 @@ function matchesFilter(node) {
 
 function upsertElement(raw) {
   const el = { id: raw.id, label: raw.label, emoji: raw.emoji, by: raw.by ?? null, credit: raw.credit || "",
-               rarity: raw.rarity || "common" };
+               rarity: raw.rarity || "common", pic: raw.pic || "" };
   const had = elements.has(el.id);
   elements.set(el.id, el);
   if (!had) appendItem(el);

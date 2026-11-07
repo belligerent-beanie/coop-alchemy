@@ -84,7 +84,7 @@ class RouteDocumentationTests(unittest.TestCase):
         self.assertGreater(len(rows), 50, "API.md has too few endpoint rows: did the table format change?")
         unknown = []
         for method, path in sorted(rows):
-            url = path.replace("<id>", "nogame").replace("<file>", "app.js")
+            url = path.replace("<id>", "nogame").replace("<file>", "app.js").replace("<token>", "x")
             status, body = call(port, method, url, {} if method == "POST" else None, headers={"X-Session": ""})
             if status == 404 and isinstance(body, dict) and body.get("error") == "not found":
                 unknown.append(f"{method} {path}")
