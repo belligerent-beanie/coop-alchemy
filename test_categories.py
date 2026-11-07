@@ -3,6 +3,10 @@ import json
 import unittest
 from pathlib import Path
 
+import categories
+from games import GameRegistry
+from test_coop import RECIPES, load_recipes
+
 HERE = Path(__file__).parent
 
 
@@ -20,6 +24,25 @@ class CategoryTests(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
         for c in self.categories:
             self.assertTrue(c["name"] and c["description"] and c["elements"], c["name"])
+
+
+class JournalCategoryTests(unittest.TestCase):
+    def test_the_journal_counts_each_category_without_naming_what_is_missing(self) -> None:
+        registry = GameRegistry(load_recipes(RECIPES))
+        game = registry.create("Cats", "ann")
+        token = game.join("ann").token
+        journal = game.journal(token)
+        tally = journal["progress"]["categories"]
+        self.assertEqual(sum(c["total"] for c in tally), journal["progress"]["total"])
+        self.assertEqual(sum(c["found"] for c in tally), journal["progress"]["found"])
+        self.assertTrue(all(set(c) == {"name", "found", "total"} for c in tally))
+        by_name = {c["name"]: c for c in tally}
+        self.assertEqual(by_name["Materials & Substances"]["found"], 4, "the four starters")
+        self.assertEqual({e["category"] for e in journal["elements"]}, {"Materials & Substances"})
+
+    def test_an_unsorted_element_falls_into_other(self) -> None:
+        self.assertEqual(categories.of("Fire"), "Materials & Substances")
+        self.assertEqual(categories.of("something new"), categories.OTHER)
 
 
 if __name__ == "__main__":

@@ -68,10 +68,10 @@ function renderJournalDetail() {
   }
   const origin = document.createElement("p");
   origin.className = "muted";
-  origin.textContent = entry.starter ? "A starting element"
+  origin.textContent = (entry.category ? `${entry.category} · ` : "") + (entry.starter ? "A starting element"
     : entry.by === "" ? "Unlocked for free"
     : entry.by === MR_ALCHEMY.name ? `A gift from ${MR_ALCHEMY.name}`
-    : entry.by ? `Discovered by ${entry.by}` : "";
+    : entry.by ? `Discovered by ${entry.by}` : "");
 
   const madeFrom = journalSection(
     "Made from",
@@ -120,50 +120,70 @@ function renderJournalProgress() {
   bar.setAttribute("aria-valuenow", String(found));
 }
 
-/** The Collection tab: found elements (filtered by who found them), then one silhouette per element still to find. */
+/** The Collection tab: a section per category, with its found elements (filtered by who found them), then one silhouette
+ *  per element of that category still to find. */
 function renderJournalGrid() {
   const filter = $("journal-grid-filter").value;
   const mine = (me.name || "").toLowerCase();
-  const tiles = [];
-  if (filter !== "locked") {
-    for (const entry of journalEntries.values()) {
-      const by = (entry.by || "").toLowerCase();
-      const byMe = by !== "" && by === mine;
-      if (filter === "mine" && !byMe) continue;
-      if (filter === "others" && (byMe || entry.starter || entry.by === "")) continue;
-      const tile = document.createElement("button");
-      tile.type = "button";
-      tile.className = "collection-tile";
-      tile.dataset.rarity = entry.rarity || "common";
-      tile.setAttribute("role", "listitem");
-      tile.textContent = journalLabel(entry.id);
-      tile.title = entry.starter ? "A starting element"
-        : entry.by === "" ? "Unlocked for free" : entry.by === MR_ALCHEMY.name ? `A gift from ${MR_ALCHEMY.name}`
-        : entry.by ? `Discovered by ${entry.by}` : "";
-      tile.addEventListener("click", () => {
-        showJournalTab("list");
-        selectJournalElement(entry.id);
-      });
-      tiles.push(tile);
+  const sections = [];
+  for (const category of journalProgress.categories || []) {
+    const tiles = [];
+    if (filter !== "locked") {
+      for (const entry of journalEntries.values()) {
+        if (entry.category !== category.name) continue;
+        const by = (entry.by || "").toLowerCase();
+        const byMe = by !== "" && by === mine;
+        if (filter === "mine" && !byMe) continue;
+        if (filter === "others" && (byMe || entry.starter || entry.by === "")) continue;
+        const tile = document.createElement("button");
+        tile.type = "button";
+        tile.className = "collection-tile";
+        tile.dataset.rarity = entry.rarity || "common";
+        tile.setAttribute("role", "listitem");
+        tile.textContent = journalLabel(entry.id);
+        tile.title = entry.starter ? "A starting element"
+          : entry.by === "" ? "Unlocked for free" : entry.by === MR_ALCHEMY.name ? `A gift from ${MR_ALCHEMY.name}`
+          : entry.by ? `Discovered by ${entry.by}` : "";
+        tile.addEventListener("click", () => {
+          showJournalTab("list");
+          selectJournalElement(entry.id);
+        });
+        tiles.push(tile);
+      }
     }
-  }
-  if (filter === "all" || filter === "locked") {
-    for (let i = 0; i < journalProgress.locked; i++) {
-      const slot = document.createElement("div");
-      slot.className = "collection-tile locked";
-      slot.setAttribute("role", "listitem");
-      slot.setAttribute("aria-label", "Not discovered yet");
-      slot.textContent = "?";
-      tiles.push(slot);
+    if (filter === "all" || filter === "locked") {
+      for (let i = category.found; i < category.total; i++) {
+        const slot = document.createElement("div");
+        slot.className = "collection-tile locked";
+        slot.setAttribute("role", "listitem");
+        slot.setAttribute("aria-label", "Not discovered yet");
+        slot.textContent = "?";
+        tiles.push(slot);
+      }
     }
+    if (!tiles.length) continue;
+    const section = document.createElement("section");
+    section.className = "collection-category";
+    const heading = document.createElement("h3");
+    heading.textContent = `${category.name} `;
+    const count = document.createElement("span");
+    count.className = "muted";
+    count.textContent = `${category.found} / ${category.total}`;
+    heading.appendChild(count);
+    const grid = document.createElement("div");
+    grid.className = "collection-tiles";
+    grid.setAttribute("role", "list");
+    grid.append(...tiles);
+    section.append(heading, grid);
+    sections.push(section);
   }
-  if (!tiles.length) {
+  if (!sections.length) {
     const none = document.createElement("p");
     none.className = "muted";
     none.textContent = filter === "locked" ? "You have found everything. Well done!" : "Nothing here yet.";
-    tiles.push(none);
+    sections.push(none);
   }
-  $("journal-grid").replaceChildren(...tiles);
+  $("journal-grid").replaceChildren(...sections);
 }
 
 function showJournalTab(tab) {

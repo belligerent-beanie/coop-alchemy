@@ -24,3 +24,5 @@ __pycache__/
 .env
 reports.json
 *-first-password.txt
+test-output.log
+.last-failed

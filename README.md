@@ -533,8 +533,13 @@ endpoint tables, the Events table, and its change log) and the options table abo
 ## Tests
 
 ```
-python3 -m unittest discover
+python3 run_tests.py            # everything; the last lines say which tests failed and why
+python3 run_tests.py --failed   # only what failed last time
+python3 run_tests.py test_bots  # one module, class or test (-x stops at the first failure)
+python3 -m unittest discover    # the plain runner
 ```
+
+`run_tests.py` keeps each test's output and the full tracebacks in `test-output.log`, so the screen only holds the verdict.
 
 The tests use `test_recipes.json` (a small made-up set), so they give the same result whatever
 recipes the game uses. The exception is `test_aigen.py`, whose end-to-end tests read (never change)

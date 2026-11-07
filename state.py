@@ -25,6 +25,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+import categories
 from achievements import Progress, earned_ids
 from achievements import one as achievement_json
 from emotes import EMOTE_GAP_SECONDS, EMOTE_IDS
@@ -1027,6 +1028,7 @@ class GameState:
                 entries.append({
                     **self._element_json(eid, with_by=True),
                     "starter": eid in self.book.starters,
+                    "category": categories.of(self.book.elements[eid].label),
                     "made_from": sorted(made_from[eid], key=lambda p: (label(p[0]), label(p[1]))),
                     "used_in": sorted(used_in[eid], key=lambda p: (label(p[1]), label(p[0]))),
                 })
@@ -1034,8 +1036,16 @@ class GameState:
             # view are drawn from this count. Time is unlocked for free, so it counts although no recipe makes it.
             collectable = self._collectable()
             found = len(have.keys() & collectable)
+            # Per category only how many there are and how many are found, so a silhouette still shows no name.
+            tally: dict[str, list[int]] = {}
+            for eid in collectable:
+                counts = tally.setdefault(categories.of(self.book.elements[eid].label), [0, 0])
+                counts[1] += 1
+                counts[0] += eid in have
+            shown = [name for name in categories.names() + [categories.OTHER] if name in tally]
             return {"elements": entries,
-                    "progress": {"found": found, "total": len(collectable), "locked": len(collectable) - found}}
+                    "progress": {"found": found, "total": len(collectable), "locked": len(collectable) - found,
+                                 "categories": [{"name": name, "found": tally[name][0], "total": tally[name][1]} for name in shown]}}
 
     # ---- Mr Alchemy -----------------------------------------------------------
 

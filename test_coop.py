@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 import contextlib
+import categories
 import io
 
 from games import GameRegistry, clean_game_name, slugify
@@ -580,7 +581,7 @@ class JournalTests(unittest.TestCase):
         for e in entries:
             self.assertTrue(e["starter"])
             self.assertEqual((e["made_from"], e["used_in"]), ([], []))
-            self.assertEqual(set(e), {"id", "label", "emoji", "by", "rarity", "starter", "made_from", "used_in"})
+            self.assertEqual(set(e), {"id", "label", "emoji", "by", "rarity", "starter", "category", "made_from", "used_in"})
 
     def test_a_discovery_links_its_ingredients_and_result(self) -> None:
         self.make("water", "fire")
@@ -611,10 +612,12 @@ class JournalTests(unittest.TestCase):
         self.make("water", "fire")
         later = self.state.journal(self.alice.token)["progress"]
         self.assertEqual((later["found"], later["total"], later["locked"]), (5, start["total"], start["locked"] - 1))
-        self.assertEqual(set(later), {"found", "total", "locked"})
+        self.assertEqual(set(later), {"found", "total", "locked", "categories"})
 
     def test_a_console_cannot_learn_undiscovered_elements_from_the_journal_or_errors(self) -> None:
         raw = json.dumps(self.state.journal(self.alice.token))
+        for name in categories.names() + [categories.OTHER]:   # category names are public (the sections of the Collection); they are not element names
+            raw = raw.replace(name, "#")
         book = self.state.book
         for eid in book.elements:
             if eid not in self.state.discovered():
