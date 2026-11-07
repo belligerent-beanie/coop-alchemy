@@ -1,0 +1,6 @@
+# Co-op Alchemy needs no third-party packages: the server and every tool in this folder use only the Python standard library.
+# This file is empty on purpose, so `pip install -r requirements.txt` succeeds and installs nothing.
+#
+# What you do need:
+#   - Python 3.10 or newer (developed and tested on 3.13); `conda env create -f environment.yml` makes an environment with it.
+#   - for touch_check.py only: Google Chrome or Microsoft Edge installed (it drives the real browser; nothing to pip install).

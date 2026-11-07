@@ -114,10 +114,16 @@ The plan: the game runs in a container on a small rented server that has **no op
 tunnel, makes an outbound connection to Cloudflare, and visitors reach the game through your domain on Cloudflare. Your home
 address is never involved, Cloudflare answers HTTPS, and there is nothing on the host to port-scan.
 
-**Written but not yet run.** `Dockerfile`, `docker-compose.yml`, `.dockerignore` and `.env.example` were written on a machine without
-Docker. `test_deploy_files.py` proves what it can without Docker (every option they pass exists; the files the image would contain
-are enough to start the server and serve its pages; the tunnel token file is git-ignored; no port is published). The first real
-build is still the real test: do it on any machine with Docker and a throwaway tunnel before the actual move.
+**Built and run locally, not yet on the real host.** On 2026-11-07 the image was built with Docker Desktop for Windows and the game
+service started from `docker-compose.yml`. Checked: it builds; it runs as the non-root user; the health check reports healthy; accounts
+and solo progress are written to the `/data` volume and are still there after a restart; element pictures are served; no port is
+published to the host; and a request from another container on the compose network carrying `CF-Connecting-IP` is logged with that
+address (so the rate limits see real visitors). `test_deploy_files.py` keeps proving what it can without Docker. **Not yet checked:**
+the `cloudflared` tunnel container (it needs a real token), and anything on the rented server. Do those with a throwaway tunnel
+before the actual move.
+
+If `docker build` says `docker-credential-desktop` is not found on Windows, the shell was opened before Docker Desktop was installed:
+open a new one, or add `C:\Program Files\Docker\Docker\resources\bin` to its PATH.
 
 **What you need to do (these need your accounts):**
 1. A domain whose DNS is on Cloudflare (a free account is enough).

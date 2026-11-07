@@ -1,6 +1,7 @@
 # Co-op Alchemy and its Cloudflare Tunnel as one unit.
 #
-# NOT YET RUN: written without Docker available. See DEPLOYMENT.md, "Moving to Cloudflare Tunnel and an external host".
+# The game service has been built and run from this file on Docker Desktop for Windows (2026-11-07); the tunnel service has not,
+# since that needs a real token. See DEPLOYMENT.md, "Moving to Cloudflare Tunnel and an external host".
 #
 #   cp .env.example .env        # then put your tunnel token in .env
 #   docker compose up -d --build

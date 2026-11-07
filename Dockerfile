@@ -1,7 +1,8 @@
 # Co-op Alchemy in a container. The server uses only the Python standard library, so the image is just Python plus this folder.
 #
-# NOT YET BUILT OR RUN: this was written on a machine without Docker. Build it once (docker build -t coop-alchemy .), start it,
-# open /healthz, and fix whatever it misses before relying on it. test_deploy_files.py checks that every option used below exists.
+# Built and run on Docker Desktop for Windows (2026-11-07): the image builds, runs as the non-root user below, reports healthy,
+# keeps accounts and solo progress in /data across a restart, and serves element pictures. Not yet tried on the real server.
+# test_deploy_files.py also checks that every option used below exists.
 #
 # Data (accounts, saved games, logs) lives in the /data volume, never in the image. Extra server options can be added after the
 # image name (docker run ... coop-alchemy --trusted-proxy 172.16.0.0/12) or as `command:` in docker-compose.yml.

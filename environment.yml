@@ -1,0 +1,8 @@
+# conda env create -f environment.yml
+# conda activate coop-alchemy
+# python server.py --recipes recipes.json
+name: coop-alchemy
+channels:
+  - conda-forge
+dependencies:
+  - python=3.13
