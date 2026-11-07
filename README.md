@@ -83,6 +83,22 @@ cause: allow incoming connections for Python on the port you chose.
 - **Emotes.** 😀 in the header of a shared game sends an emote that shows next to your name for everyone, at most one a second. Players
   can only send ids from `emotes.py`, never free text. The glyphs there are placeholders: change them in that one file.
 
+### Companions
+
+With `--bots on`, a person who has been alone in a public game for 20 to 75 seconds is joined by a **companion**: a player with an old-fashioned name
+from `cast.py` (Wulfstan, Bwci_Bach, Marigold_Finch...). It stays 6 to 30 minutes, then leaves, and that room gets no other for a good while.
+There is one per game at most, and 3 across the server (`--bots-max`).
+
+- **How they play.** A companion uses the same moves a browser does: it puts tiles down, picks one up, drags it onto another, and the cursor
+  you see is a model of a human hand (movements timed by Fitts's law, a gentle curve, a bell-shaped speed, the odd overshoot and correction, a
+  little tremor, a slow drift when idle). Some only keep a presence; most play like a beginner: they mostly guess pairs, now and then
+  try one that works, put old tiles away, and sometimes react with an emote when someone else finds something.
+- **They know their place.** A person always gets the seat: a companion never takes the last free one and leaves if the room fills, if it
+  empties, or after its stay. They are not counted as people (Mr Alchemy needs two real ones, an empty game still expires), are not saved,
+  and are not in hot-reload snapshots. They show up in lists exactly like anyone else; administrators see them on the Operations page, where
+  *Add a companion* and *Remove* are the quick way to try one.
+- Nobody can register under a name in the cast. The terms say some players may be computer-controlled.
+
 ### Mr Alchemy
 
 Once per public game, after a random 4 to 15 minutes of two or more people playing together, **Mr Alchemy** drops in: the screen dims, a hat
@@ -301,6 +317,8 @@ python3 server.py [--host 0.0.0.0] [--port 8000]
 | `--max-games-per-account` | `1` | How many running games one account may have started at once (`0` for no limit). |
 | `--blocklist-file` | none | Extra blocked words for usernames, game names and recipe names, one per line (the built-in list is `blocklist.txt`). |
 | `--reports-file` | `reports.json` next to `server.py` | Where player reports wait for the administrators, for 14 days at most. |
+| `--bots` | `off` | Companions: computer-controlled players that keep a lone player company in a public game (below). |
+| `--bots-max` | `3` | The most companions playing at once, across all games. |
 | `--mr-alchemy` | `on` | Mr Alchemy, the once-per-game visitor of public games (below). `off` switches him off. |
 | `--mr-alchemy-chance` | `1` | The chance (0 to 1) that a game gets his visit at all. |
 | `--mr-alchemy-min`, `--mr-alchemy-max` | `4`, `15` | He comes after a random number of minutes in this range, counting only time with two or more players together. |

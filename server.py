@@ -106,6 +106,8 @@ from captcha import Turnstile
 from achievements import describe as describe_achievements
 from daily import DailyStore
 from emotes import emote_list
+from bots import BotPolicy, BotRunner, bot_loop
+from cast import CAST
 from pictures import PictureIndex
 from visitor import VisitorPolicy, is_reserved
 from solo import SoloStore
@@ -370,7 +372,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"accounts": self.server.accounts.listing()})
             elif path == "/ops/games":
                 self._admin()
-                self._json(200, {"games": self.server.registry.overview(), "max_games": self.server.registry.max_games})
+                runner = self.server.registry.bots
+                self._json(200, {"games": self.server.registry.overview(), "max_games": self.server.registry.max_games,
+                                 "companions": runner.listing() if runner is not None else [],
+                                 "companions_on": bool(runner is not None and runner.policy.enabled)})
             elif path == "/ops/reports":
                 self._admin()
                 self._json(200, {"reports": self.server.reports.listing()})
@@ -618,7 +623,7 @@ class Handler(BaseHTTPRequestHandler):
         """Create an account, spending an invite code first if signup requires one."""
         accounts, invites = self.server.accounts, self.server.invites
         self.server.names.check(body.get("username"), "username")
-        if is_reserved(str(body.get("username") or "")):
+        if is_reserved(str(body.get("username") or ""), CAST):
             raise GameError(409, "that username is taken")
         email = None
         if self.server.mailer is not None:
@@ -726,6 +731,24 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(report_id, str):
                 raise GameError(400, "missing report id")
             return {"dismissed": server.reports.dismiss(report_id)}
+        if path in ("/ops/bots/add", "/ops/bots/remove"):
+            runner = server.registry.bots
+            if runner is None:
+                raise GameError(409, "companions are not set up on this server")
+            if path == "/ops/bots/add":
+                slug = body.get("id")
+                if not isinstance(slug, str):
+                    raise GameError(400, "missing game id")
+                level = body.get("level")
+                if level is not None and level not in (0, 1):
+                    raise GameError(400, "level must be 0 or 1")
+                name = runner.add(slug, level)
+                log.info("admin %s added companion %s to game %s", admin, name, slug)
+                return {"name": name}
+            slug, name = body.get("id"), body.get("name")
+            removed = runner.remove(slug if isinstance(slug, str) else None, name if isinstance(name, str) else None)
+            log.info("admin %s removed %d companion(s)", admin, removed)
+            return {"removed": removed}
         if path == "/ops/games/visit":
             slug = body.get("id")
             if not isinstance(slug, str):
@@ -1100,6 +1123,10 @@ def main() -> int:
                         help="at the earliest, minutes of two or more players together before he comes (default 4)")
     parser.add_argument("--mr-alchemy-max", type=float, default=15.0,
                         help="at the latest, minutes of two or more players together before he comes (default 15)")
+    parser.add_argument("--bots", choices=("on", "off"), default="off",
+                        help="companions: computer-controlled players that keep a lone player company in a public game (default off)")
+    parser.add_argument("--bots-max", type=int, default=3,
+                        help="the most companions playing at once, across all games (default 3)")
     parser.add_argument("--require-invite", action="store_true",
                         help="signup needs a single-use invite code (make them with accounts_admin.py invite create)")
     parser.add_argument("--invites-file", default=str(BASE_DIR / "invites.json"),
@@ -1229,6 +1256,7 @@ def main() -> int:
     print(f"{saves.purge()} saved game(s) in {args.saves_dir} (kept for 3 days).")
     server.public_base = f"{scheme}://{lan_ip()}:{args.port}"
     server.contact = " ".join(args.contact.split())[:200]
+    registry.bots = BotRunner(registry, BotPolicy(enabled=args.bots == "on", max_total=max(0, args.bots_max)))
     restored = restore_snapshot(args.snapshot_file, registry, accounts)
     if restored is not None:
         print(f"Reloaded: {restored[0]} running game(s) and {restored[1]} login(s) carried over.")
@@ -1256,6 +1284,8 @@ def run(server: AlchemyServer, registry: GameRegistry, accounts: AccountStore, a
     if hasattr(signal, "SIGUSR1"):
         signal.signal(signal.SIGUSR1, lambda *_: wanted.set())
     threading.Thread(target=visitor_loop, args=(registry,), daemon=True, name="mr-alchemy").start()   # a reload re-runs main, so this restarts
+    if registry.bots is not None:
+        threading.Thread(target=bot_loop, args=(registry.bots,), daemon=True, name="companions").start()
     try:
         while True:
             thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True)

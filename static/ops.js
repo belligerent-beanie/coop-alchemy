@@ -136,10 +136,25 @@ function renderGames(data) {
     const end = el("td");
     end.append(riskyButton("End game", () => Auth.fetch("/ops/games/end", { id: game.id }), "danger"));
     if (!game.private) end.append(plainButton("Send Mr Alchemy", () => Auth.fetch("/ops/games/visit", { id: game.id })));
+    if (!game.private && data.companions_on !== undefined) end.append(plainButton("Add a companion", () => Auth.fetch("/ops/bots/add", { id: game.id })));
     row.append(el("td", game.name), el("td", game.kind + (game.private ? " (private)" : "")),
       el("td", `${game.players}/${game.max_players}`), el("td", `${game.found}/${game.total}`), end);
     body.append(row);
   }
+  const mine = data.companions || [];
+  const crew = $("companions-table").querySelector("tbody");
+  crew.replaceChildren();
+  for (const c of mine) {
+    const row = el("tr");
+    const remove = el("td");
+    remove.append(plainButton("Remove", () => Auth.fetch("/ops/bots/remove", { id: c.game, name: c.name })));
+    row.append(el("td", c.name), el("td", c.game_name), el("td", c.level === 0 ? "keeps a presence" : "plays like a beginner"),
+      el("td", `${c.minutes} min`), remove);
+    crew.append(row);
+  }
+  $("companions-table").hidden = mine.length === 0;
+  $("no-companions").hidden = mine.length !== 0;
+  $("companions-state").textContent = data.companions_on ? "(on)" : "(off: start the server with --bots on)";
   $("games-table").hidden = data.games.length === 0;
   $("no-games").hidden = data.games.length !== 0;
 }

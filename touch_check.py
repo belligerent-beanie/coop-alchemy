@@ -549,6 +549,28 @@ def run(out: Path, chrome_path: str) -> int:
         api.call("POST", "/ops/games/visit", {"id": slug}, sessions["phonea"])
         time.sleep(13)
         report.check(browser.evaluate("document.getElementById('visitor').hidden"), "left alone, the cutscene ends by itself")
+        print("\na companion on a phone")
+        names_before = browser.evaluate("[...document.querySelectorAll('#key li')].map(li => li.querySelector('span:nth-child(2)').textContent)")
+        status, added = api.call("POST", "/ops/bots/add", {"id": slug, "level": 1}, sessions["phonea"])
+        report.check(status == 200 and added.get("name"), "an administrator can put a companion in the game", str(added))
+        time.sleep(2.0)
+        names_now = browser.evaluate("[...document.querySelectorAll('#key li')].map(li => li.querySelector('span:nth-child(2)').textContent)")
+        report.check(len(names_now) == len(names_before) + 1 and added["name"] in names_now, "it appears in the player list like anyone else", str(names_now))
+        row = browser.evaluate("(() => { const li = [...document.querySelectorAll('#key li')].find(l => l.textContent.includes(%s)); "
+                               "return li ? [li.children.length, !!li.querySelector('.report'), li.textContent] : null; })()" % json.dumps(added["name"]))
+        report.check(row is not None and row[1] and "bot" not in row[2].lower(), "...with the same report button and nothing marking it", str(row))
+        seen_cursor = False
+        for _ in range(60):
+            time.sleep(0.5)
+            if browser.evaluate("[...document.querySelectorAll('#cursor-layer .cursor-name')].some(n => n.textContent === %s)" % json.dumps(added["name"])):
+                seen_cursor = True
+                break
+        report.check(seen_cursor, "its cursor shows on the board")
+        report.check(browser.evaluate("document.documentElement.scrollWidth - innerWidth") <= 1, "...and the page still fits the screen")
+        api.call("POST", "/ops/bots/remove", {"name": added["name"]}, sessions["phonea"])
+        time.sleep(1.5)
+        report.check(browser.evaluate("![...document.querySelectorAll('#key li')].some(l => l.textContent.includes(%s))" % json.dumps(added["name"])),
+                     "when it is removed it leaves the list")
         print("\nemotes, sound, discovery moments and awards on a phone")
         report.check(browser.evaluate("!document.getElementById('emote-open').hidden"), "a shared game has an emote button")
         x, y = center_of(browser, "#emote-open")

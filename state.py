@@ -201,6 +201,7 @@ class GameState:
         self._stats: dict[str, dict[str, int]] = {}        # casefolded player name -> {"tries", "misses"}, for the awards
         self._first_finder: str | None = None              # who made the game's first discovery
         self._emote_at: dict[str, float] = {}              # pid -> when they last sent an emote
+        self._virtual: dict[str, Player] = {}              # token -> a computer-controlled player (bots.py): seated, but never a "person"
         self._visited = False                              # Mr Alchemy has been (or is not coming): once per game
         self._together = 0.0                               # seconds two or more people have played together
         self._visit_after: float | None = None             # how long of that before he comes; None until it is first drawn
@@ -242,7 +243,7 @@ class GameState:
     def _assign_color(self, pid: str) -> None:
         if pid in self._colors:
             return
-        used = Counter(self._colors[s.player.pid] for s in self._subs)
+        used = Counter(self._colors.values())
         self._colors[pid] = min(PALETTE, key=lambda c: used[c])  # first least-used colour
 
     def _online_players(self) -> list[dict[str, str]]:
@@ -253,6 +254,10 @@ class GameState:
             if pid not in seen:
                 seen.add(pid)
                 out.append({"pid": pid, "name": sub.player.name, "color": self._colors[pid]})
+        for player in self._virtual.values():
+            if player.pid not in seen:
+                seen.add(player.pid)
+                out.append({"pid": player.pid, "name": player.name, "color": self._colors[player.pid]})
         return out
 
     def _score(self) -> int:
@@ -305,6 +310,7 @@ class GameState:
 
     def _forget(self, token: str) -> None:
         player = self._players.pop(token, None)
+        self._virtual.pop(token, None)
         if player is not None:
             self._colors.pop(player.pid, None)
         self._last_active.pop(token, None)
@@ -318,6 +324,8 @@ class GameState:
         online = {s.player.token for s in self._subs}
         now = self._clock()
         for token in list(self._players):
+            if token in self._virtual:
+                continue   # a computer-controlled player has no connection to lose: bots.py takes it out when it is time
             if token not in online and now - self._last_active.get(token, 0.0) >= self._grace:
                 self._forget(token)
 
@@ -332,9 +340,24 @@ class GameState:
         now = self._clock()
         return [
             player for token, player in self._players.items()
-            if token in online
+            if token in self._virtual
+            or token in online
             or (token not in self._connected_once and now - self._last_active[token] < self._grace)
         ]
+
+    def _people(self) -> list[Player]:
+        """The seated players who are people: what Mr Alchemy, a game's expiry and the companions' own rules count."""
+        return [p for p in self._seated() if p.token not in self._virtual]
+
+    def people_count(self) -> int:
+        with self._lock:
+            self._prune()
+            return len(self._people())
+
+    def _make_room(self) -> None:
+        """A person always gets a seat: if the game is full only because of computer-controlled players, one of them leaves."""
+        while len(self._seated()) >= MAX_PLAYERS and self._virtual:
+            self._drop_virtual(next(iter(self._virtual)))
 
     def _require_player(self, token: object) -> Player:
         self._prune()
@@ -472,6 +495,7 @@ class GameState:
             if self.private and name.casefold() != clean_name(self.creator).casefold():
                 raise GameError(403, "this is someone else's private game")
             self._prune()
+            self._make_room()
             seated = self._seated()
             if len(seated) >= MAX_PLAYERS:
                 raise GameError(409, f"the game is full ({MAX_PLAYERS} players at most)")
@@ -486,6 +510,51 @@ class GameState:
             self._last_active[player.token] = self._touched = self._clock()
             return player
 
+    def add_virtual(self, raw_name: object) -> Player:
+        """Seat a computer-controlled player (see bots.py). It plays through the same methods as a person, appears in the player list like
+        one, and is never saved, never counted as a person, and always leaves its seat to a person who needs it.
+
+        Public games only, and it never takes the last free seat.
+        """
+        name = clean_name(raw_name)
+        with self._lock:
+            if self.private or self.ended:
+                raise GameError(409, "companions only join public games that are still running")
+            self._prune()
+            seated = self._seated()
+            if len(seated) >= MAX_PLAYERS - 1:
+                raise GameError(409, "no free seat to spare")
+            if name.casefold() in {p.name.casefold() for p in seated}:
+                raise GameError(409, f"the name {name!r} is already taken")
+            player = Player(secrets.token_urlsafe(16), secrets.token_hex(4), name)
+            self._players[player.token] = player
+            self._virtual[player.token] = player
+            self._last_active[player.token] = self._clock()
+            self._assign_color(player.pid)
+            self._publish("players", {"players": self._online_players()})
+            return player
+
+    def remove_virtual(self, token: str) -> None:
+        """A computer-controlled player leaves: its held tiles are put down and its cursor hidden, like anyone leaving."""
+        with self._lock:
+            self._drop_virtual(token)
+
+    def _drop_virtual(self, token: str) -> None:
+        player = self._virtual.get(token)
+        if player is None:
+            return
+        for tile in self._tiles.values():
+            if tile.held_by == player.pid:
+                tile.held_by = None
+                self._publish("tile_dropped", {"id": tile.id, "x": tile.x, "y": tile.y, "pid": player.pid})
+        self._publish("cursor", {"pid": player.pid, "x": None, "y": None})
+        self._forget(token)
+        self._publish("players", {"players": self._online_players()})
+
+    def virtual_players(self) -> list[Player]:
+        with self._lock:
+            return list(self._virtual.values())
+
     def subscribe(self, token: str) -> Subscriber | None:
         """Register an event stream; its first message is a full snapshot."""
         with self._lock:
@@ -495,6 +564,7 @@ class GameState:
                 return None
             if not any(s.player.token == token for s in self._subs):
                 # Coming (back) online needs a free seat and a name nobody else is using now.
+                self._make_room()
                 others = [p for p in self._seated() if p.token != token]
                 if len(others) >= MAX_PLAYERS or player.name.casefold() in {p.name.casefold() for p in others}:
                     self._forget(token)
@@ -739,7 +809,7 @@ class GameState:
                 "tile_seq": self._tile_seq,
                 "tiles": [{"id": t.id, "element": t.element, "x": t.x, "y": t.y} for t in self._tiles.values()],
                 "players": [{"token": p.token, "pid": p.pid, "name": p.name,
-                             "color": self._colors.get(p.pid, "")} for p in self._players.values()],
+                             "color": self._colors.get(p.pid, "")} for p in self._players.values() if p.token not in self._virtual],
                 "last_seen": {name: max(0.0, now - seen) for name, seen in self._last_seen.items()},
             }
             return data
@@ -859,7 +929,7 @@ class GameState:
         """True once nobody has been in the game for `idle_seconds`."""
         with self._lock:
             self._prune()
-            return not self._seated() and not self._subs and self._clock() - self._touched >= idle_seconds
+            return not self._people() and not self._subs and self._clock() - self._touched >= idle_seconds
 
     # ---- the journal ----------------------------------------------------------
 
@@ -919,7 +989,7 @@ class GameState:
                 return False
             assert self.visitors is not None
             self._prune()
-            if len(self._seated()) < 2:
+            if len(self._people()) < 2:
                 return False
             self._together += min(now - last, 30.0) if last is not None else 0.0   # a long gap (a paused server) is not time together
             if self._visit_after is None:
@@ -939,7 +1009,7 @@ class GameState:
         with self._lock:
             if self.private or self.ended or (self._visited and not force):
                 return None
-            if not force and len(self._seated()) < 2:
+            if not force and len(self._people()) < 2:
                 return None
             gift = pick_gift(self.book, self._discovered, self._rng)
             if not gift:

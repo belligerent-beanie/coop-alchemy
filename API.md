@@ -179,6 +179,8 @@ and names, never password hashes, email addresses, login tokens or client addres
 | `GET /ops/invites` | session + admin | `{"enabled", "codes": [{"id", "note", "created", "used_by", "used_at"}]}`. Codes are stored hashed, so they cannot be shown again. |
 | `POST /ops/invites/create` | session + admin | `{"count"?, "note"?}` → `{"codes": [...]}`, shown only now. `409` if invite codes are not switched on (`--require-invite`). |
 | `POST /ops/invites/revoke` | session + admin | `{"id"}` → `{"revoked": n}`: deletes an unused code. |
+| `POST /ops/bots/add` | session + admin | `{"id", "level"?}` → `{"name"}`: puts a companion (0 keeps a presence, 1 plays like a beginner; random if left out) in a running public game. `409` if no seat can be spared, `404` if the game is not a running public game. |
+| `POST /ops/bots/remove` | session + admin | `{"id"?, "name"?}` → `{"removed"}`: takes companions out at once: those of one game, one by name, or all. |
 | `POST /ops/games/visit` | session + admin | `{"id"}` → `{"gave": [labels]}`: sends Mr Alchemy to a running public game now, whatever the schedule and the number of players. `404` if it is not running, `409` for a private game or one with nothing left to find. |
 | `POST /ops/games/end` | session + admin | `{"id"}` → `{}`: ends a running game for everyone, unsaved. `404` if it is not running. |
 | `POST /ops/accounts/verify` | session + admin | `{"username"}` → `{}`: confirms an email address by hand. |
@@ -196,6 +198,7 @@ checks that every option the server accepts appears in the README.
 
 Newest first. Add a line whenever an endpoint, event, status code or option is added, changed or removed.
 
+- **2026-11 (companions)**: `POST /ops/bots/add` and `POST /ops/bots/remove`; `companions` and `companions_on` in the `GET /ops/games` response; `POST /register` answers `409` for the cast's names too; options `--bots`, `--bots-max`. Companions appear in `players` and the `snapshot` exactly like people (the same `pid`, `name`, `color`).
 - **2026-11 (Mr Alchemy)**: the `visitor` event and `POST /ops/games/visit`; `POST /register` answers `409` "that username is taken" for any spelling of the name Mr Alchemy; options `--mr-alchemy`, `--mr-alchemy-chance`, `--mr-alchemy-min`, `--mr-alchemy-max`.
 - **2026-11 (pictures)**: element pictures are no longer served by file name (`/static/elements/...` is `404`) and `GET /images` is no longer public or a list of names: it is `{"pictures": {id: address}}` for administrators only. Pictures are at `GET /pic/<token>.png`; each element's data (`snapshot`, `discovered`, the journal, hints, `GET /create/data`) carries `"pic"` when it has one.
 - **2026-11 (moments, awards, emotes, achievements)**: `rarity` on discovered elements and in the `discovered` event; `awards` in the `ended` event; `POST /g/<id>/emote`, `GET /emotes` and the `emote` event; the `achievement` event and `achievements` in `GET /solo`; one hint a day in solo games (`hints_left` in the hint answer and in the snapshot's `game`, `429` when used up).

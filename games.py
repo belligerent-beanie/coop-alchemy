@@ -75,6 +75,7 @@ class GameRegistry:
         self.solo = solo or SoloStore(None)
         self.pictures = pictures   # None: no element has a picture
         self.visitors = visitors   # when Mr Alchemy visits public games; None: never
+        self.bots: Any = None      # the BotRunner (bots.py), set by the server when companions are switched on
         self.max_games = max_games
         self.idle_seconds = idle_seconds
         self._clock = clock
@@ -160,6 +161,12 @@ class GameRegistry:
             return [{**game.summary(), "kind": "daily" if game.challenge is not None else "race" if game.race is not None
                      else "solo" if game.solo is not None else "game",
                      "private": game.private} for game in self._games.values()]
+
+    def public_games(self) -> list[GameState]:
+        """The running public games (what companions may join)."""
+        with self._lock:
+            self._expire()
+            return [g for g in self._games.values() if not g.private]
 
     def visitor_tick(self) -> list[str]:
         """Let Mr Alchemy visit whichever public games are due (the server calls this every few seconds). Returns their names."""
