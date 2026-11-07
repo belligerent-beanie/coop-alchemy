@@ -890,3 +890,26 @@ button.collection-tile:hover { border-color: var(--accent); }
 .achievement.locked { opacity: 0.5; border-style: dashed; background: none; }
 .ach-icon { font-size: 1.4rem; }
 .ach-text { display: flex; flex-direction: column; font-size: 0.9rem; }
+
+/* ---- Mr Alchemy's visit ---- */
+#visitor { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; pointer-events: none; text-align: center; padding: 16px; }
+#visitor > * { position: relative; }
+.visitor-vignette { position: absolute !important; inset: 0; background: radial-gradient(circle at 50% 45%, rgba(10, 6, 24, 0.35), rgba(5, 3, 14, 0.9)); animation: vis-dim 0.7s ease-out both; }
+.visitor-flash { position: absolute !important; inset: 0; background: #fff; opacity: 0; animation: vis-flash 0.9s ease-out 0.05s both; }
+.visitor-hat { font-size: clamp(3.5rem, 18vw, 6rem); filter: drop-shadow(0 0 18px #b46bff); animation: vis-hat 1s cubic-bezier(.2, 1.4, .4, 1) 0.25s both; }
+.visitor-title { font-size: clamp(1.3rem, 6vw, 2.2rem); font-weight: 800; color: #fff; text-shadow: 0 0 22px #b46bff, 0 2px 0 #000; opacity: 0; transform: scale(0.8); }
+.visitor-sub { font-size: 0.95rem; letter-spacing: 0.06em; text-transform: uppercase; color: #d9c8ff; opacity: 0; }
+#visitor.struck .visitor-title { animation: vis-title 0.8s ease-out both; }
+#visitor.struck .visitor-sub { animation: vis-fade 0.6s ease-out 0.5s both; }
+.visitor-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: 36rem; min-height: 2.4rem; }
+.visitor-chip { padding: 5px 14px; border-radius: 999px; background: var(--tile); color: inherit; border: 2px solid #b46bff; box-shadow: 0 0 14px #b46bff88; font-weight: 600; animation: pop 0.35s ease-out; }
+.visitor-skip { pointer-events: auto; position: absolute !important; right: 16px; bottom: 16px; opacity: 0.85; }
+#visitor.leaving > * { transition: opacity 0.8s, transform 0.8s, filter 0.8s; opacity: 0; transform: translateY(-30px) scale(1.15); filter: blur(10px); }
+#visitor.calm { background: rgba(5, 3, 14, 0.82); pointer-events: auto; }
+#visitor.calm .visitor-title, #visitor.calm .visitor-sub { opacity: 1; transform: none; }
+@keyframes vis-dim { from { opacity: 0; } to { opacity: 1; } }
+@keyframes vis-flash { 0% { opacity: 0.95; } 100% { opacity: 0; } }
+@keyframes vis-hat { from { opacity: 0; transform: translateY(-120px) rotate(-25deg); } to { opacity: 1; transform: none; } }
+@keyframes vis-title { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: scale(1); } }
+@keyframes vis-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { #visitor * { animation: none !important; transition: none !important; } }

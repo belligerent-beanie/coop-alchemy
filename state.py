@@ -31,6 +31,7 @@ from emotes import EMOTE_GAP_SECONDS, EMOTE_IDS
 from hints import find_element, hint_can_make, hint_recipe, hint_try
 from pictures import PictureIndex
 from recipes import RecipeBook, depths
+from visitor import MR_ALCHEMY, VisitorPolicy, pick_gift
 
 MAX_NAME_LEN = 24
 MAX_PLAYERS = 5
@@ -162,8 +163,10 @@ class GameState:
                  challenge: Challenge | None = None, race: Race | None = None,
                  solo: Callable[[dict[str, Any], int, int, bool, set[str]], list[str]] | None = None,
                  today: Callable[[], str] | None = None,
-                 pictures: PictureIndex | None = None) -> None:
+                 pictures: PictureIndex | None = None,
+                 visitors: VisitorPolicy | None = None) -> None:
         self.book = book
+        self.visitors = visitors   # None: Mr Alchemy never visits this game (see visitor.py)
         self.pictures = pictures   # the address of each element's picture, sent only with that element's data
         self._today = today or (lambda: time.strftime("%Y-%m-%d", time.gmtime()))   # the day a solo hint is counted against
         # Solo mode (see solo.py): called as solo(export, found, total, complete, earned) after every discovery, so progress
@@ -198,6 +201,10 @@ class GameState:
         self._stats: dict[str, dict[str, int]] = {}        # casefolded player name -> {"tries", "misses"}, for the awards
         self._first_finder: str | None = None              # who made the game's first discovery
         self._emote_at: dict[str, float] = {}              # pid -> when they last sent an emote
+        self._visited = False                              # Mr Alchemy has been (or is not coming): once per game
+        self._together = 0.0                               # seconds two or more people have played together
+        self._visit_after: float | None = None             # how long of that before he comes; None until it is first drawn
+        self._visit_tick: float | None = None              # the clock at the last visitor_tick
         self._genie_unlocked_at: int | None = None  # number of discoveries when the genie unlocked
         self._genie_used = 0
         self._players: dict[str, Player] = {}         # token -> player
@@ -360,7 +367,7 @@ class GameState:
         new = [r for r in results if r not in self._discovered]
         for r in new:
             self._discovered[r] = player.name
-        if new and self._first_finder is None:
+        if new and self._first_finder is None and player.name != MR_ALCHEMY:
             self._first_finder = player.name
         if self._djinn in new and self._genie_unlocked_at is None:
             self._genie_unlocked_at = len(self._discovered)
@@ -723,6 +730,7 @@ class GameState:
             if self.solo is not None:
                 data["solo"] = True
             data["awards"] = {"stats": {k: dict(v) for k, v in self._stats.items()}, "first": self._first_finder}
+            data["visitor"] = {"visited": self._visited, "together": self._together, "after": self._visit_after}
             if self.challenge is not None:
                 data["challenge"] = {"date": self.challenge.date, "tier": self.challenge.tier,
                                      "target": self.challenge.target,
@@ -752,6 +760,12 @@ class GameState:
                         if isinstance(value.get(k), int) and not isinstance(value.get(k), bool) and value[k] >= 0}
         first = saved_awards.get("first")
         self._first_finder = first if isinstance(first, str) else None
+        saved_visit = data.get("visitor") if isinstance(data.get("visitor"), dict) else {}
+        self._visited = saved_visit.get("visited") is True
+        for key, attr in (("together", "_together"), ("after", "_visit_after")):
+            value = saved_visit.get(key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+                setattr(self, attr, float(value))
         live = data.get("live") if isinstance(data.get("live"), dict) else {}
         with self._lock:
             saved = data.get("challenge")
@@ -890,6 +904,55 @@ class GameState:
             return {"elements": entries,
                     "progress": {"found": found, "total": len(collectable), "locked": len(collectable) - found}}
 
+    # ---- Mr Alchemy -----------------------------------------------------------
+
+    def _may_be_visited(self) -> bool:
+        return self.visitors is not None and self.visitors.enabled and not self.private and not self.ended
+
+    def visitor_tick(self) -> bool:
+        """Called every few seconds by the server. Counts the time two or more people have played together and, once a random amount
+        of it has passed, lets Mr Alchemy visit (once per game). Returns True if he came."""
+        with self._lock:
+            now = self._clock()
+            last, self._visit_tick = self._visit_tick, now
+            if self._visited or not self._may_be_visited():
+                return False
+            assert self.visitors is not None
+            self._prune()
+            if len(self._seated()) < 2:
+                return False
+            self._together += min(now - last, 30.0) if last is not None else 0.0   # a long gap (a paused server) is not time together
+            if self._visit_after is None:
+                if self._rng.random() >= self.visitors.chance:
+                    self._visited = True    # this game is not getting a visit
+                    return False
+                low, high = sorted((self.visitors.min_seconds, self.visitors.max_seconds))
+                self._visit_after = self._rng.uniform(low, high)
+            return self._together >= self._visit_after and self.visit() is not None
+
+    def visit(self, force: bool = False) -> dict[str, Any] | None:
+        """Mr Alchemy arrives: unlocks 5 to 10 elements for everyone, tells the pages to play the cutscene, and leaves.
+
+        Public games only. `force` (an administrator's button) allows a visit with fewer than two people and a second visit. Returns
+        what was announced, or None if no visit happened.
+        """
+        with self._lock:
+            if self.private or self.ended or (self._visited and not force):
+                return None
+            if not force and len(self._seated()) < 2:
+                return None
+            gift = pick_gift(self.book, self._discovered, self._rng)
+            if not gift:
+                return None
+            self._visited = True
+            base = len(self._discovered)
+            self._record(Player("", "", MR_ALCHEMY), gift)
+            self._unlock_time()
+            announced = {"name": MR_ALCHEMY, "elements": [self._element_json(e, with_by=True) for e in gift],
+                         "found": len(self._discovered), "total": self.total, "before": base}
+            self._publish("visitor", announced)
+            return announced
+
     # ---- awards ---------------------------------------------------------------
 
     def awards(self) -> list[dict[str, Any]]:
@@ -899,7 +962,7 @@ class GameState:
         element that was unlocked for free rather than made.
         """
         with self._lock:
-            made = {eid: by for eid, by in self._discovered.items() if by}   # found by a player, not a starter or a gift
+            made = {eid: by for eid, by in self._discovered.items() if by and by != MR_ALCHEMY}   # found by a player, not a gift
             out: list[dict[str, Any]] = []
 
             def label(eid: str) -> str:

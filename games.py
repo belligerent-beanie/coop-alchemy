@@ -29,6 +29,7 @@ from recipes import RecipeBook, depths
 from saves import SaveStore
 from solo import SoloStore
 from state import Challenge, GameError, GameState
+from visitor import VisitorPolicy
 
 MAX_GAMES = 3
 MAX_RACES = 4
@@ -65,6 +66,7 @@ class GameRegistry:
                  daily: DailyStore | None = None,
                  solo: SoloStore | None = None,
                  pictures: PictureIndex | None = None,
+                 visitors: VisitorPolicy | None = None,
                  max_per_account: int = 0) -> None:
         self.book = book
         self.max_per_account = max_per_account  # running public games one account may have started (0 = no limit)
@@ -72,6 +74,7 @@ class GameRegistry:
         self.daily = daily or DailyStore(None, book)
         self.solo = solo or SoloStore(None)
         self.pictures = pictures   # None: no element has a picture
+        self.visitors = visitors   # when Mr Alchemy visits public games; None: never
         self.max_games = max_games
         self.idle_seconds = idle_seconds
         self._clock = clock
@@ -117,7 +120,7 @@ class GameRegistry:
             slug = slugify(name) or secrets.token_hex(3)
             if slug in self._games:
                 raise GameError(409, f"a game called {self._games[slug].name!r} is already running")
-            game = GameState(self.book, pictures=self.pictures, name=name, slug=slug, creator=creator, clock=self._clock)
+            game = GameState(self.book, pictures=self.pictures, visitors=self.visitors, name=name, slug=slug, creator=creator, clock=self._clock)
             self._games[slug] = game
             return game
 
@@ -134,7 +137,7 @@ class GameRegistry:
                 if game.solo is not None and key_of(game.creator) == key_of(username):
                     return game
             slug = next(s for s in (f"solo-{secrets.token_hex(4)}" for _ in range(100)) if s not in self._games)
-            game = GameState(self.book, pictures=self.pictures, name=f"Solo: {username}", slug=slug, creator=username, clock=self._clock,
+            game = GameState(self.book, pictures=self.pictures, visitors=self.visitors, name=f"Solo: {username}", slug=slug, creator=username, clock=self._clock,
                              solo=self._solo_saver(username))
             game.restore(self.solo.load(username))
             game.report_solo()   # so the status is right before the first discovery
@@ -157,6 +160,23 @@ class GameRegistry:
             return [{**game.summary(), "kind": "daily" if game.challenge is not None else "race" if game.race is not None
                      else "solo" if game.solo is not None else "game",
                      "private": game.private} for game in self._games.values()]
+
+    def visitor_tick(self) -> list[str]:
+        """Let Mr Alchemy visit whichever public games are due (the server calls this every few seconds). Returns their names."""
+        with self._lock:
+            games = list(self._games.values())
+        return [game.name for game in games if game.visitor_tick()]
+
+    def admin_visit(self, slug: str) -> dict[str, Any]:
+        """An administrator sends Mr Alchemy to one game now, whatever the schedule says (a public game, with something left to give)."""
+        with self._lock:
+            game = self._games.get(slug)
+        if game is None:
+            raise GameError(404, "that game does not exist (it may have ended)")
+        announced = game.visit(force=True)
+        if announced is None:
+            raise GameError(409, "Mr Alchemy only visits public games that still have elements to find")
+        return {"gave": [e["label"] for e in announced["elements"]]}
 
     def admin_end(self, slug: str) -> None:
         """End a running game for everyone, without saving it (the administrator's way; players use end())."""
@@ -276,7 +296,7 @@ class GameRegistry:
             self.daily.use_attempt(day, tier, username)
             slug = next(s for s in (f"daily-{secrets.token_hex(4)}" for _ in range(100)) if s not in self._games)
             data = info["tiers"][tier]
-            game = GameState(self.book, pictures=self.pictures, name=f"Daily challenge: {tier} {day}", slug=slug, creator=username,
+            game = GameState(self.book, pictures=self.pictures, visitors=self.visitors, name=f"Daily challenge: {tier} {day}", slug=slug, creator=username,
                              clock=self._clock, challenge=self._challenge(day, tier, data["target"], data["reference"]))
             self._games[slug] = game
         for old in same:  # tell any open page of the replaced attempt that it has ended
@@ -322,7 +342,7 @@ class GameRegistry:
             creator = data.get("creator") if isinstance(data.get("creator"), str) else ""
             self._check_per_account(creator or username)
             # Saves from before games had a creator belong to whoever brings them back first.
-            game = GameState(self.book, pictures=self.pictures, name=name, slug=slug, creator=creator or username, clock=self._clock)
+            game = GameState(self.book, pictures=self.pictures, visitors=self.visitors, name=name, slug=slug, creator=creator or username, clock=self._clock)
             game.restore(data)
             self._games[slug] = game
             return game
@@ -357,7 +377,7 @@ class GameRegistry:
                     challenge = self._challenge(day, tier, target, reference if isinstance(reference, int)
                                                 and not isinstance(reference, bool) else None)
                 solo = self._solo_saver(creator) if data.get("solo") is True and creator else None
-                game = GameState(self.book, pictures=self.pictures, name=name, slug=slug, creator=creator, clock=self._clock,
+                game = GameState(self.book, pictures=self.pictures, visitors=self.visitors, name=name, slug=slug, creator=creator, clock=self._clock,
                                  challenge=challenge, solo=solo)
                 game.live_restore(data)
                 self._games[slug] = game
@@ -490,7 +510,7 @@ class GameRegistry:
             names = room.start(username)
             for name in names:
                 slug = next(s for s in (f"race-{secrets.token_hex(4)}" for _ in range(100)) if s not in self._games)
-                game = GameState(self.book, pictures=self.pictures, name=f"Race {room.id}", slug=slug, creator=name, clock=self._clock,
+                game = GameState(self.book, pictures=self.pictures, visitors=self.visitors, name=f"Race {room.id}", slug=slug, creator=name, clock=self._clock,
                                  race=room.hook(name))
                 self._games[slug] = game
                 room.attach(name, slug, len(game.discovered()))

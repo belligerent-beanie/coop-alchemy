@@ -377,7 +377,7 @@ function updateTooltip(e) {
   const by = document.createElement("div");
   by.className = "by";
   by.textContent = el.by === null ? "Starting element"
-    : el.by === "" ? "Unlocked for free" : `Discovered by ${el.by}`;
+    : el.by === "" ? "Unlocked for free" : el.by === MR_ALCHEMY.name ? `A gift from ${MR_ALCHEMY.name}` : `Discovered by ${el.by}`;
   tooltip.append(title, by);
   if (el.credit) {
     const credit = document.createElement("div");
@@ -1380,7 +1380,90 @@ function paintHintsLeft() {
   $("hints").querySelectorAll("button").forEach((b) => { b.disabled = hintsLeft === 0; });
 }
 
+// ---- Mr Alchemy -----------------------------------------------------------------------------------------------------
+//
+// A once-per-game visitor: the server unlocks 5 to 10 elements for the room at once and sends them in one "visitor" event; this plays
+// the cutscene and lets the elements appear one at a time. Skippable, and a plain card for anyone who has asked for reduced motion.
+
+const MR_ALCHEMY = { name: "Mr Alchemy", glyph: "🎩" };   // the look is a placeholder until he is designed
+let visitorScene = null;                                   // the cutscene playing now: {skip()}
+
+function playVisitor(d) {
+  visitorScene?.skip();
+  const overlay = $("visitor");
+  const timers = [];
+  const later = (ms, fn) => timers.push(setTimeout(fn, ms));
+  const revealed = new Set();
+  const reveal = (el) => {
+    if (revealed.has(el.id)) return;
+    revealed.add(el.id);
+    upsertElement(el);
+    const item = itemEls.get(el.id);
+    if (item) {
+      item.classList.add("new");
+      setTimeout(() => item.classList.remove("new"), 3000);
+    }
+  };
+  const finish = () => {
+    timers.forEach(clearTimeout);
+    d.elements.forEach(reveal);
+    overlay.hidden = true;
+    overlay.replaceChildren();
+    overlay.className = "";
+    visitorScene = null;
+    updateCounter();
+    if (typeof refreshJournal === "function") refreshJournal();
+  };
+  visitorScene = { skip: finish };
+
+  const node = (tag, className, text = "") => {
+    const n = document.createElement(tag);
+    n.className = className;
+    n.textContent = text;
+    return n;
+  };
+  const title = node("div", "visitor-title", `You've been struck by ${MR_ALCHEMY.name}`);
+  const sub = node("div", "visitor-sub", `${d.elements.length} new elements`);
+  const chips = node("div", "visitor-chips");
+  const skip = node("button", "visitor-skip", "Skip");
+  skip.type = "button";
+  skip.addEventListener("click", finish);
+
+  if (reducedMotion()) {   // no flashing or movement: just say what happened, with the elements listed, until it is closed
+    d.elements.forEach((el) => chips.appendChild(node("span", "visitor-chip", `${el.emoji} ${el.label}`.trim())));
+    skip.textContent = "Close";
+    overlay.className = "calm";
+    overlay.replaceChildren(node("div", "visitor-hat", MR_ALCHEMY.glyph), title, sub, chips, skip);
+    overlay.hidden = false;
+    d.elements.forEach(reveal);
+    return;
+  }
+
+  overlay.className = "";
+  overlay.replaceChildren(node("div", "visitor-vignette"), node("div", "visitor-flash"), node("div", "visitor-hat", MR_ALCHEMY.glyph),
+    title, sub, chips, skip);
+  overlay.hidden = false;
+  playNotes([98, 147, 196], 0.09);                       // a low rumble
+  later(900, () => overlay.classList.add("struck"));     // the title lands
+  later(900, () => playNotes([392, 494, 587, 784], 0.08));
+  d.elements.forEach((el, i) => later(2600 + i * 430, () => {
+    chips.appendChild(node("span", "visitor-chip", `${el.emoji} ${el.label}`.trim()));
+    reveal(el);
+    playNotes([523 + (i % 5) * 60], 0.04);
+  }));
+  const done = 2600 + d.elements.length * 430 + 1700;
+  later(done, () => overlay.classList.add("leaving"));   // he vanishes
+  later(done + 900, () => {
+    finish();
+    toast(`🎩 ${MR_ALCHEMY.name} left you ${d.elements.length} elements`);
+  });
+}
+
 const handlers = {
+  visitor(d) {
+    playVisitor(d);
+  },
+
   ended({ by, saved, awards }) {
     gameEnded = true;
     if (source) source.close();

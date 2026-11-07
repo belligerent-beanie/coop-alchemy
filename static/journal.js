@@ -70,6 +70,7 @@ function renderJournalDetail() {
   origin.className = "muted";
   origin.textContent = entry.starter ? "A starting element"
     : entry.by === "" ? "Unlocked for free"
+    : entry.by === MR_ALCHEMY.name ? `A gift from ${MR_ALCHEMY.name}`
     : entry.by ? `Discovered by ${entry.by}` : "";
 
   const madeFrom = journalSection(
@@ -137,7 +138,8 @@ function renderJournalGrid() {
       tile.setAttribute("role", "listitem");
       tile.textContent = journalLabel(entry.id);
       tile.title = entry.starter ? "A starting element"
-        : entry.by === "" ? "Unlocked for free" : entry.by ? `Discovered by ${entry.by}` : "";
+        : entry.by === "" ? "Unlocked for free" : entry.by === MR_ALCHEMY.name ? `A gift from ${MR_ALCHEMY.name}`
+        : entry.by ? `Discovered by ${entry.by}` : "";
       tile.addEventListener("click", () => {
         showJournalTab("list");
         selectJournalElement(entry.id);

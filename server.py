@@ -107,6 +107,7 @@ from achievements import describe as describe_achievements
 from daily import DailyStore
 from emotes import emote_list
 from pictures import PictureIndex
+from visitor import VisitorPolicy, is_reserved
 from solo import SoloStore
 from drafts import DraftStore
 from erasure import erase_account
@@ -617,6 +618,8 @@ class Handler(BaseHTTPRequestHandler):
         """Create an account, spending an invite code first if signup requires one."""
         accounts, invites = self.server.accounts, self.server.invites
         self.server.names.check(body.get("username"), "username")
+        if is_reserved(str(body.get("username") or "")):
+            raise GameError(409, "that username is taken")
         email = None
         if self.server.mailer is not None:
             if body.get("email") is None:
@@ -723,6 +726,13 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(report_id, str):
                 raise GameError(400, "missing report id")
             return {"dismissed": server.reports.dismiss(report_id)}
+        if path == "/ops/games/visit":
+            slug = body.get("id")
+            if not isinstance(slug, str):
+                raise GameError(400, "missing game id")
+            result = server.registry.admin_visit(slug)
+            log.info("admin %s sent Mr Alchemy to game %s", admin, slug)
+            return result
         if path == "/ops/games/end":
             slug = body.get("id")
             if not isinstance(slug, str):
@@ -1082,6 +1092,14 @@ def main() -> int:
     parser.add_argument("--contact", default=os.environ.get("ALCHEMY_CONTACT", ""),
                         help="an email or web address players can reach you at, shown on the terms and privacy pages "
                              "(or set ALCHEMY_CONTACT)")
+    parser.add_argument("--mr-alchemy", choices=("on", "off"), default="on",
+                        help="Mr Alchemy, the once-per-game visitor who unlocks 5 to 10 elements in public games (default on)")
+    parser.add_argument("--mr-alchemy-chance", type=float, default=1.0,
+                        help="the chance that a game gets his visit at all, 0 to 1 (default 1)")
+    parser.add_argument("--mr-alchemy-min", type=float, default=4.0,
+                        help="at the earliest, minutes of two or more players together before he comes (default 4)")
+    parser.add_argument("--mr-alchemy-max", type=float, default=15.0,
+                        help="at the latest, minutes of two or more players together before he comes (default 15)")
     parser.add_argument("--require-invite", action="store_true",
                         help="signup needs a single-use invite code (make them with accounts_admin.py invite create)")
     parser.add_argument("--invites-file", default=str(BASE_DIR / "invites.json"),
@@ -1133,6 +1151,9 @@ def main() -> int:
     saves = SaveStore(args.saves_dir)
     registry = GameRegistry(book, max_games=max(1, args.max_games), idle_seconds=args.idle_minutes * 60, saves=saves,
                             pictures=PictureIndex(BASE_DIR / "static" / "elements", book),
+                            visitors=VisitorPolicy(enabled=args.mr_alchemy == "on", chance=min(1.0, max(0.0, args.mr_alchemy_chance)),
+                                                   min_seconds=max(0.0, args.mr_alchemy_min) * 60,
+                                                   max_seconds=max(0.0, args.mr_alchemy_max) * 60),
                             daily=DailyStore(args.daily_file, book), solo=SoloStore(args.solo_file),
                             max_per_account=max(0, args.max_games_per_account))
     accounts = AccountStore(args.accounts_file)
@@ -1234,6 +1255,7 @@ def run(server: AlchemyServer, registry: GameRegistry, accounts: AccountStore, a
     wanted = threading.Event()
     if hasattr(signal, "SIGUSR1"):
         signal.signal(signal.SIGUSR1, lambda *_: wanted.set())
+    threading.Thread(target=visitor_loop, args=(registry,), daemon=True, name="mr-alchemy").start()   # a reload re-runs main, so this restarts
     try:
         while True:
             thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True)
@@ -1259,6 +1281,20 @@ def run(server: AlchemyServer, registry: GameRegistry, accounts: AccountStore, a
         except (OSError, ValueError):
             pass
     return 0
+
+
+VISITOR_CHECK_SECONDS = 5.0   # how often games are looked at to see whether Mr Alchemy is due
+
+
+def visitor_loop(registry: GameRegistry) -> None:
+    """Every few seconds, let Mr Alchemy visit any public game that is due. A failure here must never stop the loop."""
+    while True:
+        time.sleep(VISITOR_CHECK_SECONDS)
+        try:
+            for name in registry.visitor_tick():
+                log.info("Mr Alchemy visited game %s", name)
+        except Exception as exc:
+            print(f"warning: Mr Alchemy's rounds failed: {exc}", file=sys.stderr)
 
 
 def reload_in_place(server: AlchemyServer, registry: GameRegistry, accounts: AccountStore,

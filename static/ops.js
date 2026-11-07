@@ -135,6 +135,7 @@ function renderGames(data) {
     const row = el("tr");
     const end = el("td");
     end.append(riskyButton("End game", () => Auth.fetch("/ops/games/end", { id: game.id }), "danger"));
+    if (!game.private) end.append(plainButton("Send Mr Alchemy", () => Auth.fetch("/ops/games/visit", { id: game.id })));
     row.append(el("td", game.name), el("td", game.kind + (game.private ? " (private)" : "")),
       el("td", `${game.players}/${game.max_players}`), el("td", `${game.found}/${game.total}`), end);
     body.append(row);

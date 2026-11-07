@@ -83,6 +83,19 @@ cause: allow incoming connections for Python on the port you chose.
 - **Emotes.** 😀 in the header of a shared game sends an emote that shows next to your name for everyone, at most one a second. Players
   can only send ids from `emotes.py`, never free text. The glyphs there are placeholders: change them in that one file.
 
+### Mr Alchemy
+
+Once per public game, after a random 4 to 15 minutes of two or more people playing together, **Mr Alchemy** drops in: the screen dims, a hat
+lands, "You've been struck by Mr Alchemy" flashes up, and 5 to 10 new elements are unlocked for the whole room, one chip at a time, before he
+vanishes. Click *Skip* to get the elements at once. For anyone who has asked their system for reduced motion it is a plain card instead.
+
+- The gift is random but sensible: each element can be made from what the room already has plus the gifts before it, so nothing he gives
+  has ingredients nobody has found. They show in the journal as "A gift from Mr Alchemy" and win no awards.
+- Never in Solo, daily challenges or races, and never to a game with fewer than two people in it. Nobody can register under his name.
+- Administrators can send him to a running game from the Operations page (*Send Mr Alchemy*), whatever the schedule says: that is the quick
+  way to see the cutscene. `--mr-alchemy off` switches him off; `--mr-alchemy-chance` makes some games miss out.
+- His look (a 🎩 glyph) is a placeholder: the cutscene's pieces are in `static/app.js` (`MR_ALCHEMY`, `playVisitor`) and `static/style.css`.
+
 ### Solo mode
 
 **Solo** on the home page starts your own private game: just you, with the Djinn like any game, **one hint a day**, and no invite link. Your
@@ -288,6 +301,9 @@ python3 server.py [--host 0.0.0.0] [--port 8000]
 | `--max-games-per-account` | `1` | How many running games one account may have started at once (`0` for no limit). |
 | `--blocklist-file` | none | Extra blocked words for usernames, game names and recipe names, one per line (the built-in list is `blocklist.txt`). |
 | `--reports-file` | `reports.json` next to `server.py` | Where player reports wait for the administrators, for 14 days at most. |
+| `--mr-alchemy` | `on` | Mr Alchemy, the once-per-game visitor of public games (below). `off` switches him off. |
+| `--mr-alchemy-chance` | `1` | The chance (0 to 1) that a game gets his visit at all. |
+| `--mr-alchemy-min`, `--mr-alchemy-max` | `4`, `15` | He comes after a random number of minutes in this range, counting only time with two or more players together. |
 | `--max-games` | `3` | How many games may run at once (daily challenges and races do not count). |
 | `--log-file`, `--log-days` | console, 14 | Write the server's messages (logins, failures, admin actions) to a file that starts afresh each midnight, keeping this many days. |
 | `--idle-minutes` | `10` | How long an empty game stays open. |
