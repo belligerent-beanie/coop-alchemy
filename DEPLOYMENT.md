@@ -110,6 +110,8 @@ Pointer sharing is the busiest traffic in a game, so it is kept cheap (`bench_cu
   done here, not by running one after the other.
 
 ### Moving to Cloudflare Tunnel and an external host
+Step by step with a check after each step: [LAUNCH.md](LAUNCH.md). What follows is the background.
+
 The plan: the game runs in a container on a small rented server that has **no open ports**; a second container, Cloudflare's
 tunnel, makes an outbound connection to Cloudflare, and visitors reach the game through your domain on Cloudflare. Your home
 address is never involved, Cloudflare answers HTTPS, and there is nothing on the host to port-scan.

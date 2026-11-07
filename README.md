@@ -460,6 +460,11 @@ If you keep the project in git, add `accounts.json`, `saves/`, `*.pem`,
 `drafts.json`, `daily.json`, `reload_snapshot.json*`, `alchemy.pid`, `aigen/cache/`, `aigen/model.json` and
 `aigen/runs/` to `.gitignore`.
 
+## Going live
+
+[LAUNCH.md](LAUNCH.md) is the step-by-step runbook from this PC to a public game behind a Cloudflare Tunnel (server, tunnel, first
+administrator, invites, the admin lock, backups and a tested restore). [DEPLOYMENT.md](DEPLOYMENT.md) has the reasons and the security detail.
+
 ## Documentation rules
 
 When you add or change an endpoint, a server-sent event, a status code or a command-line option, update `API.md` (the
