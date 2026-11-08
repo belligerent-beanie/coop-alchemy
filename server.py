@@ -146,6 +146,7 @@ RACE_PATH = re.compile(r"^/races/([a-z0-9-]+)(/(?:join|leave|start))?$")
 # Some systems (notably Windows registries) map .js to text/plain; be explicit.
 mimetypes.add_type("text/javascript", ".js")
 mimetypes.add_type("text/css", ".css")
+mimetypes.add_type("font/woff2", ".woff2")
 
 
 def run_action(state: GameState, path: str, token: str, body: dict[str, Any]) -> dict[str, Any]:

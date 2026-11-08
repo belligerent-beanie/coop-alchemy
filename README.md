@@ -530,6 +530,14 @@ When you add or change an endpoint, a server-sent event, a status code or a comm
 endpoint tables, the Events table, and its change log) and the options table above in the same commit.
 `test_api_docs.py` compares the code with these documents and fails on any difference.
 
+## Looks
+
+The pages wear one of two looks. **Euler** (the default) borrows Project Euler's palette and layout: white pages, brown headings and links, a grey bar with an orange
+current tab, square corners, DM Sans (self-hosted in `static/fonts/`, SIL Open Font License), and it follows the browser's light or dark setting. **Classic** is the original
+look. Both are in the same stylesheets: `style.css` is the classic look on its own, and `euler.css` overrides it only under `html[data-look="euler"]`.
+`look.js` sets that attribute before the page paints, from the choice kept in the browser (`localStorage`, key `look`); a small link at the foot of every page that
+scrolls switches it. The game board has no link; it uses whichever look was chosen on the other pages.
+
 ## Tests
 
 ```
