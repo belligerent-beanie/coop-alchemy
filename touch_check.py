@@ -656,12 +656,39 @@ def run(out: Path, chrome_path: str) -> int:
         # ---- the other pages, on a phone ----
         print("\nother pages on a phone (390 x 844)")
         browser.emulate(390, 844, phone=True)
-        for name, path in (("home", "/"), ("create", "/create"), ("privacy", "/privacy"), ("terms", "/terms"), ("login", "/login")):
+        pages = (("home", "/"), ("create", "/create"), ("privacy", "/privacy"), ("terms", "/terms"), ("login", "/login"),
+                 ("admin", "/admin"), ("ops", "/ops"))
+        for name, path in pages:
             browser.navigate(base + path)
             time.sleep(0.8)
             wide = browser.evaluate("document.documentElement.scrollWidth - innerWidth")
             report.check(wide <= 1, f"{name} page fits the screen", f"{wide}px too wide")
+            report.check(browser.evaluate("document.documentElement.dataset.look") == "euler", f"...in the Euler look")
             browser.screenshot(out / f"phone-{name}.png")
+
+        print(chr(10) + "the classic look, kept as a variant, on a phone")
+        browser.navigate(base + "/")
+        time.sleep(0.8)
+        report.check(browser.evaluate("!!document.querySelector('.look-switch button')"), "the home page has a link to switch the look")
+        browser.evaluate("document.querySelector('.look-switch button').scrollIntoView({block: 'center'})")
+        x, y = center_of(browser, ".look-switch button")
+        browser.tap(x, y)
+        time.sleep(0.4)
+        report.check(browser.evaluate("document.documentElement.dataset.look") == "classic", "tapping it switches to the classic look")
+        report.check(browser.evaluate("getComputedStyle(document.querySelector('.home-tab')).borderRadius") != "0px",
+                     "...whose tabs have the original rounded corners")
+        for name, path in pages:
+            browser.navigate(base + path)
+            time.sleep(0.8)
+            wide = browser.evaluate("document.documentElement.scrollWidth - innerWidth")
+            report.check(wide <= 1 and browser.evaluate("document.documentElement.dataset.look") == "classic",
+                         f"{name} page fits the screen in the classic look, which is remembered", f"{wide}px too wide")
+        browser.screenshot(out / "phone-classic-ops.png")
+        browser.navigate(base + "/")
+        time.sleep(0.8)
+        browser.screenshot(out / "phone-classic-home.png")
+        browser.evaluate("document.querySelector('.look-switch button').click()")
+        report.check(browser.evaluate("document.documentElement.dataset.look") == "euler", "...and the link switches back")
 
         print("\nthe Operations page's load table on a phone")
         browser.navigate(base + "/ops")
