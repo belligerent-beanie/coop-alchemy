@@ -537,6 +537,8 @@ current tab, square corners, DM Sans (self-hosted in `static/fonts/`, SIL Open F
 look. Both are in the same stylesheets: `style.css` is the classic look on its own, and `euler.css` overrides it only under `html[data-look="euler"]`.
 `look.js` sets that attribute before the page paints, from the choice kept in the browser (`localStorage`, key `look`); a small link at the foot of every page that
 scrolls switches it. The game board has no link; it uses whichever look was chosen on the other pages.
+In the Euler look, hovering something with a mouse (`sparkle.js`) turns it black and white inside a pulsing dark aura that throws off black sparkles; touch screens get none of
+it, and with reduced motion only the grey-out stays.
 
 ## Tests
 

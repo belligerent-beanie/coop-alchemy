@@ -651,6 +651,18 @@ def run(out: Path, chrome_path: str) -> int:
                      "...for that element", wanted)
         browser.evaluate("document.getElementById('journal-close').click()")
         time.sleep(0.3)
+        # hovering with a mouse: the thing goes black and white inside a dark aura with sparkles; dragging or letting go clears it
+        hover = lambda kind, buttons=0: browser.evaluate(f"""(() => {{
+          const item = document.querySelector('#items .item:not([hidden])');
+          item.dispatchEvent(new PointerEvent('{kind}', {{bubbles: true, pointerType: 'mouse', buttons: {buttons}}}));
+          return [item.classList.contains('blackened'), document.querySelectorAll('.dark-aura').length, document.querySelectorAll('.dark-spark').length];
+        }})()""")
+        hovered = hover("pointerover")
+        report.check(hovered[0] and hovered[1] == 1 and hovered[2] >= 6, "hovering an element with a mouse greys it and wraps it in an aura with sparkles", str(hovered))
+        report.check(browser.evaluate("getComputedStyle(document.querySelector('.blackened')).filter").startswith("grayscale"), "...it really is black and white")
+        browser.screenshot(out / "desktop-hover-effect.png")
+        report.check(hover("pointerout")[1] == 0, "...and the aura goes when the mouse leaves")
+        report.check(hover("pointerover", buttons=1)[1] == 0, "...but not while a button is held (dragging an element)")
         browser.screenshot(out / "desktop-game.png")
 
         # ---- the other pages, on a phone ----
@@ -669,6 +681,9 @@ def run(out: Path, chrome_path: str) -> int:
         print(chr(10) + "the classic look, kept as a variant, on a phone")
         browser.navigate(base + "/")
         time.sleep(0.8)
+        report.check(browser.evaluate("""(() => { document.querySelector('.home-tab').dispatchEvent(
+          new PointerEvent('pointerover', {bubbles: true, pointerType: 'mouse'})); return !document.querySelector('.dark-aura'); })()"""),
+                     "a touch screen gets no hover effect")
         report.check(browser.evaluate("!!document.querySelector('.look-switch button')"), "the home page has a link to switch the look")
         browser.evaluate("document.querySelector('.look-switch button').scrollIntoView({block: 'center'})")
         x, y = center_of(browser, ".look-switch button")

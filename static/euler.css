@@ -169,3 +169,46 @@ html[data-look="euler"] {
 }
 
 .look-switch { margin: 28px 0 8px; padding: 0 16px; text-align: center; font-size: 0.8rem; color: var(--muted); }
+
+/* ---- the hover effect (sparkle.js): black and white, a pulsing dark aura, black sparkles ---- */
+html[data-look="euler"] {
+  --spark: #000;
+  --spark-edge: rgba(255, 255, 255, 0.85);
+  --aura: rgba(0, 0, 0, 0.7);
+  --rim: rgba(255, 255, 255, 0);
+}
+@media (prefers-color-scheme: dark) {
+  html[data-look="euler"] { --spark: #000; --spark-edge: rgba(255, 255, 255, 0.95); --aura: rgba(0, 0, 0, 0.95); --rim: rgba(255, 255, 255, 0.4); }
+}
+html[data-look="euler"] .blackened { filter: grayscale(1) contrast(1.12); transition: filter 0.2s; }
+html[data-look="euler"] .dark-aura {
+  position: fixed;
+  z-index: 10000;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px var(--rim), 0 0 10px 2px var(--aura), inset 0 0 8px rgba(0, 0, 0, 0.35);
+  outline: 1px solid var(--aura);
+  animation: aura-pulse 1.1s ease-in-out infinite alternate, aura-flicker 0.31s steps(2) infinite;
+}
+html[data-look="euler"] .dark-aura.still { animation: none; }
+html[data-look="euler"] .dark-spark {
+  position: absolute;
+  background: var(--spark);
+  clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%);
+  filter: drop-shadow(0 0 1px var(--spark-edge));
+  transform: scale(0);
+  animation: spark-rise 1.2s ease-out infinite;
+}
+@keyframes aura-pulse {
+  from { box-shadow: 0 0 0 1px var(--rim), 0 0 6px 1px var(--aura), inset 0 0 5px rgba(0, 0, 0, 0.25); }
+  to { box-shadow: 0 0 0 1px var(--rim), 0 0 18px 6px var(--aura), inset 0 0 12px rgba(0, 0, 0, 0.45); }
+}
+@keyframes aura-flicker {
+  from { outline-color: var(--aura); }
+  to { outline-color: transparent; }
+}
+@keyframes spark-rise {
+  0% { transform: translateY(0) scale(0) rotate(0); opacity: 0; }
+  25% { opacity: 1; }
+  60% { transform: translateY(calc(var(--drift) * 0.6)) scale(1) rotate(calc(var(--turn) * 0.6)); opacity: 1; }
+  100% { transform: translateY(var(--drift)) scale(0) rotate(var(--turn)); opacity: 0; }
+}
