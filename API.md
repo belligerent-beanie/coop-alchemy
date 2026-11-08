@@ -118,7 +118,7 @@ Every request below carries `{"player": "<token>"}` except `/join` (which needs 
 | `POST /g/<id>/combine` | player token | `{"b": target tile, "a": held tile or "element": element id, "x", "y"}` → `{"results", "new", "tiles", "removed"}`. |
 | `POST /g/<id>/hint` | player token | `{"kind": "can_make" \| "try" \| "find", "target"}` → a private hint. In a solo game there is one hint a day (UTC): the answer also has `"hints_left"`, and a second hint gets `429`. A hint that found nothing does not use it up. |
 | `POST /g/<id>/emote` | player token | `{"emote": id}` → `{}`: shows an emote from `GET /emotes` next to your name for everyone in the game. `400` for an unknown id, `429` faster than one a second, `403` in solo, daily and race games. |
-| `POST /g/<id>/journal` | player token | `{}` → `{"elements": [...], "progress": {"found", "total", "locked", "categories": [{"name", "found", "total"}]}}`: every fully discovered element (with its `category`) with the recipes that make it and use it, and how many elements can be found in all, in total and per category (in the order of `categories.json`; elements not in the file are in "Other"). `locked` and the per-category totals are only counts (the elements still to find are never named); Time counts although no recipe makes it. |
+| `POST /g/<id>/journal` | player token | `{}` → `{"elements": [...], "progress": {"found", "total", "locked", "categories": [{"name", "found", "total"}]}}`: every fully discovered element (with its `category` and a short `note`, empty when none is written; `notes.json`) with the recipes that make it and use it, and how many elements can be found in all, in total and per category (in the order of `categories.json`; elements not in the file are in "Other"). `locked` and the per-category totals are only counts (the elements still to find are never named); Time counts although no recipe makes it. |
 | `POST /g/<id>/genie` | player token | `{"element"}` → `{"results", "new", "tiles", "genie"}`. |
 | `POST /g/<id>/report` | player token | `{"target": pid, "reason": "name", "behaviour" or "other", "note"?}` → `{}`: tells the administrators about another player in the game (`target` is a `pid` from `players`). The note is at most 140 characters. **Nothing records who sent it.** The same reporter reporting the same player again within a day is ignored without an error. `404` if the player is not in the game, `400` for yourself or a bad reason, `429` after 5 reports an hour from one account. |
 | `POST /g/<id>/end` | player token | `{"save": true \| false}` → `{"saved"}`: ends the game for everyone. Saving: `403` unless the caller created the game. |
@@ -201,6 +201,7 @@ checks that every option the server accepts appears in the README.
 
 Newest first. Add a line whenever an endpoint, event, status code or option is added, changed or removed.
 
+- **2026-11 (notes)**: journal entries have `note`.
 - **2026-11 (categories)**: `POST /g/<id>/journal` entries have `category` and `progress` has `categories`; `categories.json` sorts every element into a category.
 - **2026-11 (hosting)**: `POST /ops/bots/host`; the `companions` entries of `GET /ops/games` have `hosting`; option `--bots-host`.
 - **2026-11 (profile)**: `GET /profile`.

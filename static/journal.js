@@ -73,6 +73,11 @@ function renderJournalDetail() {
     : entry.by === MR_ALCHEMY.name ? `A gift from ${MR_ALCHEMY.name}`
     : entry.by ? `Discovered by ${entry.by}` : "");
 
+  const note = document.createElement("p");   // a short explanation of the thing, when we have written one
+  note.className = "journal-note";
+  note.textContent = entry.note || "";
+  note.hidden = !entry.note;
+
   const madeFrom = journalSection(
     "Made from",
     entry.made_from.map(([a, b]) => [journalLink(a), textNode(" + "), journalLink(b)]),
@@ -83,7 +88,7 @@ function renderJournalDetail() {
     entry.used_in.map(([partner, result]) => [textNode("with "), journalLink(partner), textNode(" → "), journalLink(result)]),
     "Nothing discovered yet.",
   );
-  journalDetail.replaceChildren(title, origin, madeFrom, usedIn);
+  journalDetail.replaceChildren(title, origin, note, madeFrom, usedIn);
 }
 
 function renderJournalList() {

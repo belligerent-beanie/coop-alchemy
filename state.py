@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 import categories
+import notes
 from achievements import Progress, earned_ids
 from achievements import one as achievement_json
 from emotes import EMOTE_GAP_SECONDS, EMOTE_IDS
@@ -1029,6 +1030,7 @@ class GameState:
                     **self._element_json(eid, with_by=True),
                     "starter": eid in self.book.starters,
                     "category": categories.of(self.book.elements[eid].label),
+                    "note": notes.of(self.book.elements[eid].label),
                     "made_from": sorted(made_from[eid], key=lambda p: (label(p[0]), label(p[1]))),
                     "used_in": sorted(used_in[eid], key=lambda p: (label(p[1]), label(p[0]))),
                 })

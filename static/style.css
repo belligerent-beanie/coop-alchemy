@@ -786,6 +786,7 @@ body.admin { overflow: auto; }
 .journal-tab.selected { background: var(--accent); border-color: var(--accent); color: #fff; }
 #journal-grid-view { display: flex; flex-direction: column; gap: 8px; height: min(60vh, 28rem); margin-top: 10px; }
 #journal-grid { flex: 1; overflow-y: auto; padding-right: 4px; }
+.journal-note { margin: 8px 0 12px; padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--tile); border-radius: 0 8px 8px 0; line-height: 1.4; }
 .collection-category h3 { margin: 12px 0 6px; font-size: 1rem; }
 .collection-category:first-child h3 { margin-top: 0; }
 .collection-category h3 .muted { font-weight: 400; font-size: 0.85rem; }

@@ -581,7 +581,7 @@ class JournalTests(unittest.TestCase):
         for e in entries:
             self.assertTrue(e["starter"])
             self.assertEqual((e["made_from"], e["used_in"]), ([], []))
-            self.assertEqual(set(e), {"id", "label", "emoji", "by", "rarity", "starter", "category", "made_from", "used_in"})
+            self.assertEqual(set(e), {"id", "label", "emoji", "by", "rarity", "starter", "category", "note", "made_from", "used_in"})
 
     def test_a_discovery_links_its_ingredients_and_result(self) -> None:
         self.make("water", "fire")

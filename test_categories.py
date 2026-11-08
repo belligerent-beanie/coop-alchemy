@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 import categories
+import notes
 from games import GameRegistry
 from test_coop import RECIPES, load_recipes
 
@@ -44,6 +45,23 @@ class JournalCategoryTests(unittest.TestCase):
     def test_an_unsorted_element_falls_into_other(self) -> None:
         self.assertEqual(categories.of("Fire"), "Materials & Substances")
         self.assertEqual(categories.of("something new"), categories.OTHER)
+
+
+class NoteTests(unittest.TestCase):
+    def test_notes_are_for_real_elements_and_short(self) -> None:
+        elements = {label.casefold() for label in json.loads((HERE / "recipes.json").read_text(encoding="utf-8"))["elements"]}
+        for label, text in json.loads((HERE / "notes.json").read_text(encoding="utf-8"))["notes"].items():
+            self.assertIn(label.casefold(), elements, f"{label!r} has a note but is not an element")
+            self.assertTrue(text.strip() and len(text) <= notes.MAX_NOTE, f"note for {label!r} is empty or over {notes.MAX_NOTE} characters")
+
+    def test_the_journal_shows_a_note_only_for_found_elements(self) -> None:
+        self.assertTrue(notes.of("ANKH"))
+        self.assertEqual(notes.of("water"), "")
+        registry = GameRegistry(load_recipes(RECIPES))
+        game = registry.create("Notes", "ann")
+        journal = game.journal(game.join("ann").token)
+        self.assertEqual([e["note"] for e in journal["elements"]], ["", "", "", ""])
+        self.assertNotIn("Norse", json.dumps(journal))
 
 
 if __name__ == "__main__":
