@@ -1,7 +1,8 @@
 "use strict";
 // The designer's UI picker. Accounts marked as designers (accounts_admin.py make-designer) get this on every page (auth.js loads it).
 // Alt+Shift+P (or the Design button) turns picker mode on: clicks select an element instead of reaching the page; ↑ selects the
-// parent, ↓ a child, Enter opens Fill / Border / Text, Esc closes things and clears the selection. Edits are inline styles on THIS
+// parent, ↓ a child, Enter opens Fill / Border / Text, Esc closes things and clears the selection; Alt+Shift+E copies every change
+// as Markdown (the guide, shown the first time and under "Guide", explains all of this). Edits are inline styles on THIS
 // browser's copy of the page only: nothing is sent to the server or saved, and a reload wipes them. "Changes" exports them as
 // Markdown (selector, before → after) to hand to a developer or an AI. This is a convenience for designers, not a security
 // boundary: anyone can do the same in their browser's developer tools, and the server never trusts any of it.
@@ -73,6 +74,8 @@
   let menuOpen = false;
   let tool = null;             // "fill" | "border" | "text" | null
   let showChanges = false;
+  let tourStep = null;         // the guide page being shown (0-based), or null
+  let toastTimer = 0;
   let changesLink = null;      // the "Changes (n)" button in the dock, kept so its count can change without rebuilding the dock
   let exported = true;         // false while there are edits that were not copied or downloaded
   const changes = new Map();   // element -> {selector, tag, snippet, props: Map(prop -> {before, after, original}), text}
@@ -82,8 +85,9 @@
   const hoverBox = h("div", { class: "dz-box dz-hover", hidden: true });
   const selectBox = h("div", { class: "dz-box dz-picked", hidden: true });
   const dock = h("div", { class: "dz-dock", role: "region", "aria-label": "UI picker", hidden: true });
-  const toggle = h("button", { class: "dz-toggle", type: "button", title: "UI picker (Alt+Shift+P)", text: "Design" });
-  root.append(hoverBox, selectBox, dock, toggle);
+  const toggle = h("button", { class: "dz-toggle", type: "button", title: "UI picker (Alt+Shift+P); copy your changes with Alt+Shift+E", text: "Design" });
+  const toast = h("div", { class: "dz-toast", role: "status", "aria-live": "polite", hidden: true });
+  root.append(hoverBox, selectBox, dock, toggle, toast);
 
   const ours = (node) => node instanceof Node && root.contains(node);
 
@@ -226,7 +230,8 @@
   }
 
   // ---------- export ----------
-  function exportMarkdown() {
+  /** One text block per changed element: its selector (and a snippet of its text to confirm it), then each before → after. */
+  function exportBlocks() {
     const blocks = [];
     for (const rec of changes.values()) {
       const lines = [];
@@ -235,12 +240,51 @@
         if (after !== undefined && after !== rec.before[prop]) lines.push(`  ${prop}: ${rec.before[prop]} → ${after}`);
       }
       if (rec.text && rec.text.after !== rec.text.before) lines.push(`  text: ${JSON.stringify(rec.text.before)} → ${JSON.stringify(rec.text.after)}`);
-      if (!lines.length) continue;
+      if (!lines.length) continue;   // changed and changed back: nothing to hand over
       blocks.push([rec.selector + (rec.snippet ? `  (${JSON.stringify(rec.snippet)})` : ""), ...lines].join("\n"));
     }
-    return blocks.length ? location.origin + location.pathname + "\n" + blocks.join("\n") + "\n" : "";
+    return blocks;
   }
-  async function copyExport(button) {
+  /** What gets copied or downloaded: a short heading that tells whoever reads it (a developer or Claude) what it is, then the blocks.
+   *  It is meant to be pasted into a chat with Claude, who can then make the same changes in the source files. */
+  function exportMarkdown() {
+    const blocks = exportBlocks();
+    if (!blocks.length) return "";
+    return [
+      "# UI changes from the designer picker",
+      `Page: ${location.origin + location.pathname}`,
+      `Viewport: ${window.innerWidth}×${window.innerHeight} · ${new Date().toISOString().slice(0, 10)}`,
+      "Each block is one element: its selector (with a snippet of its text to confirm it), then before → after. Apply these in the source code.",
+      "",
+      blocks.join("\n\n"),
+      "",
+    ].join("\n");
+  }
+  function showToast(text) {
+    toast.textContent = text;
+    toast.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toast.hidden = true; }, 3500);
+  }
+  function fileName() {
+    const slug = location.pathname.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase();
+    return `ui-changes-${slug || "home"}.md`;
+  }
+  function downloadExport() {
+    const name = fileName();
+    const url = URL.createObjectURL(new Blob([exportMarkdown()], { type: "text/markdown" }));
+    const link = h("a", { href: url, download: name });
+    root.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    exported = true;
+    return name;
+  }
+  /** Copy every change to the clipboard (the Alt+Shift+E shortcut and the Copy button); if the browser refuses, download it instead. */
+  async function copyChanges() {
+    const count = exportBlocks().length;
+    if (!count) { showToast("No changes to export yet."); return false; }
     const text = exportMarkdown();
     let ok = false;
     try { await navigator.clipboard.writeText(text); ok = true; } catch (_) {
@@ -251,18 +295,13 @@
       try { ok = document.execCommand("copy"); } catch (_e) { ok = false; }
       area.remove();
     }
-    if (ok) exported = true;
-    button.textContent = ok ? "Copied" : "Copy failed: use Download";
-    setTimeout(() => { button.textContent = "Copy"; }, 1600);
-  }
-  function downloadExport() {
-    const url = URL.createObjectURL(new Blob([exportMarkdown()], { type: "text/markdown" }));
-    const link = h("a", { href: url, download: "ui-changes.md" });
-    root.append(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
-    exported = true;
+    if (ok) {
+      exported = true;
+      showToast(`Copied ${count} changed element${count === 1 ? "" : "s"}. Paste them to Claude.`);
+    } else {
+      showToast(`The browser blocked copying, so ${downloadExport()} was downloaded instead.`);
+    }
+    return true;
   }
   window.addEventListener("beforeunload", (event) => {
     if (changes.size && !exported) { event.preventDefault(); event.returnValue = ""; }
@@ -340,23 +379,61 @@
   }
   function closeTool() { tool = null; }
 
+  // ---------- the guide ----------
+  const TOUR_KEY = "alchemy-designer-tour";
+  const TOUR = [
+    { title: "Select an element", lines: [
+      "Alt+Shift+P turns the picker on and off.",
+      "While it is on, clicking an element selects it; the click does not reach the page, so buttons and links do nothing."] },
+    { title: "Move around", lines: [
+      "↑ selects the parent of what you have selected. ↓ goes back down the way you came, or to the first child.",
+      "Esc clears the selection."] },
+    { title: "Change it", lines: [
+      "Enter opens the tools: Fill (colour), Border (style, thickness, colour) and Text.",
+      "Text works only on elements with nothing inside them. The page changes straight away, in this tab only."] },
+    { title: "Export your changes", lines: [
+      "Alt+Shift+E copies every change as Markdown. Paste it to Claude, who can then make the same changes in the code.",
+      "\"Changes\" lists them with Copy, Download and Reset. A reload wipes the edits, so export first."] },
+  ];
+  function endTour() {
+    tourStep = null;
+    try { localStorage.setItem(TOUR_KEY, "done"); } catch (_) { /* not remembered: it shows again next time */ }
+    renderDock();
+  }
+  function tourPanel() {
+    const page = TOUR[tourStep];
+    const last = tourStep === TOUR.length - 1;
+    return h("div", { class: "dz-tour" },
+      h("div", { class: "dz-head" },
+        h("strong", { text: `Guide ${tourStep + 1} / ${TOUR.length}` }),
+        h("button", { type: "button", class: "dz-link", text: "Skip", onclick: endTour })),
+      h("p", { class: "dz-tour-title", text: page.title }),
+      ...page.lines.map((line) => h("p", { class: "dz-hint", text: line })),
+      h("div", { class: "dz-menu" },
+        h("button", { type: "button", class: "dz-menu-button", text: "Back", disabled: tourStep === 0, onclick: () => { tourStep -= 1; renderDock(); } }),
+        h("button", { type: "button", class: "dz-menu-button dz-active", text: last ? "Done" : "Next",
+                      onclick: () => { if (last) endTour(); else { tourStep += 1; renderDock(); } } })));
+  }
+
   function renderDock() {
     dock.replaceChildren();
     dock.hidden = !on;
     toggle.textContent = on ? "Design: on" : "Design";
     toggle.classList.toggle("dz-on", on);
     if (!on) return;
+    if (tourStep !== null) { dock.append(tourPanel()); return; }
 
     changesLink = h("button", { type: "button", class: "dz-link", text: `Changes (${changes.size})`, onclick: () => { showChanges = !showChanges; renderDock(); } });
     const head = h("div", { class: "dz-head" },
       h("strong", { text: selected ? label(selected) : "UI picker" }),
       changesLink,
+      h("button", { type: "button", class: "dz-link", text: "Guide", title: "How the picker works", onclick: () => { tourStep = 0; renderDock(); } }),
       h("button", { type: "button", class: "dz-link", text: "Off", title: "Turn picker mode off", onclick: () => setOn(false) }));
     dock.append(head);
 
     if (showChanges) { dock.append(changesPanel()); return; }
     if (!selected) {
-      dock.append(h("p", { class: "dz-hint", text: "Click any element to select it. ↑ parent, ↓ child, Enter for the tools, Esc to clear." }));
+      dock.append(h("p", { class: "dz-hint", text: "Click any element to select it. ↑ parent, ↓ child, Enter for the tools, Esc to clear. Alt+Shift+E copies your changes." }));
       return;
     }
     if (!menuOpen && !tool) {
@@ -448,10 +525,10 @@
         h("code", { text: rec.selector }),
         h("button", { type: "button", class: "dz-link", text: "Reset", onclick: () => resetElement(element) })));
     }
-    const copy = h("button", { type: "button", class: "dz-menu-button", text: "Copy", onclick: () => copyExport(copy) });
+    const copy = h("button", { type: "button", class: "dz-menu-button", text: "Copy", title: "Alt+Shift+E", onclick: copyChanges });
     panel.append(h("pre", { class: "dz-preview", text: exportMarkdown() || "(nothing differs from the original)" }),
       h("div", { class: "dz-menu" }, copy,
-        h("button", { type: "button", class: "dz-menu-button", text: "Download", onclick: downloadExport }),
+        h("button", { type: "button", class: "dz-menu-button", text: "Download", onclick: () => showToast(`Downloaded ${downloadExport()}.`) }),
         h("button", { type: "button", class: "dz-menu-button", text: "Reset all", onclick: resetAll })));
     return panel;
   }
@@ -479,7 +556,13 @@
   }
   function onKey(event) {
     if (event.altKey && event.shiftKey && event.code === "KeyP") { event.preventDefault(); setOn(!on); return; }
+    if (event.altKey && event.shiftKey && event.code === "KeyE") { event.preventDefault(); copyChanges(); return; }   // works with the picker off too
     if (!on) return;
+    if (tourStep !== null) {   // the guide is open: Esc closes it, the arrows turn its pages
+      if (event.key === "Escape") { event.preventDefault(); endTour(); return; }
+      if (event.key === "ArrowRight" && tourStep < TOUR.length - 1) { event.preventDefault(); tourStep += 1; renderDock(); return; }
+      if (event.key === "ArrowLeft" && tourStep > 0) { event.preventDefault(); tourStep -= 1; renderDock(); return; }
+    }
     const typing = ours(event.target) && /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName);
     if (event.key === "Escape") {
       event.preventDefault();
@@ -511,7 +594,12 @@
     const method = on ? "addEventListener" : "removeEventListener";
     for (const type of STOPPED) window[method](type, swallow, true);
     window[method]("mousemove", onMove, true);
-    if (!on) { hovered = null; selected = null; climbed = []; menuOpen = false; tool = null; showChanges = false; }
+    if (!on) { hovered = null; selected = null; climbed = []; menuOpen = false; tool = null; showChanges = false; tourStep = null; }
+    else {
+      let seen = false;
+      try { seen = localStorage.getItem(TOUR_KEY) === "done"; } catch (_) { /* unreadable: show the guide */ }
+      if (!seen) tourStep = 0;   // the first time on this browser
+    }
     renderDock();
     refreshBoxes();
   }

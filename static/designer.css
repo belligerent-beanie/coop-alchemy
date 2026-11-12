@@ -46,3 +46,9 @@
 .dz-change { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .dz-change code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #f3f3f6; font: 12px ui-monospace, Consolas, monospace; }
 .dz-preview { margin: 0; padding: 8px; max-height: 160px; overflow: auto; border-radius: 6px; background: #121216; color: #d8d8e0; font: 11px/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-all; }
+
+.dz-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); max-width: min(90vw, 460px); padding: 8px 14px; border-radius: 8px;
+  background: #1f1f24; color: #f3f3f6; border: 1px solid #55555f; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4); pointer-events: none; text-align: center; }
+.dz-tour p { margin: 0 0 8px; }
+.dz-tour .dz-tour-title { font-weight: 600; font-size: 14px; color: #ff9fcb; }
+.dz-menu-button.dz-active:hover:not(:disabled) { background: #ff7dbb !important; }
