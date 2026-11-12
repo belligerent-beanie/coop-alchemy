@@ -277,6 +277,84 @@ class SessionLifetimeTests(unittest.TestCase):
         self.assertEqual(accounts.import_sessions(bad), 0)
 
 
+class BreachCheckTests(unittest.TestCase):
+    PASSWORD = "correct horse battery"
+
+    @staticmethod
+    def answer_for(password: str, count: int) -> str:
+        import hashlib
+        digest = hashlib.sha1(password.encode(), usedforsecurity=False).hexdigest().upper()
+        filler = "".join(f"{i:035X}:{i + 1}\r\n" for i in range(1, 30))
+        return filler + (f"{digest[5:]}:{count}\r\n" if count else "")
+
+    def checker(self, count: int | None):
+        from breach import BreachChecker
+        calls: list[str] = []
+
+        def fetch(prefix: str) -> str:
+            calls.append(prefix)
+            if count is None:
+                raise OSError("no network")
+            return self.answer_for(self.PASSWORD, count)
+        return BreachChecker(fetch), calls
+
+    def test_count_found_missing_and_unknown(self) -> None:
+        self.assertEqual(self.checker(7)[0].count(self.PASSWORD), 7)
+        self.assertEqual(self.checker(0)[0].count(self.PASSWORD), 0)
+        self.assertIsNone(self.checker(None)[0].count(self.PASSWORD))
+
+    def test_only_five_hash_characters_are_sent_and_answers_are_cached(self) -> None:
+        checker, calls = self.checker(3)
+        checker.count(self.PASSWORD)
+        checker.count(self.PASSWORD)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(calls[0]), 5)
+        self.assertNotIn(self.PASSWORD, calls[0])
+
+    def test_garbled_or_empty_answer_is_unknown(self) -> None:
+        from breach import BreachChecker
+        self.assertIsNone(BreachChecker(lambda prefix: "").count(self.PASSWORD))
+        self.assertIsNone(BreachChecker(lambda prefix: "<html>oops</html>").count(self.PASSWORD))
+
+    def store(self, count: int | None) -> AccountStore:
+        accounts = AccountStore(Path(tempfile.mkdtemp()) / "accounts.json", iterations=1000)
+        accounts.breach_count = self.checker(count)[0].count
+        return accounts
+
+    def test_a_breached_password_is_refused_at_signup_and_change(self) -> None:
+        accounts = self.store(5)
+        with self.assertRaises(GameError) as caught:
+            accounts.register("alice", self.PASSWORD)
+        self.assertEqual(caught.exception.status, 400)
+        plain = AccountStore(accounts.path, iterations=1000)   # same file, check off
+        plain.register("alice", "an unbreached passphrase")
+        with self.assertRaises(GameError) as changed:
+            accounts.change_password("alice", "an unbreached passphrase", self.PASSWORD)   # the new one is the one checked
+        self.assertEqual(changed.exception.status, 400)
+        self.assertEqual(accounts.login("alice", "an unbreached passphrase")[1], "alice")   # still the old password
+
+    def test_an_outage_never_blocks_signup_or_login(self) -> None:
+        accounts = self.store(None)
+        accounts.register("bob", self.PASSWORD)
+        accounts.login("bob", self.PASSWORD)
+        time.sleep(0.2)
+        self.assertFalse(accounts.password_breached("bob"))
+
+    def test_login_flags_a_breached_password_in_the_background_and_a_change_clears_it(self) -> None:
+        accounts = self.store(0)
+        accounts.register("carol", self.PASSWORD)
+        accounts.breach_count = self.checker(9)[0].count   # it appears in a breach after she signed up
+        accounts.login("carol", self.PASSWORD)
+        for _ in range(50):
+            if accounts.password_breached("carol"):
+                break
+            time.sleep(0.05)
+        self.assertTrue(accounts.password_breached("carol"))
+        accounts.breach_count = None
+        accounts.set_password("carol", "a different long password")
+        self.assertFalse(accounts.password_breached("carol"))
+
+
 class CommonPasswordTests(unittest.TestCase):
     def test_the_list_is_there_and_catches_the_usual_suspects(self) -> None:
         self.assertGreater(len(load_common()), 10_000)

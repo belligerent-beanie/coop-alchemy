@@ -104,6 +104,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from accounts import AccountStore, clean_email, key_of
+from breach import BreachChecker
 from captcha import ORIGIN as TURNSTILE_ORIGIN
 from captcha import Turnstile
 from achievements import ACHIEVEMENTS, BADGES, describe_badges
@@ -503,7 +504,8 @@ class Handler(BaseHTTPRequestHandler):
                 username = self._user()
                 accounts = self.server.accounts
                 self._json(200, {"username": username, "admin": accounts.is_admin(username),
-                                 "must_change_password": accounts.must_change_password(username)})
+                                 "must_change_password": accounts.must_change_password(username),
+                                 "password_breached": accounts.password_breached(username)})
             elif path == "/create":
                 self._static("create.html")
             elif path == "/create/data":
@@ -1364,6 +1366,8 @@ def main() -> int:
                         help="running games one account may have started at once (default 1; 0 for no limit)")
     parser.add_argument("--max-games", type=int, default=MAX_GAMES,
                         help=f"how many games may run at once (default {MAX_GAMES}); daily challenges and races do not count")
+    parser.add_argument("--no-breach-check", action="store_true",
+                        help="do not ask haveibeenpwned.com whether a password is known from a data breach (only 5 characters of its hash are ever sent)")
     parser.add_argument("--max-connections-per-address", type=int, default=MAX_CONNECTIONS_PER_PEER,
                         help=f"the most connections one directly connected address may hold open; a trusted proxy is exempt (default {MAX_CONNECTIONS_PER_PEER})")
     parser.add_argument("--max-streams-per-client", type=int, default=MAX_STREAMS_PER_CLIENT,
@@ -1396,6 +1400,8 @@ def main() -> int:
                             profiles=ProfileStore(args.profile_file),
                             max_per_account=max(0, args.max_games_per_account))
     accounts = AccountStore(args.accounts_file)
+    if not args.no_breach_check:
+        accounts.breach_count = BreachChecker().count
     listen_fd = int(os.environ.pop("ALCHEMY_LISTEN_FD")) if "ALCHEMY_LISTEN_FD" in os.environ else None
     try:
         server = AlchemyServer((args.host, args.port), registry, BASE_DIR / "static", accounts, listen_fd,

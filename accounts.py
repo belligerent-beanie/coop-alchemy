@@ -38,6 +38,7 @@ ACCOUNT_MAX_FAILURES = 50       # wrong passwords for one account, from anywhere
 ACCOUNT_WINDOW_SECONDS = 3600.0
 ACCOUNT_PAUSE_SECONDS = 900.0   # ... and then logging in to that account is paused this long after the latest failure
 MAX_TRACKED_FAILURES = 5000
+BREACH_RECHECK_SECONDS = 7 * 24 * 3600.0   # a password is looked up in the breach list at login, then not again for this long
 MAX_SESSIONS = 2000
 VERIFY_SECONDS = 24 * 3600.0    # an emailed link works this long; an account still unverified then is deleted
 MAX_EMAIL_LEN = 254
@@ -66,6 +67,12 @@ def check_password(password: object, username: str = "") -> str:
     if is_common(password):
         raise GameError(400, "that password is one many people use, so it is easy to guess: please choose another")
     return password
+
+
+def refuse_if_breached(password: str, breach_count: Callable[[str], int | None] | None) -> None:
+    """400 if the password is known from a data breach; does nothing if the check is off or could not be made."""
+    if breach_count is not None and (breach_count(password) or 0) > 0:
+        raise GameError(400, "that password has appeared in a data breach, so attackers already try it: please choose another")
 
 
 def clean_email(raw: object) -> tuple[str, str]:
@@ -107,6 +114,8 @@ class AccountStore:
         self._failures: dict[str, tuple[int, float]] = {}        # key|client -> (count, locked until); oldest first
         self._account_failures: dict[str, list[float]] = {}      # key -> times of recent wrong passwords, from any client
         self._cache: tuple[tuple[int, int] | None, dict[str, dict[str, Any]]] | None = None  # see _peek()
+        # How many known data breaches a password appears in (None if unknown); set by the server (breach.py). Off when None.
+        self.breach_count: Callable[[str], int | None] | None = None
 
     # ---- file ----------------------------------------------------------
 
@@ -175,6 +184,7 @@ class AccountStore:
         """
         username = clean_username(raw_username)
         password = check_password(raw_password, username)
+        refuse_if_breached(password, self.breach_count)   # asks the network, so before any lock is taken
         key = key_of(username)
         email, email_key = clean_email(raw_email) if raw_email is not None else ("", "")
         with self._lock:
@@ -316,7 +326,38 @@ class AccountStore:
                                      "or ask for a new one below")
             if record.get("disabled") is True:
                 raise GameError(403, "this account has been disabled by an administrator")
+            self._maybe_check_breach(key, record, raw_password)
             return self._new_session(key, record["salt"]), record["name"]
+
+    def _maybe_check_breach(self, key: str, record: dict[str, Any], password: str) -> None:
+        """After a right password: if it has not been looked up lately, do so in the background (the login does not wait).
+
+        Call with the lock held; the thread takes it itself later."""
+        if self.breach_count is None or self._clock() - float(record.get("breach_checked", 0)) < BREACH_RECHECK_SECONDS:
+            return
+        threading.Thread(target=self._check_breach, args=(key, record["salt"], password), daemon=True).start()
+
+    def _check_breach(self, key: str, salt: str, password: str) -> None:
+        count = self.breach_count(password) if self.breach_count else None
+        if count is None:
+            return   # unknown: try again at the next login
+        with self._lock:
+            accounts = self._load()
+            record = accounts.get(key)
+            if record is None or record.get("salt") != salt:   # deleted, or the password changed meanwhile
+                return
+            record["breach_checked"] = int(self._clock())
+            if count > 0:
+                record["breached"] = True
+            else:
+                record.pop("breached", None)
+            self._save(accounts)
+
+    def password_breached(self, username: str) -> bool:
+        """True if the account's password was found in a known data breach when last checked (at login)."""
+        with self._lock:
+            record = self._peek().get(key_of(username))
+            return bool(record and record.get("breached") is True)
 
     def _account_paused_until(self, key: str, now: float) -> float:
         """When logging in to this account may resume after too many wrong passwords from any clients (0 if it is not paused).
@@ -469,6 +510,8 @@ class AccountStore:
             if key not in accounts:
                 raise GameError(404, f"there is no account called {username!r}")
             accounts[key].update(salt=salt, hash=digest, iterations=self._iterations)
+            accounts[key].pop("breached", None)   # the new password gets checked at its first login
+            accounts[key].pop("breach_checked", None)
             if must_change:
                 accounts[key]["must_change"] = True
             else:
@@ -483,7 +526,7 @@ class AccountStore:
         """
         token, name = self.login(username, current, client)  # 401/403/429 exactly as at login
         self.logout(token)
-        check_password(new, name)
+        refuse_if_breached(check_password(new, name), self.breach_count)
         self.set_password(name, str(new))
         return self.session_for(name)
 

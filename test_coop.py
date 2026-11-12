@@ -1829,7 +1829,8 @@ class ServerTests(unittest.TestCase):
         status, data = call(self.port, "POST", "/register", {"username": "Zoe Z", "password": "zoe-pass-1"}, headers=none)
         self.assertEqual((status, data["username"]), (200, "Zoe Z"))
         session = {"X-Session": data["session"]}
-        self.assertEqual(call(self.port, "GET", "/me", headers=session)[1], {"username": "Zoe Z", "admin": False, "must_change_password": False})
+        self.assertEqual(call(self.port, "GET", "/me", headers=session)[1], {"username": "Zoe Z", "admin": False, "must_change_password": False,
+                                                                                   "password_breached": False})
         self.assertEqual(call(self.port, "POST", "/register", {"username": "zoe z", "password": "zoe-pass-2"},
                               headers=none)[0], 409)
         self.assertEqual(call(self.port, "POST", "/register", {"username": "Q", "password": "zoe-pass-2"},
