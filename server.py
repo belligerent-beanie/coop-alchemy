@@ -236,7 +236,7 @@ def configure_logging(log_file: str | None, days: int = 14) -> logging.Handler:
 def build_csp(turnstile: bool) -> str:
     """The Content-Security-Policy: our own files only, plus Cloudflare's origin when the Turnstile widget is on."""
     extra = f" {TURNSTILE_ORIGIN}" if turnstile else ""
-    return (f"default-src 'self'; script-src 'self'{extra}; style-src 'self' 'unsafe-inline'; "
+    return (f"default-src 'self'; script-src 'self'{extra}; style-src 'self'; "
             f"img-src 'self' data:; connect-src 'self'{extra}; frame-src 'self'{extra}; object-src 'none'; "
             "base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
@@ -1075,7 +1075,8 @@ class Handler(BaseHTTPRequestHandler):
         body = (
             "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
             "<title>Game not found</title>"
-            "<body style='font:16px system-ui;max-width:30rem;margin:4rem auto;padding:0 1rem'>"
+            "<link rel=stylesheet href='/static/style.css'>"
+            "<body class=notfound>"
             "<h1>That game isn't running</h1>"
             "<p>It may have been ended, or it closed after sitting empty for a while. "
             "If it was saved, you can bring it back from the home page.</p>"

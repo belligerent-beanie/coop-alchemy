@@ -921,3 +921,6 @@ button.collection-tile:hover { border-color: var(--accent); }
 .profile .stat strong { font-size: 1.2rem; }
 .profile .stat span { font-size: 0.8rem; color: var(--muted); }
 .profile p { margin: 8px 0 0; font-size: 0.9rem; }
+
+/* Plain page served when a game id is not running (no inline styles: the CSP forbids them). */
+body.notfound { font: 16px system-ui; max-width: 30rem; margin: 4rem auto; padding: 0 1rem; }
