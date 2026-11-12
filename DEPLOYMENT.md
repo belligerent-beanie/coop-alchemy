@@ -217,6 +217,7 @@ On Windows a deploy means a restart, which ends every running game.
 | Confirmed email addresses, 24-hour expiry of unconfirmed accounts (`--require-email-verification`) | `accounts.py`, `mailer.py` |
 | Auth audit log (logins, failures, throttling, signups, with client address) to stderr | `server.py` |
 | IPv6 clients are limited by their /64 network, not by single address | `throttle.py` (`throttle_key`) |
+| Sessions end after 24 hours idle or 14 days at most; common passwords are refused | `accounts.py`, `commonpasswords.py` |
 | 50 wrong passwords an hour for one account, from anywhere, pause logins to it for 15 minutes | `accounts.py` |
 | One event stream per player, 30 stream tickets a minute, at most `--max-connections` (600) open connections | `state.py`, `server.py` |
 | Per-player limits on game requests (about twice what the page sends at its peak) | `ratelimit.py`, `server.py` |
@@ -410,7 +411,7 @@ and a contact address. If anyone under 13 could play, check COPPA and similar ru
 - Session tokens still live in `localStorage`, which any XSS could read. The CSP makes XSS much harder, but
   moving to an `HttpOnly; Secure; SameSite=Strict` cookie plus a CSRF header would remove the exposure. It's a
   larger change touching every page.
-- No absolute session lifetime (sessions slide for 24 hours of use, forever). (New passwords are checked against a local list of common ones: `commonpasswords.py`.)
+- (Done: sessions end after 24 hours idle or 14 days at most, and new passwords are checked against a local list of common ones: `commonpasswords.py`.)
 - Keep Python patched, and run `pip`-free as now: the stdlib-only design means no dependency to track.
 - Run an automated scan (OWASP ZAP) against a staging copy and fix what it finds.
 - Keep `aigen/` and `/admin` away from the public. Put `/admin*` behind the proxy's own auth (basic auth or an

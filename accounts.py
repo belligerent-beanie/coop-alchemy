@@ -30,7 +30,8 @@ MIN_PASSWORD_LEN = 10           # for new passwords and password changes; loggin
 MAX_PASSWORD_LEN = 128
 MAX_ACCOUNTS = 500
 PBKDF2_ITERATIONS = 600_000
-SESSION_SECONDS = 24 * 3600.0   # a session ends after this long without being used
+SESSION_SECONDS = 24 * 3600.0   # a session ends after this long without being used ...
+SESSION_MAX_SECONDS = 14 * 24 * 3600.0   # ... and, however often it is used, this long after it was made (log in again)
 MAX_FAILURES = 5                # wrong passwords in a row before the account is locked for a while
 LOCKOUT_SECONDS = 60.0
 ACCOUNT_MAX_FAILURES = 50       # wrong passwords for one account, from anywhere, within ACCOUNT_WINDOW_SECONDS ...
@@ -102,7 +103,7 @@ class AccountStore:
         self._clock = clock
         self._iterations = iterations
         self._lock = threading.Lock()
-        self._sessions: dict[str, tuple[str, str, float]] = {}   # token -> (key, salt, last used)
+        self._sessions: dict[str, tuple[str, str, float, float]] = {}   # token -> (key, salt, last used, made)
         self._failures: dict[str, tuple[int, float]] = {}        # key|client -> (count, locked until); oldest first
         self._account_failures: dict[str, list[float]] = {}      # key -> times of recent wrong passwords, from any client
         self._cache: tuple[tuple[int, int] | None, dict[str, dict[str, Any]]] | None = None  # see _peek()
@@ -357,11 +358,11 @@ class AccountStore:
     def _new_session(self, key: str, salt: str) -> str:
         now = self._clock()
         if len(self._sessions) >= MAX_SESSIONS:
-            self._sessions = {t: s for t, s in self._sessions.items() if now - s[2] < SESSION_SECONDS}
+            self._sessions = {t: s for t, s in self._sessions.items() if now - s[2] < SESSION_SECONDS and now - s[3] < SESSION_MAX_SECONDS}
             while len(self._sessions) >= MAX_SESSIONS:  # still full: drop the least recently used
                 del self._sessions[min(self._sessions, key=lambda t: self._sessions[t][2])]
         token = secrets.token_urlsafe(24)
-        self._sessions[token] = (key, salt, now)
+        self._sessions[token] = (key, salt, now, now)
         return token
 
     def session_for(self, username: str) -> str:
@@ -380,21 +381,22 @@ class AccountStore:
             entry = self._sessions.get(token)
             if entry is None:
                 return None
-            key, salt, last = entry
+            key, salt, last, made = entry
             now = self._clock()
             record = self._peek().get(key)
-            if now - last >= SESSION_SECONDS or record is None or record["salt"] != salt or record.get("disabled") is True:
-                del self._sessions[token]  # expired, deleted account, password reset, or disabled by an administrator
+            if now - last >= SESSION_SECONDS or now - made >= SESSION_MAX_SECONDS \
+                    or record is None or record["salt"] != salt or record.get("disabled") is True:
+                del self._sessions[token]  # expired, too old, deleted account, password reset, or disabled by an administrator
                 return None
-            self._sessions[token] = (key, salt, now)
+            self._sessions[token] = (key, salt, now, made)
             return str(record["name"])
 
     def export_sessions(self) -> list[dict[str, Any]]:
         """Logged-in sessions as ages, so a restarted server (see hotreload.py) can keep everyone logged in."""
         with self._lock:
             now = self._clock()
-            return [{"token": t, "key": key, "salt": salt, "age": max(0.0, now - last)}
-                    for t, (key, salt, last) in self._sessions.items() if now - last < SESSION_SECONDS]
+            return [{"token": t, "key": key, "salt": salt, "age": max(0.0, now - last), "made": max(0.0, now - made)}
+                    for t, (key, salt, last, made) in self._sessions.items() if now - last < SESSION_SECONDS and now - made < SESSION_MAX_SECONDS]
 
     def import_sessions(self, items: object) -> int:
         """Load export_sessions() output; returns how many were kept. Each is still checked against the account's salt."""
@@ -408,9 +410,13 @@ class AccountStore:
                     token, key, salt, age = item["token"], item["key"], item["salt"], float(item["age"])
                 except (KeyError, TypeError, ValueError):
                     continue
+                try:
+                    made_ago = float(item.get("made", age))   # a snapshot from before this existed: treat it as made when last used
+                except (TypeError, ValueError):
+                    continue
                 if isinstance(token, str) and isinstance(key, str) and isinstance(salt, str) \
-                        and 0 <= age < SESSION_SECONDS:
-                    self._sessions[token] = (key, salt, now - age)
+                        and 0 <= age < SESSION_SECONDS and age <= made_ago < SESSION_MAX_SECONDS:
+                    self._sessions[token] = (key, salt, now - age, now - made_ago)
                     kept += 1
         return kept
 
@@ -446,7 +452,7 @@ class AccountStore:
         """How many logins are active right now."""
         with self._lock:
             now = self._clock()
-            return sum(1 for _, _, last in self._sessions.values() if now - last < SESSION_SECONDS)
+            return sum(1 for _, _, last, made in self._sessions.values() if now - last < SESSION_SECONDS and now - made < SESSION_MAX_SECONDS)
 
     def set_password(self, username: str, password: str, must_change: bool = False) -> None:
         """Replace an account's password (this ends all its sessions). With must_change the owner has to pick their own

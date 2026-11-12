@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 import accounts as accounts_module
+import hotreload
 from accounts import AccountStore
 from commonpasswords import is_common, load_common
 from state import GameError
@@ -210,6 +211,70 @@ class AccountFailureCapTests(unittest.TestCase):
             except GameError:
                 pass
         self.assertEqual(self.fail(accounts, "10.3.0.1"), 429)   # still locked
+
+
+class SessionLifetimeTests(unittest.TestCase):
+    def make(self) -> tuple[AccountStore, list[float]]:
+        now = [1000.0]
+        accounts = AccountStore(Path(tempfile.mkdtemp()) / "accounts.json", iterations=1000, clock=lambda: now[0])
+        accounts.register("alice", "correct horse battery")
+        return accounts, now
+
+    @staticmethod
+    def use_until(accounts: AccountStore, now: list[float], token: str, seconds: float, check: bool = True) -> None:
+        """Move the clock forward by `seconds`, using the session at least every 23 hours on the way so it never goes idle."""
+        end = now[0] + seconds
+        while end - now[0] > 23 * 3600:
+            now[0] += 23 * 3600
+            if check:
+                assert accounts.username(token) == "alice"
+            else:
+                accounts.username(token)
+        now[0] = end
+
+    def test_a_session_used_every_day_still_ends_after_the_maximum_age(self) -> None:
+        accounts, now = self.make()
+        token = accounts.login("alice", "correct horse battery", client="10.0.0.1")[0]
+        self.use_until(accounts, now, token, accounts_module.SESSION_MAX_SECONDS - 60)
+        self.assertEqual(accounts.username(token), "alice")      # just under the maximum
+        now[0] += 120
+        self.assertIsNone(accounts.username(token))              # just over it, though it was used a moment ago
+        self.assertEqual(accounts.session_count(), 0)
+        self.assertTrue(accounts.login("alice", "correct horse battery", client="10.0.0.1")[0])   # logging in again works
+
+    def test_the_idle_rule_still_applies(self) -> None:
+        accounts, now = self.make()
+        token = accounts.login("alice", "correct horse battery", client="10.0.0.1")[0]
+        now[0] += accounts_module.SESSION_SECONDS + 1
+        self.assertIsNone(accounts.username(token))
+
+    def test_a_reload_keeps_when_the_session_was_made(self) -> None:
+        accounts, now = self.make()
+        token = accounts.login("alice", "correct horse battery", client="10.0.0.1")[0]
+        self.use_until(accounts, now, token, 13 * 86400)
+        self.assertEqual(accounts.username(token), "alice")      # used on day 13
+        exported = accounts.export_sessions()
+        self.assertEqual(exported[0]["made"], 13 * 86400)
+        fresh = AccountStore(accounts.path, iterations=1000, clock=lambda: now[0])
+        self.assertEqual(fresh.import_sessions(exported), 1)
+        self.assertEqual(fresh.username(token), "alice")
+        self.use_until(fresh, now, token, 2 * 86400, check=False)   # day 15, with the session used on the way
+        self.assertIsNone(fresh.username(token))
+
+    def test_a_snapshot_from_before_the_maximum_age_existed_still_loads(self) -> None:
+        accounts, now = self.make()
+        token = accounts.login("alice", "correct horse battery", client="10.0.0.1")[0]
+        old_style = [{k: v for k, v in item.items() if k != "made"} for item in accounts.export_sessions()]
+        fresh = AccountStore(accounts.path, iterations=1000, clock=lambda: now[0])
+        self.assertEqual(fresh.import_sessions(old_style), 1)
+        self.assertEqual(fresh.username(token), "alice")
+
+    def test_nonsense_in_a_snapshot_is_skipped(self) -> None:
+        accounts, _ = self.make()
+        bad = [{"token": "t", "key": "alice", "salt": "s", "age": 1.0, "made": "soon"},
+               {"token": "u", "key": "alice", "salt": "s", "age": 100.0, "made": 50.0},   # made after it was last used: impossible
+               {"token": "v", "key": "alice", "salt": "s", "age": 1.0, "made": 10**9}]
+        self.assertEqual(accounts.import_sessions(bad), 0)
 
 
 class CommonPasswordTests(unittest.TestCase):

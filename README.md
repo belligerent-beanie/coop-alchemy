@@ -397,7 +397,7 @@ python3 reload.py
   back into the password, even by someone who has the server's files.
 - After 5 wrong passwords in a row, that account is locked for a minute. There is
   no limit per IP address.
-- A login lasts 24 hours since you last used it. Sessions are kept in memory, so
+- A login lasts 24 hours since you last used it, and 14 days at most whatever you do (then you log in again). Sessions are kept in memory, so
   **restarting the server logs everybody out** (and ends the games that were
   running).
 - `accounts.json` is created when the first person registers. Keep it private; it
