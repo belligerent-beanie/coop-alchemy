@@ -22,6 +22,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from commonpasswords import is_common
 from state import MAX_NAME_LEN, GameError
 
 MIN_USERNAME_LEN = 3
@@ -61,6 +62,8 @@ def check_password(password: object, username: str = "") -> str:
         raise GameError(400, f"the password must be {MIN_PASSWORD_LEN} to {MAX_PASSWORD_LEN} characters")
     if username and password.casefold() == username.casefold():
         raise GameError(400, "the password must not be the same as the username")
+    if is_common(password):
+        raise GameError(400, "that password is one many people use, so it is easy to guess: please choose another")
     return password
 
 

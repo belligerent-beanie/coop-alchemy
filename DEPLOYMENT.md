@@ -410,7 +410,7 @@ and a contact address. If anyone under 13 could play, check COPPA and similar ru
 - Session tokens still live in `localStorage`, which any XSS could read. The CSP makes XSS much harder, but
   moving to an `HttpOnly; Secure; SameSite=Strict` cookie plus a CSRF header would remove the exposure. It's a
   larger change touching every page.
-- No breached-password check and no absolute session lifetime (sessions slide for 24 hours of use, forever).
+- No absolute session lifetime (sessions slide for 24 hours of use, forever). (New passwords are checked against a local list of common ones: `commonpasswords.py`.)
 - Keep Python patched, and run `pip`-free as now: the stdlib-only design means no dependency to track.
 - Run an automated scan (OWASP ZAP) against a staging copy and fix what it finds.
 - Keep `aigen/` and `/admin` away from the public. Put `/admin*` behind the proxy's own auth (basic auth or an

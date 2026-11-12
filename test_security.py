@@ -13,6 +13,7 @@ from pathlib import Path
 
 import accounts as accounts_module
 from accounts import AccountStore
+from commonpasswords import is_common, load_common
 from state import GameError
 from games import GameRegistry
 from test_coop import RECIPES, call, load_recipes, login_as, serve
@@ -211,12 +212,52 @@ class AccountFailureCapTests(unittest.TestCase):
         self.assertEqual(self.fail(accounts, "10.3.0.1"), 429)   # still locked
 
 
+class CommonPasswordTests(unittest.TestCase):
+    def test_the_list_is_there_and_catches_the_usual_suspects(self) -> None:
+        self.assertGreater(len(load_common()), 10_000)
+        for weak in ("password123456", "Password123456", "PASSWORD123456", "1234567890", "qwertyuiop", "aaaaaaaaaaaa", "abababababab",
+                     "abcdefghijkl", "9876543210"):
+            self.assertTrue(is_common(weak), weak)
+
+    def test_ordinary_good_passwords_pass(self) -> None:
+        for fine in ("correct horse battery", "my-own-fresh-passphrase", "k7#Qv!2mRt9z", "purple giraffes eat 4 pies"):
+            self.assertFalse(is_common(fine), fine)
+
+    def test_a_missing_list_file_switches_the_list_check_off_but_not_the_pattern_check(self) -> None:
+        empty = frozenset()
+        self.assertFalse(is_common("password123456", empty))
+        self.assertTrue(is_common("aaaaaaaaaaaa", empty))
+
+    def test_new_passwords_on_the_list_are_refused_everywhere_a_password_is_chosen(self) -> None:
+        accounts = AccountStore(Path(tempfile.mkdtemp()) / "accounts.json", iterations=1000)
+        with self.assertRaises(GameError) as ctx:
+            accounts.register("weakling", "Password123456")
+        self.assertEqual(ctx.exception.status, 400)
+        accounts.register("sturdy", "k7#Qv!2mRt9z")
+        with self.assertRaises(GameError):
+            accounts.change_password("sturdy", "k7#Qv!2mRt9z", "1234567890")
+        with self.assertRaises(GameError):
+            accounts.set_password("sturdy", "qwertyuiop")
+        self.assertTrue(accounts.login("sturdy", "k7#Qv!2mRt9z", client="10.0.0.1")[0])   # unchanged
+
+    def test_an_old_account_whose_password_is_on_the_list_can_still_log_in_and_must_pick_a_better_one_to_change(self) -> None:
+        accounts = AccountStore(Path(tempfile.mkdtemp()) / "accounts.json", iterations=1000)
+        records = accounts._load()
+        records["oldtimer"] = {"name": "oldtimer", "salt": "cd" * 16, "hash": accounts._hash("Password123456", "cd" * 16, 1000),
+                               "iterations": 1000, "created": 1.0}
+        accounts._save(records)
+        self.assertTrue(accounts.login("oldtimer", "Password123456", client="10.0.0.1")[0])
+        with self.assertRaises(GameError):
+            accounts.change_password("oldtimer", "Password123456", "iloveyou1234")
+        self.assertTrue(accounts.change_password("oldtimer", "Password123456", "a much better one 42"))
+
+
 class PasswordLengthTests(unittest.TestCase):
     def test_new_passwords_need_the_new_minimum_but_old_short_ones_still_log_in(self) -> None:
         accounts = AccountStore(Path(tempfile.mkdtemp()) / "accounts.json", iterations=1000)
         with self.assertRaises(GameError):
             accounts.register("shorty", "123456789")   # 9 characters
-        accounts.register("longer", "1234567890")
+        accounts.register("longer", "lemon-ocean")
         # an account made when 8 characters were enough: written straight into the file
         records = accounts._load()
         old = accounts._hash("12345678", "ab" * 16, 1000)
