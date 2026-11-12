@@ -47,7 +47,7 @@
     <div id="emote-picker" role="menu" aria-label="Emotes" hidden></div>
     <div id="challenge" class="challenge-bar" role="status" hidden>
       🎯 <span id="challenge-tier"></span> · Find <strong id="challenge-target"></strong> by unlocking as few elements as you can ·
-      <span id="challenge-count"></span> <span id="challenge-ref" class="muted"></span>
+      <span id="challenge-count"></span> <span id="challenge-ref" class="muted"></span> <span class="help"><button type="button" class="help-btn" aria-label="What is this?" aria-describedby="tip-challenge" aria-expanded="false">?</button><span role="tooltip" id="tip-challenge" class="help-pop">Every element you discover on the way counts, the target included but not the starting elements. The lower the score the better, and the reference is a good route to beat. Hints are switched off in challenges.</span></span>
     </div>
     <div id="race" class="challenge-bar race-bar" role="status" hidden>
       🏁 <span id="race-goal"></span> · <span id="race-standings"></span>
@@ -74,7 +74,7 @@
           <div id="hint-result" aria-live="polite"></div>
         </details>
         <section id="genie" hidden>
-          <div class="genie-head"><strong>🧞 Djinn</strong> <span id="genie-status"></span></div>
+          <div class="genie-head"><strong>🧞 Djinn</strong> <span class="help left"><button type="button" class="help-btn" aria-label="What is this?" aria-describedby="tip-djinn" aria-expanded="false">?</button><span role="tooltip" id="tip-djinn" class="help-pop">Unlocked when the Djinn element is discovered. A wish combines one element with every element you have found and puts all the results on the workspace. You get 3 wishes, plus 1 more for every 50 discoveries after unlocking. A wish that would make nothing is not spent.</span></span> <span id="genie-status"></span></div>
           <button type="button" id="genie-use">Use a wish</button>
           <p id="genie-note"></p>
         </section>
@@ -206,6 +206,7 @@
   <div id="visitor" role="status" aria-live="polite" hidden></div>
   <div id="tooltip" hidden></div>
   <div id="toasts" aria-live="polite"></div>
+  <script src="/static/help.js"></script>
   <script src="/static/auth.js"></script>
   <script src="/static/daily-common.js"></script>
   <script src="/static/pictures.js"></script>

@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/static/euler.css">
   <script src="/static/look.js"></script>
   <script src="/static/sparkle.js" defer></script>
+  <script src="/static/help.js" defer></script>
 </head>
 <body class="home">
   <main id="home">
@@ -41,22 +42,22 @@
 
     <div class="home-panel" id="panel-solo" role="tabpanel" aria-labelledby="home-tab-solo" hidden>
     <section id="solo" hidden>
-      <h2>Solo <span id="solo-count" class="muted"></span></h2>
+      <h2>Solo <span id="solo-count" class="muted"></span> <span class="help"><button type="button" class="help-btn" aria-label="What is this?" aria-describedby="tip-solo" aria-expanded="false">?</button><span role="tooltip" id="tip-solo" class="help-pop">Your own private game. It saves after every discovery, so you can stop and carry on any time. Find every element to unlock Create recipes.</span></span></h2>
       <p class="muted">Your own private game, saved as you go. Find every element to unlock Create recipes.</p>
       <div class="journal-bar" role="progressbar" aria-label="Solo progress" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0"><div id="solo-bar-fill"></div></div>
       <p class="home-links">
         <button type="button" id="solo-start" class="btn">Play solo</button>
         <span id="solo-error" class="error" role="alert"></span>
       </p>
-      <h3 class="daily-sub">Achievements <span id="achievement-count" class="muted"></span></h3>
+      <h3 class="daily-sub">Achievements <span id="achievement-count" class="muted"></span> <span class="help"><button type="button" class="help-btn" aria-label="What is this?" aria-describedby="tip-ach" aria-expanded="false">?</button><span role="tooltip" id="tip-ach" class="help-pop">Earned automatically as you play. Solo and daily challenge achievements both count towards the 10 that unlock Multiplayer.</span></span></h3>
       <ul id="achievements" class="achievements"></ul>
-      <p id="solo-hints" class="solo-hints">💡 <strong id="solo-hints-count">3</strong> <span id="solo-hints-word">hints</span> left.
+      <p id="solo-hints" class="solo-hints">💡 <strong id="solo-hints-count">3</strong> <span id="solo-hints-word">hints</span> left. <span class="help"><button type="button" class="help-btn" aria-label="What is this?" aria-describedby="tip-hints" aria-expanded="false">?</button><span role="tooltip" id="tip-hints" class="help-pop">Open <strong>💡 Hints</strong> inside a Solo game to use one. You start with 3 and they never refill by themselves. A hint that finds nothing is free. Earn <strong>+1</strong> for each daily challenge you finish while on a streak of 2 or more days.</span></span>
         <span class="muted">Hints never refill by themselves: finish a daily challenge on a streak of 2 or more days to earn 1 more
         (see the Challenges tab). Open <em>💡 Hints</em> inside a game to use one.</span></p>
     </section>
 
     <section>
-      <h2>Create recipes</h2>
+      <h2>Create recipes <span class="help"><button type="button" class="help-btn" aria-label="What is this?" aria-describedby="tip-create" aria-expanded="false">?</button><span role="tooltip" id="tip-create" class="help-pop">A playground with every element unlocked, where you can invent new combinations. It opens once you have found every element in Solo. If you like a recipe, promote it and the admins can add it to the game with your name as credit.</span></span></h2>
       <p id="create-blurb" class="muted">A solo playground with every element unlocked. Invent new combinations and, if you like one,
         promote it so the admins can add it to the game, with your name as credit.</p>
       <p class="home-links">
@@ -70,7 +71,7 @@
 
     <div class="home-panel" id="panel-multiplayer" role="tabpanel" aria-labelledby="home-tab-multiplayer" hidden>
     <section id="mp-locked" class="locked-card" hidden>
-      <h2>🔒 Multiplayer is locked</h2>
+      <h2>🔒 Multiplayer is locked <span class="help"><button type="button" class="help-btn" aria-label="What is this?" aria-describedby="tip-locked" aria-expanded="false">?</button><span role="tooltip" id="tip-locked" class="help-pop">Shared games open once you have earned 10 achievements from Solo and the daily challenge. This gives you a feel for the game before you play with others, and shared-game achievements do not count since you could not earn them yet.</span></span></h2>
       <p>Play with friends once you have earned <strong id="mp-needed">10</strong> achievements. You have
         <strong id="mp-earned">0</strong> so far.</p>
       <div class="journal-bar" role="progressbar" aria-label="Achievements towards Multiplayer" aria-valuemin="0" aria-valuemax="10" aria-valuenow="0"><div id="mp-bar-fill"></div></div>
@@ -120,7 +121,7 @@
 
     <div class="home-panel" id="panel-challenges" role="tabpanel" aria-labelledby="home-tab-challenges" hidden>
     <section id="daily" hidden>
-      <h2>Daily challenge <span id="daily-date" class="muted"></span> <span id="daily-streak" class="streak" hidden></span></h2>
+      <h2>Daily challenge <span id="daily-date" class="muted"></span> <span id="daily-streak" class="streak" hidden></span> <span class="help"><button type="button" class="help-btn" aria-label="What is this?" aria-describedby="tip-daily" aria-expanded="false">?</button><span role="tooltip" id="tip-daily" class="help-pop">Everyone gets the same targets each day. Reach the target while unlocking as few elements as you can: fewer is a better score. Finish on two or more days in a row and every challenge you finish after that also earns <strong>1 Solo hint</strong>.</span></span></h2>
       <p class="muted">Start with the basic elements and discover a target while unlocking as few elements as you
         can. There are three difficulties, with 3 attempts each per day.</p>
       <div id="daily-tiers"></div>
@@ -129,7 +130,7 @@
         <span id="daily-share-msg" class="muted"></span>
       </p>
       <p id="daily-error" class="error" role="alert"></p>
-      <h3 class="daily-sub">This week <span id="week-label" class="muted"></span></h3>
+      <h3 class="daily-sub">This week <span id="week-label" class="muted"></span> <span class="help"><button type="button" class="help-btn" aria-label="What is this?" aria-describedby="tip-week" aria-expanded="false">?</button><span role="tooltip" id="tip-week" class="help-pop">Points for the week (Monday to Sunday). A finished challenge is worth 100 × the reference score ÷ your score, so matching the reference route is 100 and using twice as many elements is 50. Your best of each difficulty each day counts.</span></span></h3>
       <ol id="week-board" class="daily-board"></ol>
       <p id="week-empty" class="muted" hidden>Nobody has finished a challenge this week yet.</p>
       <p class="muted daily-note">Weekly points: a finished challenge is worth 100 × reference ÷ your score, and your
@@ -146,7 +147,7 @@
     </section>
 
     <section id="races">
-      <h2>Race</h2>
+      <h2>Race <span class="help"><button type="button" class="help-btn" aria-label="What is this?" aria-describedby="tip-race" aria-expanded="false">?</button><span role="tooltip" id="tip-race" class="help-pop">Everyone races in their own world, starting from only the basic elements. The first to reach the goal wins. Races open to everyone, and finishing or winning one earns achievements that count towards unlocking Multiplayer.</span></span></h2>
       <p class="muted">Everyone gets their own world with only the starting elements. The first to reach the goal
         wins. Up to 6 racers.</p>
       <p id="race-mine" hidden>You are in a race: <a id="race-mine-link" class="btn" href="#">Go to your race</a></p>
