@@ -42,7 +42,7 @@ ACHIEVEMENTS: tuple[Achievement, ...] = (
     Achievement("djinn", "🧞", "Wishmaster", "Unlock the Djinn.", lambda p: p.djinn),
     Achievement("wish", "✨", "Careful what you wish for", "Use a Djinn wish.", lambda p: p.wishes >= 1),
     Achievement("time", "⏳", "Time flies", "Unlock Time.", lambda p: p.time),
-    Achievement("hint", "💡", "A little help", "Use your hint of the day.", lambda p: p.hints >= 1),
+    Achievement("hint", "💡", "A little help", "Use a hint.", lambda p: p.hints >= 1),
 )
 
 BY_ID = {a.id: a for a in ACHIEVEMENTS}

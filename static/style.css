@@ -929,3 +929,14 @@ button.collection-tile:hover { border-color: var(--accent); }
 
 /* Plain page served when a game id is not running (no inline styles: the CSP forbids them). */
 body.notfound { font: 16px system-ui; max-width: 30rem; margin: 4rem auto; padding: 0 1rem; }
+
+/* ---- onboarding: the "start here" card, the locked Multiplayer card, solo hints and the hint guide ---- */
+.start-here { border: 2px solid var(--accent); border-radius: 12px; padding: 16px 18px; margin: 12px 0 16px; background: var(--panel); }
+.start-here h2 { margin-top: 0; }
+.btn.big { font-size: 1.15rem; padding: 12px 22px; }
+.locked-card { border: 1px dashed var(--line); border-radius: 12px; padding: 16px 18px; margin: 8px 0 16px; background: var(--panel); }
+.locked-card h2 { margin-top: 0; }
+.solo-hints { margin: 10px 0; }
+.hint-reward { font-weight: 600; color: #d9731a; }
+.tutorial-list { padding-left: 1.2rem; }
+.tutorial-list li { margin: 6px 0; }

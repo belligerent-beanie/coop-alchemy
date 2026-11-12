@@ -42,6 +42,7 @@ function card(game, label = "Join") {
 async function refresh() {
   try {
     const data = await Auth.fetch("/games");
+    paintMultiplayer(data.multiplayer);
     maxGames = data.max_games;
     const games = data.games.filter((g) => !g.private);  // your daily challenge attempt is not a game to join
     running = games.length;
@@ -391,19 +392,42 @@ async function loadSolo() {
     bar.setAttribute("aria-valuemax", String(s.total || 1));
     bar.setAttribute("aria-valuenow", String(s.found));
     $("solo-start").textContent = s.found > 4 ? "Continue solo" : "Play solo";
+    $("solo-hints-count").textContent = String(s.hints);
+    $("solo-hints-word").textContent = s.hints === 1 ? "hint" : "hints";
+    $("start-here").hidden = s.found > 0;   // a player who has not found anything yet gets the big "Start playing" card
+    paintMultiplayer(s.multiplayer);
     renderAchievements("achievements", "achievement-count", s.achievements);
     $("create-link").textContent = s.may_create ? "Create recipes" : "Create recipes 🔒";
     if (!s.may_create) $("create-blurb").textContent = "Finish Solo mode (find every element) to unlock a playground where you can invent new combinations and promote them to the admins.";
   } catch (_) { /* the rest of the page still works */ }
 }
-$("solo-start").addEventListener("click", async () => {
-  $("solo-error").textContent = "";
+async function startSolo(errorBox) {
+  errorBox.textContent = "";
   try {
     location.href = (await Auth.fetch("/solo/start", {})).url;
   } catch (err) {
-    $("solo-error").textContent = err.message;
+    errorBox.textContent = err.message;
   }
-});
+}
+$("solo-start").addEventListener("click", () => startSolo($("solo-error")));
+$("hero-start").addEventListener("click", () => startSolo($("hero-error")));
+
+/** Shows Multiplayer as locked (with progress) or open; `mp` is {unlocked, earned, needed} from the server. */
+function paintMultiplayer(mp) {
+  if (!mp) return;
+  $("mp-locked").hidden = mp.unlocked;
+  $("mp-content").hidden = !mp.unlocked;
+  $("home-tab-multiplayer").textContent = mp.unlocked ? "Multiplayer" : "🔒 Multiplayer";
+  $("mp-earned").textContent = String(mp.earned);
+  $("mp-needed").textContent = String(mp.needed);
+  $("mp-bar-fill").style.width = `${Math.min(100, (mp.earned / Math.max(1, mp.needed)) * 100)}%`;
+  const bar = document.querySelector("#mp-locked .journal-bar");
+  bar.setAttribute("aria-valuemax", String(mp.needed));
+  bar.setAttribute("aria-valuenow", String(Math.min(mp.earned, mp.needed)));
+}
+for (const button of document.querySelectorAll("[data-goto]")) {
+  button.addEventListener("click", () => { showHomeTab(button.dataset.goto); history.replaceState(null, "", `#${button.dataset.goto}`); });
+}
 loadSolo();
 loadAchievements();
 loadProfile();
@@ -497,7 +521,7 @@ setInterval(loadAdmin, 30000);
 // ---- the three ways to play: Solo, Multiplayer, Challenges ----
 const HOME_TABS = ["solo", "multiplayer", "challenges"];
 function showHomeTab(name, remember = true) {
-  if (!HOME_TABS.includes(name)) name = "multiplayer";
+  if (!HOME_TABS.includes(name)) name = "solo";   // Solo is where a new player should land
   for (const tab of HOME_TABS) {
     $(`panel-${tab}`).hidden = tab !== name;
     const button = $(`home-tab-${tab}`);

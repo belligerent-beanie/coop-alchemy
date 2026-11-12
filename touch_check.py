@@ -771,14 +771,18 @@ def run(out: Path, chrome_path: str) -> int:
         report.check(browser.evaluate("document.getElementById('invite').hidden"), "a solo game has no invite button")
         report.check(browser.evaluate("document.getElementById('end').textContent") == "Leave", "a solo game says Leave, not End")
         report.check(browser.evaluate("document.getElementById('emote-open').hidden"), "a solo game has no emote button")
-        report.check("1 hint" in browser.evaluate("document.getElementById('hints-left').textContent"), "a solo game says you have 1 hint today")
-        browser.evaluate("document.querySelector('#hints summary').click()")
+        report.check(browser.evaluate("document.getElementById('hint-tutorial').open"), "the first solo game opens the hint guide by itself")
+        browser.evaluate("document.getElementById('hint-tutorial-next').click(); document.getElementById('hint-tutorial-next').click(); "
+                         "document.getElementById('hint-tutorial-done').click()")
+        report.check(not browser.evaluate("document.getElementById('hint-tutorial').open"), "'Got it' closes the guide")
+        report.check("3 hints" in browser.evaluate("document.getElementById('hints-left').textContent"), "a solo game starts with 3 hints")
+        if not browser.evaluate("document.getElementById('hints').open"):
+            browser.evaluate("document.querySelector('#hints summary').click()")
         time.sleep(0.3)
         x, y = center_of(browser, '[data-hint="can_make"]')
         browser.tap(x, y)
         time.sleep(1.0)
-        report.check("used today's hint" in browser.evaluate("document.getElementById('hints-left').textContent"), "using it says the hint is used up")
-        report.check(browser.evaluate("document.querySelector('[data-hint=can_make]').disabled"), "...and the hint buttons are switched off")
+        report.check("2 hints" in browser.evaluate("document.getElementById('hints-left').textContent"), "using a hint leaves 2")
         # the end-of-game screen (this is the solo page, so closing its stream disturbs nothing that follows)
         browser.evaluate("handlers.ended({by: 'phoneb', saved: false, awards: [{icon: '🥇', title: 'Most elements found', player: 'phonea', detail: '12 elements'}, "
                          "{icon: '💎', title: 'Rarest find', player: 'phoneb', detail: 'a rare thing, only 1 way to make it'}]})")

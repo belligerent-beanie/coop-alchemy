@@ -70,6 +70,7 @@
             <button type="submit">Find</button>
           </form>
           <p id="hints-left" class="muted" hidden></p>
+          <button type="button" id="hint-help" class="link" hidden>How do hints work?</button>
           <div id="hint-result" aria-live="polite"></div>
         </details>
         <section id="genie" hidden>
@@ -116,9 +117,39 @@
       </div>
     </form>
   </dialog>
+  <dialog id="hint-tutorial" class="dialog">
+    <p class="muted" id="hint-tutorial-step" aria-live="polite">1 of 3</p>
+    <div class="tutorial-page" data-page="0">
+      <h2>💡 Stuck? Use a hint</h2>
+      <p>Open <strong>💡 Hints</strong> in the side panel any time you are not sure what to try next.</p>
+      <p>You start with <strong>3 hints</strong>. They are yours to spend whenever you like, and they do not refill by themselves,
+        so save them for when you are really stuck.</p>
+    </div>
+    <div class="tutorial-page" data-page="1" hidden>
+      <h2>Three kinds of hint</h2>
+      <ul class="tutorial-list">
+        <li><strong>What can I make?</strong> names one element you could make right now, without saying how.</li>
+        <li><strong>A combination to try</strong> shows two of your elements that make something new, without saying what.</li>
+        <li><strong>How do I make…</strong> shows a recipe for an element you type in.</li>
+      </ul>
+      <p>A hint that has nothing to tell you is free: only a useful answer uses one up.</p>
+    </div>
+    <div class="tutorial-page" data-page="2" hidden>
+      <h2>Earn more hints</h2>
+      <p>Finish a <strong>daily challenge</strong> two days in a row (a streak of 2 or more days) and each challenge you finish
+        after that earns <strong>1 hint</strong>. Find them on the <em>Challenges</em> tab of the home page.</p>
+      <p>You can reopen this guide any time with <em>How do hints work?</em> under the Hints panel.</p>
+    </div>
+    <div class="dialog-buttons">
+      <button type="button" id="hint-tutorial-back">Back</button>
+      <button type="button" id="hint-tutorial-next">Next</button>
+      <button type="button" id="hint-tutorial-done" hidden>Got it</button>
+    </div>
+  </dialog>
   <dialog id="challenge-done" class="dialog">
     <h2>🎉 You found it!</h2>
     <p id="challenge-done-text"></p>
+    <p id="challenge-done-hint" class="hint-reward" hidden></p>
     <div class="dialog-buttons">
       <button type="button" id="challenge-copy">Copy result</button>
       <button type="button" id="challenge-again">Try again</button>

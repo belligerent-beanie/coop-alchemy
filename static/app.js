@@ -312,12 +312,15 @@ function setSolo(on) {
 
 let shareStreak = 0;   // the player's streak, for the "Copy result" text
 
-function showChallengeDone(score, reference) {
+function showChallengeDone(score, reference, hintReward) {
   const target = challenge.target;
   const beat = reference ? (score < reference ? " That beats the reference route!"
     : score === reference ? " That matches the reference route." : ` The reference route unlocks ${reference}.`) : "";
   $("challenge-done-text").textContent =
     `You found ${`${target.emoji} ${target.label}`.trim()} after unlocking ${score} element${score === 1 ? "" : "s"}.${beat}`;
+  const reward = $("challenge-done-hint");
+  reward.hidden = !hintReward;
+  if (hintReward) reward.textContent = `💡 Streak bonus: +1 hint for Solo (you now have ${hintReward.hints}).`;
   challenge.done = score;
   $("challenge-count").textContent = `found it with ${score} unlocked`;
   if (!$("challenge-done").open) $("challenge-done").showModal();
@@ -1071,7 +1074,7 @@ async function askHint(kind, target) {
   } catch (err) {
     hintResult.className = "error";
     hintResult.textContent = err.message;
-    if (/used today's hint/.test(err.message)) hintsLeft = 0;
+    if (/out of hints/.test(err.message)) hintsLeft = 0;
   } finally {
     buttons.forEach((b) => { b.disabled = false; });
     paintHintsLeft();
@@ -1367,18 +1370,64 @@ function paintEmote(pid) {
   row.appendChild(bubble);
 }
 
-// ---- the solo hint of the day --------------------------------------------------------------------------------------
+// ---- solo hints: a balance of hints, with a short guide the first time -------------------------------------------------
 
 let hintsLeft = null;   // null: unlimited hints (a shared game); a number in a solo game
 
 function paintHintsLeft() {
   const note = $("hints-left");
   note.hidden = hintsLeft === null;
+  $("hint-help").hidden = hintsLeft === null;
+  $("hints").querySelector("summary").textContent = hintsLeft === null ? "💡 Hints" : `💡 Hints (${hintsLeft} left)`;
   if (hintsLeft !== null) {
-    note.textContent = hintsLeft > 0 ? "You have 1 hint today." : "You have used today's hint. A new one comes tomorrow.";
+    note.textContent = hintsLeft > 0
+      ? `You have ${hintsLeft} hint${hintsLeft === 1 ? "" : "s"} left. A hint that finds nothing is free.`
+      : "You are out of hints. Finish a daily challenge on a streak of 2 or more days to earn another.";
   }
-  $("hints").querySelectorAll("button").forEach((b) => { b.disabled = hintsLeft === 0; });
+  $("hints").querySelectorAll("button[data-hint], #hint-find button").forEach((b) => { b.disabled = hintsLeft === 0; });
 }
+
+const TUTORIAL_PAGES = document.querySelectorAll("#hint-tutorial .tutorial-page");
+let tutorialPage = 0;
+
+function showTutorialPage(n) {
+  tutorialPage = Math.max(0, Math.min(TUTORIAL_PAGES.length - 1, n));
+  TUTORIAL_PAGES.forEach((page, i) => { page.hidden = i !== tutorialPage; });
+  $("hint-tutorial-step").textContent = `${tutorialPage + 1} of ${TUTORIAL_PAGES.length}`;
+  $("hint-tutorial-back").hidden = tutorialPage === 0;
+  const last = tutorialPage === TUTORIAL_PAGES.length - 1;
+  $("hint-tutorial-next").hidden = last;
+  $("hint-tutorial-done").hidden = !last;
+}
+
+function tutorialKey() {
+  return `alchemy-hint-guide:${Auth.user().toLowerCase()}`;
+}
+
+function openHintTutorial() {
+  showTutorialPage(0);
+  if (!$("hint-tutorial").open) $("hint-tutorial").showModal();
+}
+
+function closeHintTutorial() {
+  $("hint-tutorial").close();
+  try { localStorage.setItem(tutorialKey(), "1"); } catch (_) { /* private window: the guide shows again next time */ }
+  $("hints").open = true;   // point at the panel the guide just described
+}
+
+/** The first time an account opens a solo game, the hint guide appears by itself. */
+function maybeShowHintTutorial() {
+  if (hintsLeft === null || $("hint-tutorial").open) return;
+  let seen = false;
+  try { seen = localStorage.getItem(tutorialKey()) === "1"; } catch (_) { /* treat as not seen */ }
+  if (!seen) openHintTutorial();
+}
+
+$("hint-help").addEventListener("click", openHintTutorial);
+$("hint-tutorial-next").addEventListener("click", () => showTutorialPage(tutorialPage + 1));
+$("hint-tutorial-back").addEventListener("click", () => showTutorialPage(tutorialPage - 1));
+$("hint-tutorial-done").addEventListener("click", closeHintTutorial);
+$("hint-tutorial").addEventListener("cancel", (e) => { e.preventDefault(); closeHintTutorial(); });   // Escape ends the guide too
 
 // ---- Mr Alchemy -----------------------------------------------------------------------------------------------------
 //
@@ -1514,6 +1563,7 @@ const handlers = {
     setSolo(s.game.solo === true);
     hintsLeft = typeof s.game.hints_left === "number" ? s.game.hints_left : null;
     paintHintsLeft();
+    maybeShowHintTutorial();
     $("emote-open").hidden = !!(s.challenge || s.race || s.game.solo);   // emotes are for shared games
     if (!$("emote-open").hidden && !emoteList.length) loadEmotes();
     clearAllTiles();
@@ -1614,7 +1664,7 @@ const handlers = {
   },
 
   challenge_done(d) {
-    if (challenge) showChallengeDone(d.score, d.reference);
+    if (challenge) showChallengeDone(d.score, d.reference, d.hint_reward);
   },
 
   tiles_cleared(d) {
