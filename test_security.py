@@ -17,6 +17,7 @@ from state import GameError
 from games import GameRegistry
 from test_coop import RECIPES, call, load_recipes, login_as, serve
 from server import MAX_DRAIN, Handler
+from ratelimit import ACTION_BURST, ACTION_RATE, MOTION_BURST, MOTION_RATE, TokenBuckets
 from throttle import Throttle, TicketStore, client_ip, parse_networks, throttle_key
 
 
@@ -73,6 +74,48 @@ class ClientIpTests(unittest.TestCase):
         self.assertEqual(client_ip("127.0.0.1", "6.6.6.6, 198.51.100.7", self.PROXY), "198.51.100.7")
         self.assertEqual(client_ip("127.0.0.1", "198.51.100.7, 10.1.2.3", self.PROXY), "198.51.100.7")
         self.assertEqual(client_ip("127.0.0.1", "not-an-ip", self.PROXY), "127.0.0.1")
+
+
+class TokenBucketTests(unittest.TestCase):
+    def test_a_burst_is_allowed_then_refused_then_refills(self) -> None:
+        now = [0.0]
+        buckets = TokenBuckets(2.0, 3, clock=lambda: now[0])
+        self.assertEqual([buckets.allow("a") for _ in range(5)], [True, True, True, False, False])
+        now[0] = 0.5   # one request's worth has come back
+        self.assertEqual([buckets.allow("a"), buckets.allow("a")], [True, False])
+        now[0] = 100.0   # a long rest saves up only the burst
+        self.assertEqual([buckets.allow("a") for _ in range(4)], [True, True, True, False])
+
+    def test_keys_are_independent_and_the_table_stays_bounded(self) -> None:
+        now = [0.0]
+        buckets = TokenBuckets(1.0, 1, clock=lambda: now[0], limit=10)
+        self.assertTrue(buckets.allow("a"))
+        self.assertFalse(buckets.allow("a"))
+        self.assertTrue(buckets.allow("b"))
+        for i in range(100):
+            buckets.allow(f"k{i}")
+        self.assertLessEqual(len(buckets._buckets), 10)
+
+    def test_honest_play_never_meets_the_limits(self) -> None:
+        """What the page really does, replayed on a clock: 20 cursor updates a second all the time, tile moves every 40 ms
+        for the first second of every 5, a click every half second, and a burst of ten quick actions every 20 seconds."""
+        motion_times = [i * 0.05 for i in range(20 * 60)]
+        motion_times += [t + i * 0.04 for t in range(0, 60, 5) for i in range(25)]
+        action_times = [i * 0.5 for i in range(120)] + [t + i * 0.01 for t in range(0, 60, 20) for i in range(10)]
+        now = [0.0]
+        motion = TokenBuckets(MOTION_RATE, MOTION_BURST, clock=lambda: now[0])
+        action = TokenBuckets(ACTION_RATE, ACTION_BURST, clock=lambda: now[0])
+        for bucket, times in ((motion, motion_times), (action, action_times)):
+            now[0] = 0.0
+            for moment in sorted(times):
+                now[0] = moment
+                self.assertTrue(bucket.allow("p"), moment)
+
+    def test_a_flood_is_cut_off(self) -> None:
+        now = [0.0]
+        action = TokenBuckets(ACTION_RATE, ACTION_BURST, clock=lambda: now[0])
+        allowed = sum(action.allow("p") for _ in range(1000))   # 1000 requests in one instant
+        self.assertEqual(allowed, ACTION_BURST)
 
 
 class ThrottleKeyTests(unittest.TestCase):
@@ -457,6 +500,22 @@ class ServerHardeningTests(unittest.TestCase):
         self.assertEqual(game.kick("Holder"), 1)
         self.assertIsNone(game._tiles[tile["id"]].held_by)
         self.assertEqual(game.kick("Holder"), 0)
+
+    def test_a_flood_of_game_requests_is_limited_and_the_game_stays_sound(self) -> None:
+        token = self.join("flooded")
+        game = self.server.registry.get("flooded")
+        element = next(iter(game._discovered))
+        statuses = [call(self.port, "POST", "/g/flooded/tile/add", {"player": token, "element": element, "x": 0.1, "y": 0.1})[0]
+                    for _ in range(80)]
+        self.assertIn(429, statuses)
+        self.assertIn(200, statuses)
+        self.assertLessEqual(len(game._tiles), 300)
+        self.assertEqual(len(game._tiles), statuses.count(200))
+        cursor = [call(self.port, "POST", "/g/flooded/cursor", {"player": token, "x": 0.5, "y": 0.5})[0] for _ in range(150)]
+        self.assertEqual(set(cursor), {200})   # excess pointer updates are dropped without an error
+        self.assertGreaterEqual(self.server.stats["actions_limited"], 1)
+        other = self.seat("flooded", "Flood Neighbour")[1]   # another player's budget is separate
+        self.assertEqual(call(self.port, "POST", "/g/flooded/tile/add", {"player": other, "element": element, "x": 0.2, "y": 0.2})[0], 200)
 
     def test_a_visitor_on_one_ipv6_64_shares_one_login_limit(self) -> None:
         server = self.server

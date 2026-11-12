@@ -22,7 +22,12 @@ this file in the same commit (and add a line to the [change log](#change-log)).
   (JSON) or `no-cache` (files) and carry a Content-Security-Policy, `X-Content-Type-Options`, `X-Frame-Options` and
   `Referrer-Policy` (and `Strict-Transport-Security` over HTTPS).
 - **Limits.** Per client address: 20 login attempts a minute, 5 sign-ups per 10 minutes, 10 verification-email requests an
-  hour. 5 wrong passwords in a row for one account from one address lock that pair for 60 seconds. At most 5 players per
+  hour. An IPv6 address counts as its whole /64 network. 5 wrong passwords in a row for one account from one address lock that
+  pair for 60 seconds, and 50 wrong passwords in an hour for one account from anywhere pause logins to it for 15 minutes.
+  Per player in a game: cursor and tile-move requests at about 50 a second and everything else at about 10 a second (bursts of
+  100 and 30 are allowed); beyond that `429` (a cursor update is dropped with a `200`). 30 event-stream tickets a minute per
+  player, one open event stream per player (a new one closes the old), and at most 600 open connections on the server (`503`).
+  A disabled or deleted account gets `403` on game requests and is taken out of its games. At most 5 players per
   game. When the server runs behind a reverse proxy, start it with `--trusted-proxy` (and, for Cloudflare, `--client-ip-header CF-Connecting-IP`) so these limits see real addresses.
 
 ## Pages and files (GET, return HTML or files)

@@ -130,6 +130,7 @@ from recipes import RecipeError, load_recipes
 from reports import REASONS, ReportStore, clean_note
 from saves import SaveStore
 from state import GameError, GameState
+from ratelimit import ACTION_BURST, ACTION_RATE, MOTION_BURST, MOTION_RATE, TokenBuckets
 from throttle import Throttle, TicketStore, client_ip, parse_networks, throttle_key
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -270,6 +271,8 @@ class AlchemyServer(ThreadingHTTPServer):
         self.games_throttle = Throttle(10, 3600.0)   # games one account may start per hour
         self.reports_throttle = Throttle(5, 3600.0)  # reports one account may send per hour
         self.tickets = TicketStore()                 # one-time passes for event streams
+        self.motion_limit = TokenBuckets(MOTION_RATE, MOTION_BURST)   # cursor and tile moves per player (ratelimit.py)
+        self.action_limit = TokenBuckets(ACTION_RATE, ACTION_BURST)   # every other game request per player
         self.ticket_throttle = Throttle(30, 60.0)    # tickets one player token may ask for per minute (a reconnect needs one)
         self.max_connections = MAX_CONNECTIONS       # see --max-connections
         self.open_connections = 0
@@ -635,6 +638,13 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(token, str):
                     raise GameError(400, "missing player token")
                 self._check_account(game, game.authorize(token))
+                limit = self.server.motion_limit if rest in ("/cursor", "/tile/move") else self.server.action_limit
+                if not limit.allow(token):
+                    self.server.bump("actions_limited")
+                    if rest == "/cursor":   # a pointer position is out of date a moment later: drop it quietly
+                        self._json(200, {})
+                        return
+                    raise GameError(429, "slow down: too many requests")
                 self._json(200, run_action(game, rest, token, body))
         except GameError as exc:
             self._json(exc.status, {"error": exc.message})
