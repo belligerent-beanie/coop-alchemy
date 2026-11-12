@@ -589,6 +589,75 @@ class ServerHardeningTests(unittest.TestCase):
             self.fail("connections were still being refused after the idle ones closed")
         self.assertGreaterEqual(server.stats["connections_refused"], 1)
 
+    def test_one_address_cannot_hold_every_connection(self) -> None:
+        server = self.server
+        saved = server.max_per_peer
+        self.addCleanup(lambda: setattr(server, "max_per_peer", saved))
+        server.max_per_peer = 2
+        idle = [socket.create_connection(("127.0.0.1", self.port), timeout=5) for _ in range(2)]
+        time.sleep(0.3)
+        refused = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        refused.request("GET", "/healthz")
+        self.assertEqual(refused.getresponse().status, 503)
+        refused.close()
+        for sock in idle:
+            sock.close()
+        for _ in range(30):
+            time.sleep(0.2)
+            conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+            conn.request("GET", "/healthz")
+            ok = conn.getresponse().status == 200
+            conn.close()
+            if ok:
+                break
+        else:
+            self.fail("the address was still refused after its idle connections closed")
+
+    def test_a_trusted_proxy_is_not_limited_per_address(self) -> None:
+        import ipaddress
+        server = self.server
+        saved = (server.max_per_peer, server.trusted_proxies)
+        self.addCleanup(lambda: (setattr(server, "max_per_peer", saved[0]), setattr(server, "trusted_proxies", saved[1])))
+        server.max_per_peer = 1
+        server.trusted_proxies = [ipaddress.ip_network("127.0.0.1/32")]
+        idle = [socket.create_connection(("127.0.0.1", self.port), timeout=5) for _ in range(3)]
+        time.sleep(0.3)
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("GET", "/healthz")
+        self.assertEqual(conn.getresponse().status, 200)
+        conn.close()
+        for sock in idle:
+            sock.close()
+
+    def test_one_client_cannot_open_unlimited_event_streams(self) -> None:
+        server = self.server
+        saved = server.max_streams_per_client
+        self.addCleanup(lambda: setattr(server, "max_streams_per_client", saved))
+        server.max_streams_per_client = 2
+        games = ["streamcap1", "streamcap2", "streamcap3"]
+        tokens = [self.join(g) for g in games]
+        socks = [self.open_stream(g, self.ticket(g, t)) for g, t in zip(games[:2], tokens[:2])]
+        for sock in socks:
+            sock.recv(1024)
+        third = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        status, data = call(self.port, "POST", "/g/streamcap3/ticket", {"player": tokens[2]})
+        third.request("GET", f"/g/streamcap3/events?ticket={data['ticket']}")
+        self.assertEqual(third.getresponse().status, 429)
+        third.close()
+        socks[0].close()
+        for _ in range(30):   # the slot frees once the server notices the closed stream
+            time.sleep(0.2)
+            status, data = call(self.port, "POST", "/g/streamcap3/ticket", {"player": tokens[2]})
+            retry = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+            retry.request("GET", f"/g/streamcap3/events?ticket={data['ticket']}")
+            code = retry.getresponse().status
+            retry.close()
+            if code == 200:
+                break
+        else:
+            self.fail("the stream slot never came back")
+        socks[1].close()
+
     # ---- disabled and deleted accounts leave running games ---------------------------------------------
 
     def seat(self, game: str, name: str) -> tuple[str, str]:

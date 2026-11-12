@@ -137,6 +137,8 @@ BASE_DIR = Path(__file__).resolve().parent
 MAX_BODY = 4096
 MAX_DRAIN = 65536  # an unread request body up to this size is read and thrown away before the connection closes
 KEEPALIVE_SECONDS = 3  # a closed browser is noticed on the second failed write, so about 6 s
+MAX_CONNECTIONS_PER_PEER = 60   # open connections from one directly connected address (not a trusted proxy, which carries everybody)
+MAX_STREAMS_PER_CLIENT = 12     # open event streams for one client address, found through the proxy headers (several players may share one)
 MAX_CONNECTIONS = 600  # open connections at once (each takes a thread; the event streams stay open); more are turned away
 CURSOR_BATCH_SECONDS = 0.03  # after a cursor update, the stream waits this long to send the room's pointer moves together
 
@@ -284,6 +286,10 @@ class AlchemyServer(ThreadingHTTPServer):
         self.ticket_throttle = Throttle(30, 60.0)    # tickets one player token may ask for per minute (a reconnect needs one)
         self.max_connections = MAX_CONNECTIONS       # see --max-connections
         self.open_connections = 0
+        self.per_peer: dict[str, int] = {}           # open connections by directly connected address (never counts trusted proxies)
+        self.client_streams: dict[str, int] = {}     # open event streams by client address bucket
+        self.max_per_peer = MAX_CONNECTIONS_PER_PEER
+        self.max_streams_per_client = MAX_STREAMS_PER_CLIENT
         self.trusted_proxies: list = []              # addresses whose X-Forwarded-* headers are believed (--trusted-proxy)
         self.client_ip_header = ""                   # a header holding the client's address, set by the proxy (--client-ip-header)
 
@@ -291,12 +297,26 @@ class AlchemyServer(ThreadingHTTPServer):
         with self._stats_lock:
             self.stats[counter] += 1
 
+    def _peer_key(self, client_address: Any) -> str | None:
+        """The directly connected address as a counting key, or None for a trusted proxy (all players arrive through it)."""
+        try:
+            peer = ipaddress.ip_address(str(client_address[0]))
+        except (ValueError, IndexError, TypeError):
+            return None
+        if any(peer in net for net in self.trusted_proxies):
+            return None
+        return throttle_key(str(peer))
+
     def process_request(self, request: Any, client_address: Any) -> None:
-        """Start a thread for the connection, unless this many are already open (then it is closed at once)."""
+        """Start a thread for the connection, unless too many are already open (then it is closed at once)."""
+        peer = self._peer_key(client_address)
         with self._stats_lock:
-            full = self.open_connections >= self.max_connections
+            full = (self.open_connections >= self.max_connections
+                    or (peer is not None and self.per_peer.get(peer, 0) >= self.max_per_peer))
             if not full:
                 self.open_connections += 1
+                if peer is not None:
+                    self.per_peer[peer] = self.per_peer.get(peer, 0) + 1
         if full:
             self.bump("connections_refused")
             if not isinstance(request, ssl.SSLSocket):   # a TLS socket would start a handshake here, in the accept loop
@@ -310,18 +330,38 @@ class AlchemyServer(ThreadingHTTPServer):
         try:
             super().process_request(request, client_address)
         except BaseException:
-            self._connection_closed()
+            self._connection_closed(peer)
             raise
 
     def process_request_thread(self, request: Any, client_address: Any) -> None:
         try:
             super().process_request_thread(request, client_address)
         finally:
-            self._connection_closed()
+            self._connection_closed(self._peer_key(client_address))
 
-    def _connection_closed(self) -> None:
+    def _connection_closed(self, peer: str | None = None) -> None:
         with self._stats_lock:
             self.open_connections -= 1
+            if peer is not None and peer in self.per_peer:
+                self.per_peer[peer] -= 1
+                if self.per_peer[peer] <= 0:
+                    del self.per_peer[peer]
+
+    def claim_stream(self, bucket: str) -> bool:
+        """Count one more open event stream for this client; False if it already has its share."""
+        with self._stats_lock:
+            if self.client_streams.get(bucket, 0) >= self.max_streams_per_client:
+                return False
+            self.client_streams[bucket] = self.client_streams.get(bucket, 0) + 1
+            return True
+
+    def release_stream(self, bucket: str) -> None:
+        with self._stats_lock:
+            left = self.client_streams.get(bucket, 0) - 1
+            if left > 0:
+                self.client_streams[bucket] = left
+            else:
+                self.client_streams.pop(bucket, None)
 
     def handle_error(self, request: Any, client_address: Any) -> None:
         if isinstance(sys.exc_info()[1], (ConnectionError, TimeoutError, ssl.SSLError)):
@@ -1167,8 +1207,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def _events(self, game: GameState, slug: str, query: dict[str, list[str]]) -> None:
         token = self.server.tickets.redeem(query.get("ticket", [""])[0], slug)
-        sub = game.subscribe(token) if token else None
+        bucket = throttle_key(self._client())
+        if not self.server.claim_stream(bucket):
+            self.server.bump("streams_refused")
+            raise GameError(429, "too many open connections from your address; close some tabs and try again")
+        try:
+            sub = game.subscribe(token) if token else None
+        except BaseException:
+            self.server.release_stream(bucket)
+            raise
         if sub is None:
+            self.server.release_stream(bucket)
             raise GameError(403, "unknown player")
         self.close_connection = True
         tune_socket(self.connection)
@@ -1208,6 +1257,7 @@ class Handler(BaseHTTPRequestHandler):
             pass  # client went away
         finally:
             game.unsubscribe(sub)
+            self.server.release_stream(bucket)
 
 
 def broad_proxy_trust(networks: list) -> bool:
@@ -1314,6 +1364,10 @@ def main() -> int:
                         help="running games one account may have started at once (default 1; 0 for no limit)")
     parser.add_argument("--max-games", type=int, default=MAX_GAMES,
                         help=f"how many games may run at once (default {MAX_GAMES}); daily challenges and races do not count")
+    parser.add_argument("--max-connections-per-address", type=int, default=MAX_CONNECTIONS_PER_PEER,
+                        help=f"the most connections one directly connected address may hold open; a trusted proxy is exempt (default {MAX_CONNECTIONS_PER_PEER})")
+    parser.add_argument("--max-streams-per-client", type=int, default=MAX_STREAMS_PER_CLIENT,
+                        help=f"the most event streams one client address (seen through the proxy) may hold open (default {MAX_STREAMS_PER_CLIENT})")
     parser.add_argument("--max-connections", type=int, default=MAX_CONNECTIONS,
                         help=f"the most connections open at once, event streams included; others are turned away (default {MAX_CONNECTIONS})")
     parser.add_argument("--log-file", help="write the server's messages (logins, failures, admin actions) to this file, "
@@ -1350,6 +1404,8 @@ def main() -> int:
         print(f"cannot listen on {args.host}:{args.port}: {exc}", file=sys.stderr)
         return 1
     server.max_connections = max(10, args.max_connections)
+    server.max_per_peer = max(2, args.max_connections_per_address)
+    server.max_streams_per_client = max(1, args.max_streams_per_client)
     if args.require_invite:
         server.invites = InviteStore(args.invites_file)
     if args.turnstile_site_key:
