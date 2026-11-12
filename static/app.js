@@ -1392,7 +1392,7 @@ let tutorialPage = 0;
 
 function showTutorialPage(n) {
   tutorialPage = Math.max(0, Math.min(TUTORIAL_PAGES.length - 1, n));
-  TUTORIAL_PAGES.forEach((page, i) => { page.hidden = i !== tutorialPage; });
+  TUTORIAL_PAGES.forEach((page, i) => page.classList.toggle("off", i !== tutorialPage));
   $("hint-tutorial-step").textContent = `${tutorialPage + 1} of ${TUTORIAL_PAGES.length}`;
   $("hint-tutorial-back").classList.toggle("invisible", tutorialPage === 0);   // keeps its place, so Next never moves
   $("hint-tutorial-back").disabled = tutorialPage === 0;                       // and cannot be tabbed to while unseen

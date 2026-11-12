@@ -942,7 +942,7 @@ body.notfound { font: 16px system-ui; max-width: 30rem; margin: 4rem auto; paddi
 /* All the guide's pages share one grid cell, so the dialog is as tall as the tallest page and the buttons stay put. */
 .tutorial-pages { display: grid; }
 .tutorial-page { grid-area: 1 / 1; }
-.tutorial-page[hidden] { display: block; visibility: hidden; }
+.tutorial-page.off { visibility: hidden; }   /* not [hidden]: that is display:none, which would take the page out of the shared cell */
 .invisible { visibility: hidden; }
 .tutorial-list li { margin: 6px 0; }
 
