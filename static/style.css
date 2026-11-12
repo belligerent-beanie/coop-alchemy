@@ -804,7 +804,7 @@ button.collection-tile:hover { border-color: var(--accent); }
 .daily-board { margin: 0; padding-left: 1.4rem; line-height: 1.7; }
 .daily-board .me { font-weight: 600; }
 .challenge-bar { padding: 6px 14px; background: var(--accent); color: #fff; font-size: 0.95rem; }
-.challenge-bar .muted { color: inherit; opacity: 0.85; }
+.challenge-bar .muted, #challenge .muted, #race .muted { color: #fff; opacity: 0.9; }   /* the id selectors beat a grey .muted set elsewhere, which was nearly invisible on the orange bar */
 #challenge-done { max-width: 26rem; }
 
 /* ---- daily challenge, tiers ---- */
