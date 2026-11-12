@@ -1394,7 +1394,8 @@ function showTutorialPage(n) {
   tutorialPage = Math.max(0, Math.min(TUTORIAL_PAGES.length - 1, n));
   TUTORIAL_PAGES.forEach((page, i) => { page.hidden = i !== tutorialPage; });
   $("hint-tutorial-step").textContent = `${tutorialPage + 1} of ${TUTORIAL_PAGES.length}`;
-  $("hint-tutorial-back").hidden = tutorialPage === 0;
+  $("hint-tutorial-back").classList.toggle("invisible", tutorialPage === 0);   // keeps its place, so Next never moves
+  $("hint-tutorial-back").disabled = tutorialPage === 0;                       // and cannot be tabbed to while unseen
   const last = tutorialPage === TUTORIAL_PAGES.length - 1;
   $("hint-tutorial-next").hidden = last;
   $("hint-tutorial-done").hidden = !last;
@@ -1413,6 +1414,7 @@ function closeHintTutorial() {
   $("hint-tutorial").close();
   try { localStorage.setItem(tutorialKey(), "1"); } catch (_) { /* private window: the guide shows again next time */ }
   $("hints").open = true;   // point at the panel the guide just described
+  $("hints").querySelector("summary").focus();   // a closed dialog hands focus back to nothing: put it on the panel instead
 }
 
 /** The first time an account opens a solo game, the hint guide appears by itself. */
@@ -1846,8 +1848,8 @@ $("cat").addEventListener("click", () => {
     me.name = name;
     showApp();
     connect();
-  } else if (GAME_ID.startsWith("race-")) {
-    // A racer's world is theirs alone and the race is already on: no "Join" step.
+  } else if (GAME_ID.startsWith("race-") || GAME_ID.startsWith("solo-")) {
+    // A racer's or solo player's world is theirs alone and already open: no "Join" step.
     loaded.then(() => $("join-form").requestSubmit());
   }
 })();

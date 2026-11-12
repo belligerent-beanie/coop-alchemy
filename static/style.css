@@ -939,6 +939,11 @@ body.notfound { font: 16px system-ui; max-width: 30rem; margin: 4rem auto; paddi
 .solo-hints { margin: 10px 0; }
 .hint-reward { font-weight: 600; color: #d9731a; }
 .tutorial-list { padding-left: 1.2rem; }
+/* All the guide's pages share one grid cell, so the dialog is as tall as the tallest page and the buttons stay put. */
+.tutorial-pages { display: grid; }
+.tutorial-page { grid-area: 1 / 1; }
+.tutorial-page[hidden] { display: block; visibility: hidden; }
+.invisible { visibility: hidden; }
 .tutorial-list li { margin: 6px 0; }
 
 /* ---- "?" help tips: a small button whose explanation shows on hover, focus or tap (static/help.js) ---- */
