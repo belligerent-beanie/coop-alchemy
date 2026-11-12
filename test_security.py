@@ -367,6 +367,109 @@ class BreachCheckTests(unittest.TestCase):
         self.assertFalse(accounts.password_breached("carol"))
 
 
+class CookieSessionTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.server, cls.port = serve(GameRegistry(load_recipes(RECIPES), max_games=10))
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def raw(self, method: str, path: str, body: dict | None = None, headers: dict[str, str] | None = None):
+        """(status, parsed json, Set-Cookie lines) for a request that carries only the headers given (no automatic X-Session)."""
+        import json
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        sent = dict(headers or {})
+        payload = None
+        if body is not None:
+            payload = json.dumps(body).encode()
+            sent["Content-Type"] = "application/json"
+        conn.request(method, path, body=payload, headers=sent)
+        resp = conn.getresponse()
+        data = resp.read()
+        cookies = [value for name, value in resp.getheaders() if name.lower() == "set-cookie"]
+        conn.close()
+        return resp.status, (json.loads(data) if data[:1] in (b"{", b"[") else data), cookies
+
+    def login(self, name: str = "cookieuser") -> tuple[str, str]:
+        body = {"username": name, "password": f"password-{name}"}
+        status, data, cookies = self.raw("POST", "/register", body)
+        if status == 409:
+            status, data, cookies = self.raw("POST", "/login", body)
+        self.assertEqual(status, 200)
+        return data["session"], cookies[0]
+
+    def test_login_sets_an_httponly_samesite_cookie(self) -> None:
+        token, line = self.login()
+        self.assertTrue(line.startswith(f"alchemy_session={token};"))
+        for part in ("HttpOnly", "SameSite=Lax", "Path=/", "Max-Age=1209600"):
+            self.assertIn(part, line)
+        self.assertNotIn("Secure", line)   # plain http (a LAN): a Secure cookie would be refused
+
+    def test_the_cookie_is_secure_when_the_site_is_https(self) -> None:
+        server = self.server
+        saved = server.public_base
+        self.addCleanup(lambda: setattr(server, "public_base", saved))
+        server.public_base = "https://alchemy.example"
+        self.assertIn("; Secure", self.login("cookieuser2")[1])
+
+    def test_the_cookie_alone_logs_you_in_and_logout_clears_it(self) -> None:
+        token, _ = self.login()
+        cookie = {"Cookie": f"alchemy_session={token}"}
+        status, me, _ = self.raw("GET", "/me", headers=cookie)
+        self.assertEqual((status, me["username"]), (200, "cookieuser"))
+        status, _, cleared = self.raw("POST", "/logout", {}, headers=cookie)
+        self.assertEqual(status, 200)
+        self.assertTrue(cleared and "Max-Age=0" in cleared[0] and cleared[0].startswith("alchemy_session=;"))
+        self.assertEqual(self.raw("GET", "/me", headers=cookie)[0], 401)   # the session is really gone, not just the cookie
+
+    def test_the_header_still_works_for_api_clients_and_wins_over_the_cookie(self) -> None:
+        token, _ = self.login()
+        self.assertEqual(self.raw("GET", "/me", headers={"X-Session": token})[0], 200)
+        status, _, _ = self.raw("GET", "/me", headers={"X-Session": "bogus", "Cookie": f"alchemy_session={token}"})
+        self.assertEqual(status, 401)
+
+    def test_a_dead_cookie_is_refused_and_cleared(self) -> None:
+        status, _, cookies = self.raw("GET", "/me", headers={"Cookie": "alchemy_session=nonsense"})
+        self.assertEqual(status, 401)
+        self.assertTrue(cookies and "Max-Age=0" in cookies[0])
+
+    def test_junk_in_the_cookie_header_is_harmless(self) -> None:
+        for junk in ("alchemy_session", "alchemy_session=\x01\x02; ;;=", "a=b; alchemy_session=\"unterminated", "\xff" * 5):
+            try:
+                status = self.raw("GET", "/me", headers={"Cookie": junk})[0]
+            except UnicodeEncodeError:
+                continue   # http.client refuses to send it at all
+            self.assertEqual(status, 401)
+
+    def test_an_old_browser_token_is_swapped_for_a_cookie_once(self) -> None:
+        token, _ = self.login()
+        browser = {"X-Session": token, "Sec-Fetch-Site": "same-origin"}
+        status, _, cookies = self.raw("GET", "/me", headers=browser)
+        self.assertEqual(status, 200)
+        self.assertTrue(cookies and cookies[0].startswith(f"alchemy_session={token};"))
+        with_cookie = dict(browser, Cookie=f"alchemy_session={token}")
+        self.assertEqual(self.raw("GET", "/me", headers=with_cookie)[2], [])   # already has it: nothing more is set
+        self.assertEqual(self.raw("GET", "/me", headers={"X-Session": token})[2], [])   # API clients never get cookies pushed on them
+
+    def test_a_cross_site_post_with_the_cookie_is_refused(self) -> None:
+        token, _ = self.login()
+        status, _, _ = self.raw("POST", "/games", {"name": "forged"},
+                                headers={"Cookie": f"alchemy_session={token}", "Origin": "http://evil.example"})
+        self.assertEqual(status, 403)
+
+    def test_changing_the_password_issues_a_new_cookie(self) -> None:
+        token, _ = self.login("cookieuser3")
+        cookie = {"Cookie": f"alchemy_session={token}"}
+        status, data, cookies = self.raw("POST", "/account/change-password",
+                                         {"current": "password-cookieuser3", "new": "a brand new passphrase"}, headers=cookie)
+        self.assertEqual(status, 200)
+        self.assertTrue(cookies[0].startswith(f"alchemy_session={data['session']};"))
+        self.assertEqual(self.raw("GET", "/me", headers=cookie)[0], 401)   # the old session ended
+
+
 class CommonPasswordTests(unittest.TestCase):
     def test_the_list_is_there_and_catches_the_usual_suspects(self) -> None:
         self.assertGreater(len(load_common()), 10_000)

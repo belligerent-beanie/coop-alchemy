@@ -11,8 +11,8 @@ username, which is also their name in games, and a password). Then they can star
 http://<ip>:8000/g/<game-id>, which can be shared directly.
 
 HTTP API
-    Everything except the pages, /register and /login needs the header
-    X-Session: <session token> from /register or /login (401 otherwise).
+    Everything except the pages, /register and /login needs the session from /register or /login (401 otherwise):
+    the header X-Session: <token>, or the HttpOnly cookie alchemy_session that those calls also set (the web pages use the cookie).
     POST /register {"username", "password"}  -> {"session", "username"}   (409 if the name is taken)
     POST /login    {"username", "password"}  -> {"session", "username"}   (401 wrong; 429 after 5 wrong in a row)
     POST /logout   {}                        -> {}
@@ -98,12 +98,13 @@ import sys
 import threading
 import time
 from collections import Counter
+from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from accounts import AccountStore, clean_email, key_of
+from accounts import SESSION_MAX_SECONDS, AccountStore, clean_email, key_of
 from breach import BreachChecker
 from captcha import ORIGIN as TURNSTILE_ORIGIN
 from captcha import Turnstile
@@ -138,6 +139,7 @@ BASE_DIR = Path(__file__).resolve().parent
 MAX_BODY = 4096
 MAX_DRAIN = 65536  # an unread request body up to this size is read and thrown away before the connection closes
 KEEPALIVE_SECONDS = 3  # a closed browser is noticed on the second failed write, so about 6 s
+SESSION_COOKIE = "alchemy_session"   # HttpOnly, so scripts on the page cannot read it; also accepted: an X-Session header (API clients)
 MAX_CONNECTIONS_PER_PEER = 60   # open connections from one directly connected address (not a trusted proxy, which carries everybody)
 MAX_STREAMS_PER_CLIENT = 12     # open event streams for one client address, found through the proxy headers (several players may share one)
 MAX_CONNECTIONS = 600  # open connections at once (each takes a thread; the event streams stay open); more are turned away
@@ -389,7 +391,41 @@ class Handler(BaseHTTPRequestHandler):
         ("Cross-Origin-Opener-Policy", "same-origin"),
     )
 
+    def handle_one_request(self) -> None:
+        self._cookies_out: list[str] = []   # Set-Cookie lines for this request's response only (a connection serves many)
+        super().handle_one_request()
+
+    def _session_token(self) -> tuple[str, bool]:
+        """(the session token the caller sent, whether it came in the cookie). The X-Session header wins if both are present."""
+        header = self.headers.get("X-Session", "")
+        if header:
+            return header, False
+        raw = self.headers.get("Cookie", "")
+        if SESSION_COOKIE in raw:
+            try:
+                jar: SimpleCookie = SimpleCookie()
+                jar.load(raw)
+                if SESSION_COOKIE in jar:
+                    return jar[SESSION_COOKIE].value, True
+            except CookieError:
+                pass
+        return "", False
+
+    def _set_session_cookie(self, token: str) -> None:
+        """Hand the browser its session as an HttpOnly cookie (SameSite=Lax: other sites' requests do not carry it)."""
+        self._cookies_out.append(self._cookie_line(token, int(SESSION_MAX_SECONDS)))
+
+    def _clear_session_cookie(self) -> None:
+        self._cookies_out.append(self._cookie_line("", 0))
+
+    def _cookie_line(self, value: str, max_age: int) -> str:
+        line = f"{SESSION_COOKIE}={value}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax"
+        return line + "; Secure" if self._https() else line   # Secure cookies are refused over plain http, e.g. on a LAN
+
     def end_headers(self) -> None:
+        for line in getattr(self, "_cookies_out", ()):
+            self.send_header("Set-Cookie", line)
+        self._cookies_out = []
         self.send_header("Content-Security-Policy", self.server.csp)
         for name, value in self.SECURITY_HEADERS:
             self.send_header(name, value)
@@ -452,9 +488,15 @@ class Handler(BaseHTTPRequestHandler):
         password (403), so the temporary password is not a working login for anyone who learned it.
         """
         accounts = self.server.accounts
-        name = accounts.username(self.headers.get("X-Session", ""))
+        token, from_cookie = self._session_token()
+        name = accounts.username(token)
         if name is None:
+            if from_cookie:
+                self._clear_session_cookie()   # the server forgot this session: stop sending it
             raise GameError(401, "please log in")
+        if (not from_cookie and token and self.headers.get("Sec-Fetch-Site") == "same-origin"
+                and SESSION_COOKIE not in self.headers.get("Cookie", "")):
+            self._set_session_cookie(token)    # a browser still holding the old localStorage token moves over to the cookie
         if urlsplit(self.path).path not in self.PASSWORD_CHANGE_PATHS and accounts.must_change_password(name):
             raise GameError(403, "an administrator gave you a temporary password: choose your own on the home page first")
         return name
@@ -791,7 +833,8 @@ class Handler(BaseHTTPRequestHandler):
     def _account_action(self, path: str, body: dict[str, Any]) -> None:
         accounts = self.server.accounts
         if path == "/logout":
-            accounts.logout(self.headers.get("X-Session", ""))
+            accounts.logout(self._session_token()[0])
+            self._clear_session_cookie()
             self._json(200, {})
             return
         client = self._client()      # the full address: for logs and for Cloudflare's check
@@ -824,10 +867,13 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/register":
                 username = self._register(body)
                 self.server.bump("registrations")
-                self._json(200, {"session": accounts.session_for(username), "username": username})
+                session = accounts.session_for(username)
+                self._set_session_cookie(session)
+                self._json(200, {"session": session, "username": username})
             else:
                 session, username = accounts.login(body.get("username"), body.get("password"), bucket)
                 self.server.bump("logins")
+                self._set_session_cookie(session)
                 reply: dict[str, Any] = {"session": session, "username": username}
                 if accounts.must_change_password(username):  # an administrator reset it: the page asks for a new one
                     reply["must_change_password"] = True
@@ -961,6 +1007,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/account/change-password":
                 session = accounts.change_password(username, body.get("current"), body.get("new"), bucket)
                 log.info("password changed client=%s user=%s", client, username)
+                self._set_session_cookie(session)
                 self._json(200, {"session": session})
                 return
             accounts.login(username, body.get("password"), bucket)  # 403 or 429 unless the password is right
@@ -977,6 +1024,7 @@ class Handler(BaseHTTPRequestHandler):
         self.server.bump("accounts_deleted")
         registry.evict_account(username)
         log.info("account deleted client=%s user=%s", client, username)
+        self._clear_session_cookie()
         self._json(200, {"deleted": summary.as_json()})
 
     def _send_verification(self, username: str) -> None:

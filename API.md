@@ -12,8 +12,9 @@ this file in the same commit (and add a line to the [change log](#change-log)).
 - **Errors.** Every error is `{"error": "<message for a person>"}` with an HTTP status. Statuses used: `400` bad or missing
   input, `401` not logged in (or a wrong password), `403` not allowed, `404` not found, `409` conflict (name taken, game full,
   limits), `429` too many attempts (see Limits), `500` the server could not save, `503` the human check is unavailable.
-- **Logging in.** `POST /register` or `POST /login` returns a session token. Send it as the header `X-Session: <token>` on every
-  request marked *session* below. Sessions end after 24 hours without use, 14 days after they were made (however often they are used), when the account's password changes, or when the
+- **Logging in.** `POST /register` or `POST /login` returns a session token, and also sets it as an `HttpOnly; SameSite=Lax` cookie
+  (`alchemy_session`, `Secure` over HTTPS), which is what the web pages use. API clients send the token as the header `X-Session: <token>` on every
+  request marked *session* below (the header wins if both are sent). `POST /logout` and `POST /account/delete` clear the cookie. Sessions end after 24 hours without use, 14 days after they were made (however often they are used), when the account's password changes, or when the
   server restarts (a hot reload keeps them).
 - **Game requests.** Joining a game returns a *player token*. Every POST under `/g/<id>` except `/join` carries
   `{"player": "<token>"}` in the body. A player token is not a login: it works only for that game.

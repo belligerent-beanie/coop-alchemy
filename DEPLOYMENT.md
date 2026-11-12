@@ -209,7 +209,7 @@ On Windows a deploy means a restart, which ends every running game.
 | Lockout after 5 wrong passwords, per account **and** client address, so strangers can't lock you out | `accounts.py` |
 | 20 logins/min and 5 signups/10 min per client address | `throttle.py`, `server.py` |
 | CSP (`script-src 'self'`), `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, HSTS behind HTTPS | `server.py` |
-| Cross-site POSTs refused (`Origin` must match `Host`) | `server.py` |
+| Cross-site POSTs refused (`Origin` must match `Host`); the session cookie is `HttpOnly`, `SameSite=Lax`, `Secure` over HTTPS | `server.py` |
 | 30 s read timeout; 4 KB request bodies | `server.py` |
 | Event streams use a one-time, 30-second ticket, never the player token in a URL | `throttle.py`, `server.py`, `static/app.js` |
 | Single-use, hashed invite codes for signup (`--require-invite`) | `invites.py`, `accounts_admin.py` |
@@ -406,11 +406,9 @@ A privacy notice (what you store: username, password hash, game history, IP addr
 and a contact address. If anyone under 13 could play, check COPPA and similar rules. Add a retention rule for logs.
 
 ### Remaining hardening
-- Drop `'unsafe-inline'` from `style-src` once the inline `style=` attributes in the pages and scripts are
-  moved into `style.css`.
-- Session tokens still live in `localStorage`, which any XSS could read. The CSP makes XSS much harder, but
-  moving to an `HttpOnly; Secure; SameSite=Strict` cookie plus a CSRF header would remove the exposure. It's a
-  larger change touching every page.
+- (Done: `style-src` no longer allows `'unsafe-inline'`; sessions live in an `HttpOnly; SameSite=Lax` cookie, `Secure` over HTTPS, so
+  injected script cannot read them, and the page keeps only the username. Cross-site POSTs are still refused by the `Origin` check.
+  The `X-Session` header is still accepted for API clients and bots, so a leaked token from an API client is still a bearer token.)
 - (Done: sessions end after 24 hours idle or 14 days at most, and new passwords are checked against a local list of common ones: `commonpasswords.py`.)
 - Keep Python patched, and run `pip`-free as now: the stdlib-only design means no dependency to track.
 - Run an automated scan (OWASP ZAP) against a staging copy and fix what it finds.

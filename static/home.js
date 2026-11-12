@@ -3,7 +3,7 @@
 const $ = (id) => document.getElementById(id);
 const POLL_MS = 3000;
 
-if (!Auth.token()) Auth.toLogin();
+if (!Auth.loggedIn()) Auth.toLogin();
 $("who").textContent = Auth.user();
 $("logout").addEventListener("click", () => Auth.logout());
 
@@ -442,8 +442,9 @@ $("password-form").addEventListener("submit", async (e) => {
     return;
   }
   try {
-    const data = await Auth.fetch("/account/change-password", { current: $("pw-current").value, new: $("pw-new").value });
-    Auth.set(data.session, Auth.user()); // every other login of this account just ended; this one carries on
+    await Auth.fetch("/account/change-password", { current: $("pw-current").value, new: $("pw-new").value });
+    // every other login of this account just ended; this one carries on with the new cookie the reply set
+    try { localStorage.removeItem("alchemy-session"); } catch (_) { /* an old token would now be refused */ }
     $("password-form").reset();
     accountForced = false;
     $("breach-note").hidden = true;

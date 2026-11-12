@@ -7,7 +7,7 @@ const $ = (id) => document.getElementById(id);
 const REFRESH_MS = 10000;
 const CONFIRM_MS = 4000;
 
-if (!Auth.token()) Auth.toLogin();
+if (!Auth.loggedIn()) Auth.toLogin();
 
 let accounts = [];
 

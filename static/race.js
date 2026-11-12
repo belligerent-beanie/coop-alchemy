@@ -6,7 +6,7 @@
 const $ = (id) => document.getElementById(id);
 const RACE_ID = location.pathname.split("/").pop();
 
-if (!Auth.token()) Auth.toLogin();
+if (!Auth.loggedIn()) Auth.toLogin();
 
 let room = null;
 let timer = null;
