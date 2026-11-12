@@ -1848,8 +1848,8 @@ $("cat").addEventListener("click", () => {
     me.name = name;
     showApp();
     connect();
-  } else if (GAME_ID.startsWith("race-") || GAME_ID.startsWith("solo-")) {
-    // A racer's or solo player's world is theirs alone and already open: no "Join" step.
+  } else if (["race-", "solo-", "daily-"].some((prefix) => GAME_ID.startsWith(prefix))) {
+    // A racer's, solo player's or challenger's world is theirs alone and already open: no "Join" step.
     loaded.then(() => $("join-form").requestSubmit());
   }
 })();
