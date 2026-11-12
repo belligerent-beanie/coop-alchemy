@@ -96,7 +96,7 @@ class SoloGameTests(unittest.TestCase):
         self.registry.start_solo("Alice")
         self.assertEqual(self.registry.solo.delete_user("Alice"), 1)
         self.assertEqual(self.registry.solo.delete_user("Alice"), 0)
-        self.assertEqual(self.registry.solo_status("Alice"), {"found": 0, "total": 0, "complete": False})
+        self.assertEqual(self.registry.solo_status("Alice"), {"found": 0, "total": 0, "complete": False, "hints": 3})
 
     def test_a_solo_game_survives_a_hot_reload(self) -> None:
         game = self.registry.start_solo("Alice")

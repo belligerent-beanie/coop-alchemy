@@ -11,6 +11,25 @@ from recipes import RecipeBook
 
 UNREACHABLE = 10**9
 
+STARTING_HINTS = 3      # every account starts Solo with this many hints; there is no daily refill
+MAX_HINTS = 99          # what an account can hold at most
+HINT_REWARD_MIN_STREAK = 2   # a finished daily challenge earns a hint once the streak (today included) is this many days
+
+
+class LocalWallet:
+    """A hint balance kept in memory: for a solo game that is not tied to an account store (tests)."""
+
+    def __init__(self, balance: int = STARTING_HINTS) -> None:
+        self._balance = balance
+
+    def balance(self) -> int:
+        return self._balance
+
+    def spend(self) -> int:
+        """Use one hint; returns what is left (never below zero)."""
+        self._balance = max(0, self._balance - 1)
+        return self._balance
+
 
 def new_combinations(book: RecipeBook, discovered: Iterable[str]) -> list[tuple[str, str, str]]:
     """Every (a, b, result) that can be made right now and gives something not yet discovered."""

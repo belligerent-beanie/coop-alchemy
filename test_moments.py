@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import random
 import tempfile
 import unittest
@@ -11,6 +12,7 @@ from typing import Any
 from achievements import ACHIEVEMENTS, Progress, earned_ids
 from emotes import EMOTE_IDS, EMOTES
 from games import GameRegistry
+from hints import MAX_HINTS
 from solo import SoloStore
 from state import GameError, GameState
 from test_coop import RECIPES, drain, load_recipes, names
@@ -228,34 +230,62 @@ class SoloHintTests(unittest.TestCase):
         game._today = lambda: self.day[0]
         return game, game.join("Alice").token
 
-    def test_one_hint_a_day_and_a_new_one_tomorrow(self) -> None:
+    def test_everyone_starts_with_three_hints_and_there_is_no_daily_refill(self) -> None:
         game, token = self.start()
-        self.assertEqual(game._hints_left(), 1)
-        first = game.hint(token, "can_make")
-        self.assertEqual(first["hints_left"], 0)
-        self.assertNotIn("useful", first)
+        self.assertEqual(game._hints_left(), 3)
+        self.assertEqual(game.hint(token, "can_make")["hints_left"], 2)
+        self.assertEqual(game.hint(token, "try")["hints_left"], 1)
+        self.assertEqual(game.hint(token, "can_make")["hints_left"], 0)
         with self.assertRaises(GameError) as caught:
             game.hint(token, "try")
         self.assertEqual(caught.exception.status, 429)
-        self.day[0] = "2026-11-08"
-        self.assertEqual(game.hint(token, "try")["hints_left"], 0)
+        self.assertIn("daily challenge", caught.exception.message)   # the error says how to earn more
+        self.day[0] = "2026-11-08"                                   # a new day gives nothing
+        with self.assertRaises(GameError):
+            game.hint(token, "try")
 
     def test_a_hint_that_found_nothing_is_not_used_up(self) -> None:
         game, token = self.start()
         with self.assertRaises(GameError) as caught:
             game.hint(token, "find", "unicorn")
         self.assertEqual(caught.exception.status, 404)
-        self.assertEqual(game.hint(token, "find", "water")["hints_left"], 1)   # a starting element: nothing to tell
-        self.assertEqual(game._hints_left(), 1)
-        self.assertEqual(game.hint(token, "can_make")["hints_left"], 0)
+        self.assertEqual(game.hint(token, "find", "water")["hints_left"], 3)   # a starting element: nothing to tell
+        self.assertEqual(game._hints_left(), 3)
+        self.assertEqual(game.hint(token, "can_make")["hints_left"], 2)
 
-    def test_the_day_is_remembered_across_a_restart_and_earns_an_achievement(self) -> None:
+    def test_the_balance_is_remembered_across_a_restart_and_earns_an_achievement(self) -> None:
         game, token = self.start()
         game.hint(token, "can_make")
         again, token = self.start()
-        with self.assertRaises(GameError):
-            again.hint(token, "can_make")
+        self.assertEqual(again._hints_left(), 2)
         self.assertIn("hint", SoloStore(self.file).achievements("Alice"))
+        self.assertEqual(SoloStore(self.file).hints("Alice"), 2)   # it lives with the account, not the running game
+        self.assertEqual(SoloStore(self.file).hints("Bob"), 3)     # a new account starts with three
+
+    def test_an_account_that_played_before_hints_were_counted_gets_three(self) -> None:
+        self.file.write_text(json.dumps({"version": 1, "users": {"alice": {
+            "complete": False, "game": {"discovered": {}, "hints": {"day": "2026-11-06", "used": 1, "total": 5}}}}}), encoding="utf-8")
+        game, token = self.start()
+        self.assertEqual(game._hints_left(), 3)
+
+    def test_rewards_need_a_streak_pay_once_per_challenge_and_stop_at_the_cap(self) -> None:
+        store = SoloStore(None)
+        self.assertIsNone(store.reward_hint("Alice", "2026-11-07:easy", 1))     # no streak yet
+        self.assertEqual(store.hints("Alice"), 3)
+        self.assertEqual(store.reward_hint("Alice", "2026-11-07:easy", 2), 4)
+        self.assertIsNone(store.reward_hint("Alice", "2026-11-07:easy", 5))     # the same challenge never pays twice
+        self.assertEqual(store.reward_hint("alice", "2026-11-07:hard", 3), 5)   # another tier does; names ignore case
+        for i in range(200):
+            store.reward_hint("Alice", f"2026-12-{i}:easy", 9)
+        self.assertEqual(store.hints("Alice"), MAX_HINTS)
+
+    def test_spending_the_last_hint_is_refused(self) -> None:
+        store = SoloStore(None)
+        for left in (2, 1, 0):
+            self.assertEqual(store.spend_hint("Alice"), left)
+        with self.assertRaises(GameError) as caught:
+            store.spend_hint("Alice")
+        self.assertEqual(caught.exception.status, 429)
 
     def test_shared_games_have_unlimited_hints_and_no_counter(self) -> None:
         game = GameState(self.book, rng=random.Random(1))

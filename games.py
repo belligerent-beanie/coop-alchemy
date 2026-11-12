@@ -144,7 +144,7 @@ class GameRegistry:
                     return game
             slug = next(s for s in (f"solo-{secrets.token_hex(4)}" for _ in range(100)) if s not in self._games)
             game = GameState(self.book, pictures=self.pictures, visitors=self.visitors, profile=self._profile, name=f"Solo: {username}", slug=slug, creator=username, clock=self._clock,
-                             solo=self._solo_saver(username))
+                             solo=self._solo_saver(username), hint_wallet=self.solo.wallet(username))
             game.restore(self.solo.load(username))
             game.report_solo()   # so the status is right before the first discovery
             self._games[slug] = game
@@ -157,7 +157,7 @@ class GameRegistry:
 
     def solo_status(self, username: str) -> dict[str, Any]:
         """{"found", "total", "complete"}: the account's solo progress. A running game is more up to date than the file."""
-        return self.solo.status(username)
+        return {**self.solo.status(username), "hints": self.solo.hints(username)}
 
     def overview(self) -> list[dict[str, Any]]:
         """Every running game for the administrator: its summary, its kind (game, daily or race) and whether it is private."""
@@ -231,7 +231,9 @@ class GameRegistry:
 
     def _challenge(self, date: str, tier: str, target: str, reference: int | None) -> Challenge:
         return Challenge(date, target, reference, lambda name, score: self.daily.submit(date, tier, name, score), tier,
-                         lambda name: self.daily.streak(name)["best"])
+                         lambda name: self.daily.streak(name)["best"],
+                         reward_hint=lambda name, streak: self.solo.reward_hint(name, f"{date}:{tier}", streak),
+                         current_streak=lambda name: self.daily.streak(name)["current"])
 
     def _attempts(self, username: str) -> list[GameState]:
         """This account's daily challenge attempts that are still running (call with the lock held)."""
@@ -401,7 +403,8 @@ class GameRegistry:
                                                 and not isinstance(reference, bool) else None)
                 solo = self._solo_saver(creator) if data.get("solo") is True and creator else None
                 game = GameState(self.book, pictures=self.pictures, visitors=self.visitors, profile=self._profile, name=name, slug=slug, creator=creator, clock=self._clock,
-                                 challenge=challenge, solo=solo)
+                                 challenge=challenge, solo=solo,
+                                 hint_wallet=self.solo.wallet(creator) if solo is not None else None)
                 game.live_restore(data)
                 self._games[slug] = game
                 restored += 1

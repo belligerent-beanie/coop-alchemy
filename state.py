@@ -30,7 +30,7 @@ import notes
 from achievements import Progress, earned_ids
 from achievements import one as achievement_json
 from emotes import EMOTE_GAP_SECONDS, EMOTE_IDS
-from hints import find_element, hint_can_make, hint_recipe, hint_try
+from hints import LocalWallet, find_element, hint_can_make, hint_recipe, hint_try
 from pictures import PictureIndex
 from recipes import RecipeBook, depths
 from visitor import MR_ALCHEMY, VisitorPolicy, pick_gift
@@ -43,7 +43,6 @@ MAX_PLAYERS = 5
 # (keeping the same colour) as long as the seat and name are still free.
 JOIN_GRACE_SECONDS = 30.0
 MAX_TILES = 300
-SOLO_HINTS_PER_DAY = 1    # a solo game's hints: this many a day, per account
 RARITY_CUTS = (0.5, 0.8, 0.95)   # an element is uncommon / rare / epic from these fractions of the depth ranking up
 QUEUE_SIZE = 256
 
@@ -106,6 +105,9 @@ class Challenge:
     on_finish: Callable[[str, int], None] | None = None
     tier: str = "medium"           # easy, medium or hard
     streak: Callable[[str], int] | None = None   # the account's best run of days with a finished challenge, for achievements
+    # reward_hint(username, current streak) pays a solo hint if this finish earns one and returns the new balance, else None
+    reward_hint: Callable[[str, int], int | None] | None = None
+    current_streak: Callable[[str], int] | None = None   # days in a row up to today, for the hint reward
 
 
 @dataclass(frozen=True)
@@ -166,6 +168,7 @@ class GameState:
                  challenge: Challenge | None = None, race: Race | None = None,
                  solo: Callable[[dict[str, Any], int, int, bool, set[str]], list[str]] | None = None,
                  today: Callable[[], str] | None = None,
+                 hint_wallet: Any = None,
                  pictures: PictureIndex | None = None,
                  visitors: VisitorPolicy | None = None,
                  profile: Callable[[str, dict[str, int], dict[str, int]], list[str]] | None = None) -> None:
@@ -203,7 +206,9 @@ class GameState:
         depth_ranking = sorted(self._depth.values())
         self._rarity_at = tuple(depth_ranking[min(len(depth_ranking) - 1, int(len(depth_ranking) * q))]
                                 for q in RARITY_CUTS) if depth_ranking else (1, 1, 1)
-        self._hints = {"day": "", "used": 0, "total": 0}   # a solo game's hint of the day
+        self._wallet = hint_wallet or LocalWallet()        # a solo game's hints left (an account-wide balance, see solo.py)
+        self._hints = {"total": 0}                         # hints this solo game has used, for the achievement
+        self._hint_reward: dict[str, int] | None = None    # set when finishing this challenge paid a hint
         self._stats: dict[str, dict[str, int]] = {}        # casefolded player name -> {"tries", "misses"}, for the awards
         self._first_finder: str | None = None              # who made the game's first discovery
         self._emote_at: dict[str, float] = {}              # pid -> when they last sent an emote
@@ -488,6 +493,13 @@ class GameState:
                     print(f"warning: could not work out the daily streak: {exc}", file=sys.stderr)
                 self._account(player.name, {"daily_done": 1, **({"daily_hard": 1} if self.challenge.tier == "hard" else {})},
                               {"daily_streak": streak})
+                if self.challenge.reward_hint is not None and self.challenge.current_streak is not None:
+                    try:
+                        paid = self.challenge.reward_hint(player.name, self.challenge.current_streak(player.name))
+                        if paid is not None:
+                            self._hint_reward = {"earned": 1, "hints": paid}
+                    except Exception as exc:  # a reward that cannot be paid must not break the game
+                        print(f"warning: could not pay the daily streak hint: {exc}", file=sys.stderr)
         if self.race is not None and new:
             count = len(self._discovered)
             reached = (self.race.target in self._discovered) if self.race.goal == "target" \
@@ -519,7 +531,8 @@ class GameState:
             self._publish("race_won", {"name": player.name})
         if self.challenge is not None and self._result is not None and self.challenge.target in new:
             self._publish("challenge_done", {"score": self._result, "reference": self.challenge.reference,
-                                             "target": self._element_json(self.challenge.target)})
+                                             "target": self._element_json(self.challenge.target),
+                                             **({"hint_reward": self._hint_reward} if self._hint_reward else {})})
 
     def _collectable(self) -> set[str]:
         """Every element a player can end up with: what recipes can make, and Time, which is unlocked for free."""
@@ -877,12 +890,8 @@ class GameState:
                 self._genie_used = max(0, min(used, total))
             self._unlock_time()  # a saved room that already has enough elements
             hints = data.get("hints")
-            if isinstance(hints, dict):
-                day, used, total = hints.get("day"), hints.get("used"), hints.get("total")
-
-                def count(n: object) -> int:
-                    return n if isinstance(n, int) and not isinstance(n, bool) and n >= 0 else 0
-                self._hints = {"day": day if isinstance(day, str) else "", "used": count(used), "total": count(total)}
+            total = hints.get("total") if isinstance(hints, dict) else None
+            self._hints = {"total": total if isinstance(total, int) and not isinstance(total, bool) and total >= 0 else 0}
             names = data.get("players")
             if isinstance(names, list):
                 self._player_names = [n[:MAX_NAME_LEN] for n in names if isinstance(n, str) and n.strip()][:50]
@@ -1221,7 +1230,7 @@ class GameState:
             if self.private and self.solo is None:   # a solo game is private but is allowed its hints
                 raise GameError(403, "hints are switched off in the daily challenge and in races")
             if self.solo is not None and self._hints_left() <= 0:
-                raise GameError(429, "you have used today's hint in Solo: a new one comes tomorrow")
+                raise GameError(429, "you are out of hints: finish a daily challenge on a streak of two days or more to earn another")
             answer = self._hint(kind, target)
             if self.solo is not None:
                 if answer.pop("useful"):   # a hint that found nothing does not use up the day's hint
@@ -1232,15 +1241,11 @@ class GameState:
             return answer
 
     def _hints_left(self) -> int:
-        """Solo hints still available today (the count starts again each day, UTC)."""
-        used = self._hints["used"] if self._hints["day"] == self._today() else 0
-        return max(0, SOLO_HINTS_PER_DAY - used)
+        """Solo hints this account still has."""
+        return self._wallet.balance()
 
     def _use_hint(self) -> None:
-        today = self._today()
-        if self._hints["day"] != today:
-            self._hints["day"], self._hints["used"] = today, 0
-        self._hints["used"] += 1
+        self._wallet.spend()
         self._hints["total"] += 1
         self.report_solo()
 

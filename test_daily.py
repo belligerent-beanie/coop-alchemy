@@ -232,6 +232,48 @@ class DailyStoreTests(unittest.TestCase):
             self.assertEqual(err.exception.status, 500)
 
 
+class HintRewardTests(unittest.TestCase):
+    """Finishing a daily challenge pays one solo hint when the streak, today included, is at least two days."""
+
+    def setUp(self) -> None:
+        self.store = seeded_store()
+        self.registry = GameRegistry(BOOK, max_games=5, daily=self.store)
+
+    def finish(self, tier: str, fresh: bool = False) -> list[tuple[str, Any]]:
+        game = self.registry.start_daily("Ann", tier, fresh=fresh)
+        player = game.join("Ann")
+        sub = game.subscribe(player.token)
+        assert sub
+        drain(sub)
+        for a, b, _ in ROUTES[tier][2]:
+            first = game.add_tile(player.token, a, 0.2, 0.2)
+            second = game.add_tile(player.token, b, 0.6, 0.6)
+            game.grab_tile(player.token, first["id"])
+            game.combine(player.token, second["id"], tile=first["id"], x=0.6, y=0.6)
+        return drain(sub)
+
+    def reward(self, events: list[tuple[str, Any]]) -> Any:
+        done = [data for name, data in events if name == "challenge_done"]
+        return done[0].get("hint_reward") if done else "no event"
+
+    def test_a_first_day_pays_nothing(self) -> None:
+        self.assertIsNone(self.reward(self.finish("easy")))
+        self.assertEqual(self.registry.solo.hints("Ann"), 3)
+
+    def test_a_streak_of_two_days_pays_one_hint_per_challenge_per_day(self) -> None:
+        put(self.store, "2026-11-03", "easy", {"Ann": (1, 5)})            # she played yesterday
+        self.assertEqual(self.reward(self.finish("easy")), {"earned": 1, "hints": 4})
+        self.assertEqual(self.registry.solo.hints("Ann"), 4)
+        self.assertIsNone(self.reward(self.finish("easy", fresh=True)))   # playing the same challenge again pays nothing
+        self.assertEqual(self.reward(self.finish("medium")), {"earned": 1, "hints": 5})   # another challenge does
+        self.assertEqual(self.registry.solo.hints("Ann"), 5)
+
+    def test_a_missed_day_breaks_the_streak(self) -> None:
+        put(self.store, "2026-11-02", "easy", {"Ann": (1, 5)})            # two days ago, nothing yesterday
+        self.assertIsNone(self.reward(self.finish("easy")))
+        self.assertEqual(self.registry.solo.hints("Ann"), 3)
+
+
 class ChallengeGameTests(unittest.TestCase):
     def setUp(self) -> None:
         self.store = seeded_store()

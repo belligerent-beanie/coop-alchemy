@@ -16,7 +16,10 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from accounts import key_of
+from hints import HINT_REWARD_MIN_STREAK, MAX_HINTS, STARTING_HINTS
 from state import GameError
+
+KEEP_REWARD_KEYS = 120   # daily-challenge rewards remembered per account (so one challenge cannot pay twice)
 
 
 class SoloStore:
@@ -69,7 +72,7 @@ class SoloStore:
             user = data["users"].setdefault(key_of(username), {"complete": False})
             was = bool(user.get("complete"))
             user["game"] = {"discovered": game.get("discovered", {}), "genie": game.get("genie", {}),
-                            "hints": game.get("hints", {})}
+                            "hints": game.get("hints", {})}   # the balance itself lives beside the game (see hints())
             user["found"], user["total"] = found, total
             if complete and not was:
                 user["complete"] = True
@@ -98,6 +101,48 @@ class SoloStore:
     def is_complete(self, username: str) -> bool:
         return self.status(username)["complete"]
 
+    # ---- hints: a balance per account, shared by every solo game and earned in the daily challenge ----------------------------
+
+    def hints(self, username: str) -> int:
+        """Hints this account has left. An account that never spent or earned one has STARTING_HINTS."""
+        with self._lock:
+            user = self._load()["users"].get(key_of(username)) or {}
+            balance = user.get("hints")
+            return balance if isinstance(balance, int) and not isinstance(balance, bool) and balance >= 0 else STARTING_HINTS
+
+    def spend_hint(self, username: str) -> int:
+        """Use one hint; returns what is left. 429 if there are none."""
+        with self._lock:
+            data = self._load()
+            user = data["users"].setdefault(key_of(username), {"complete": False})
+            left = self.hints(username)
+            if left <= 0:
+                raise GameError(429, "you are out of hints: finish a daily challenge on a streak of two days or more to earn another")
+            user["hints"] = left - 1
+            self._save(data)
+            return left - 1
+
+    def reward_hint(self, username: str, key: str, streak: int) -> int | None:
+        """Pay one hint for finishing the daily challenge `key` (e.g. "2026-11-12:easy") while on a streak of at least
+        HINT_REWARD_MIN_STREAK days. Each key pays once. Returns the new balance if a hint was paid, otherwise None."""
+        if streak < HINT_REWARD_MIN_STREAK:
+            return None
+        with self._lock:
+            data = self._load()
+            user = data["users"].setdefault(key_of(username), {"complete": False})
+            paid = user.get("hint_rewards")
+            paid = [k for k in paid if isinstance(k, str)] if isinstance(paid, list) else []
+            if key in paid:
+                return None
+            balance = min(MAX_HINTS, self.hints(username) + 1)
+            user["hints"] = balance
+            user["hint_rewards"] = (paid + [key])[-KEEP_REWARD_KEYS:]
+            self._save(data)
+            return balance
+
+    def wallet(self, username: str) -> "StoreWallet":
+        return StoreWallet(self, username)
+
     def delete_user(self, username: str) -> int:
         """Remove an account's solo progress (used when the account is deleted); returns 1 if there was any."""
         with self._lock:
@@ -106,3 +151,17 @@ class SoloStore:
             if removed is not None:
                 self._save(data)
             return 1 if removed is not None else 0
+
+
+class StoreWallet:
+    """One account's hint balance in a SoloStore, in the shape GameState uses (see hints.LocalWallet)."""
+
+    def __init__(self, store: SoloStore, username: str) -> None:
+        self._store = store
+        self._username = username
+
+    def balance(self) -> int:
+        return self._store.hints(self._username)
+
+    def spend(self) -> int:
+        return self._store.spend_hint(self._username)
