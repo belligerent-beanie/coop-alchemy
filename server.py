@@ -619,6 +619,9 @@ class Handler(BaseHTTPRequestHandler):
                 save = body.get("save")
                 if not isinstance(save, bool):
                     raise GameError(400, "say whether to save the game")
+                ending = self.server.registry.get(match.group(1))
+                if ending is not None:
+                    self._check_account(ending, ending.authorize(body.get("player")))
                 self._json(200, self.server.registry.end(match.group(1), body.get("player"), save))
                 return
             game = self.server.registry.get(match.group(1))
@@ -631,6 +634,7 @@ class Handler(BaseHTTPRequestHandler):
                 token = body.get("player")
                 if not isinstance(token, str):
                     raise GameError(400, "missing player token")
+                self._check_account(game, game.authorize(token))
                 self._json(200, run_action(game, rest, token, body))
         except GameError as exc:
             self._json(exc.status, {"error": exc.message})
@@ -651,6 +655,7 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(token, str):
             raise GameError(400, "missing player token")
         reporter = game.authorize(token)
+        self._check_account(game, reporter)
         target = game.name_of(body.get("target"))
         if target is None:
             raise GameError(404, "that player is not in this game")
@@ -667,12 +672,23 @@ class Handler(BaseHTTPRequestHandler):
             self.server.bump("reports")
             log.info("report: %s about a player (%s)", reason, "with a note" if note else "no note")  # no names in the log
 
+    def _check_account(self, game: GameState, player: Any) -> None:
+        """A player whose account was disabled or deleted after they joined is taken out of the game and refused (403).
+
+        Game requests carry the player's token, not the login session, so ending the session is not enough. People only:
+        computer-controlled players never come through here.
+        """
+        if not self.server.accounts.is_active(player.name):
+            game.kick(player.name)
+            raise GameError(403, "this account can no longer play")
+
     def _event_ticket(self, slug: str, token: object) -> str:
         """A one-time pass for GET /g/<id>/events, so the player token itself never appears in a URL."""
         game = self.server.registry.get(slug)
         if game is None:
             raise GameError(404, "that game does not exist (it may have ended)")
         player = game.authorize(token)
+        self._check_account(game, player)
         wait = self.server.ticket_throttle.allow(player.token)
         if wait:
             raise GameError(429, f"too many reconnects: try again in {int(wait) + 1} seconds")
@@ -846,6 +862,8 @@ class Handler(BaseHTTPRequestHandler):
             return {}
         if action in ("enable", "disable"):
             accounts.set_disabled(username, action == "disable")
+            if action == "disable":
+                server.registry.evict_account(username)   # their login stops at once; so does their seat in a running game
             return {}
         if action == "reset-password":
             temporary = secrets.token_urlsafe(9)
@@ -856,6 +874,7 @@ class Handler(BaseHTTPRequestHandler):
                                 daily=registry.daily, invites=server.invites, reports=server.reports,
                                 solo=registry.solo, profiles=registry.profiles)
         server.bump("accounts_deleted")
+        registry.evict_account(username)
         return {"deleted": summary.as_json()}
 
     def _account_self_service(self, path: str, body: dict[str, Any]) -> None:
@@ -885,6 +904,7 @@ class Handler(BaseHTTPRequestHandler):
                                 daily=registry.daily, invites=self.server.invites, reports=self.server.reports,
                                 solo=registry.solo, profiles=registry.profiles)
         self.server.bump("accounts_deleted")
+        registry.evict_account(username)
         log.info("account deleted client=%s user=%s", client, username)
         self._json(200, {"deleted": summary.as_json()})
 

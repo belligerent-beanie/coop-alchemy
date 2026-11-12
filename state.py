@@ -356,6 +356,34 @@ class GameState:
             if add:
                 self._account(person.name, add)
 
+    def kick(self, name: str) -> int:
+        """Remove the (human) player with this account name: their streams close, their held tiles are put down, their seat is freed.
+
+        Used when the account is disabled or deleted, so it cannot go on playing in a game that is already running.
+        Computer-controlled players are never removed here. Returns how many seats were freed.
+        """
+        wanted = " ".join(str(name).split()).casefold()
+        with self._lock:
+            tokens = [t for t, p in self._players.items() if t not in self._virtual and " ".join(p.name.split()).casefold() == wanted]
+            for token in tokens:
+                player = self._players[token]
+                for sub in [s for s in self._subs if s.player.token == token]:
+                    self._subs.remove(sub)
+                    sub.dead = True
+                    try:
+                        sub.messages.put_nowait(None)
+                    except queue.Full:
+                        pass   # it notices `dead` within a keepalive
+                for tile in self._tiles.values():
+                    if tile.held_by == player.pid:
+                        tile.held_by = None
+                        self._publish("tile_dropped", {"id": tile.id, "x": tile.x, "y": tile.y, "pid": player.pid})
+                self._publish("cursor", {"pid": player.pid, "x": None, "y": None})
+                self._forget(token)
+            if tokens:
+                self._publish("players", {"players": self._online_players()})
+            return len(tokens)
+
     def _forget(self, token: str) -> None:
         player = self._players.pop(token, None)
         self._virtual.pop(token, None)

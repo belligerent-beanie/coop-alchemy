@@ -198,6 +198,12 @@ class GameRegistry:
             raise GameError(404, "that game does not exist (it may have ended)")
         game.close("an administrator", False)
 
+    def evict_account(self, username: str) -> int:
+        """Take an account's player out of every running game (it was disabled or deleted); returns how many seats were freed."""
+        with self._lock:
+            games = list(self._games.values())
+        return sum(game.kick(username) for game in games)
+
     def end(self, slug: str, token: object, save: bool) -> dict[str, Any]:
         """End a running game on behalf of one of its players, optionally saving it first."""
         with self._lock:

@@ -502,6 +502,12 @@ class AccountStore:
             record = self._peek().get(key_of(username))
             return bool(record and record.get("disabled") is True)
 
+    def is_active(self, username: str) -> bool:
+        """True if the account exists and is not disabled (what a running game checks before it obeys one of its players)."""
+        with self._lock:
+            record = self._peek().get(key_of(username))
+            return record is not None and record.get("disabled") is not True
+
     def is_admin(self, username: str) -> bool:
         """True for accounts an administrator has marked as admins (see accounts_admin.py make-admin)."""
         with self._lock:

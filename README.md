@@ -347,6 +347,7 @@ python3 server.py [--host 0.0.0.0] [--port 8000]
 | `--mr-alchemy-chance` | `1` | The chance (0 to 1) that a game gets his visit at all. |
 | `--mr-alchemy-min`, `--mr-alchemy-max` | `4`, `15` | He comes after a random number of minutes in this range, counting only time with two or more players together. |
 | `--max-games` | `3` | How many games may run at once (daily challenges and races do not count). |
+| `--max-connections` | `600` | The most connections open at once, event streams included. More are turned away with a 503, so one visitor cannot use up every server thread. |
 | `--log-file`, `--log-days` | console, 14 | Write the server's messages (logins, failures, admin actions) to a file that starts afresh each midnight, keeping this many days. |
 | `--idle-minutes` | `10` | How long an empty game stays open. |
 | `--drafts-file` | `drafts.json` next to `server.py` | Players' draft recipes and promotion proposals. |

@@ -216,7 +216,7 @@ class UnreadBodyTests(unittest.TestCase):
 class ServerHardeningTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.server, cls.port = serve(GameRegistry(load_recipes(RECIPES), max_games=5))
+        cls.server, cls.port = serve(GameRegistry(load_recipes(RECIPES), max_games=60))
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -393,6 +393,70 @@ class ServerHardeningTests(unittest.TestCase):
         else:
             self.fail("connections were still being refused after the idle ones closed")
         self.assertGreaterEqual(server.stats["connections_refused"], 1)
+
+    # ---- disabled and deleted accounts leave running games ---------------------------------------------
+
+    def seat(self, game: str, name: str) -> tuple[str, str]:
+        """Log `name` in, have them join `game`, and return (their session, their player token)."""
+        session = login_as(self.port, name)
+        status, joined = call(self.port, "POST", f"/g/{game}/join", {}, headers={"X-Session": session})
+        self.assertEqual(status, 200)
+        return session, joined["token"]
+
+    def names_in(self, game: str) -> set[str]:
+        return {p.name for p in self.server.registry.get(game)._players.values()}
+
+    def act(self, game: str, token: str) -> int:
+        return call(self.port, "POST", f"/g/{game}/cursor", {"player": token, "x": 0.5, "y": 0.5})[0]
+
+    def test_disabling_an_account_removes_it_from_a_running_game(self) -> None:
+        self.server.accounts.set_admin("Host", True)
+        self.assertEqual(call(self.port, "POST", "/games", {"name": "banned"})[0], 200)
+        _, host_token = self.seat("banned", "Host")
+        _, troll_token = self.seat("banned", "Troll")
+        stream = self.open_stream("banned", self.ticket("banned", troll_token))
+        stream.recv(4096)
+        self.assertEqual(self.act("banned", troll_token), 200)
+        self.assertEqual(call(self.port, "POST", "/ops/accounts/disable", {"username": "Troll"})[0], 200)
+        self.assertEqual(self.act("banned", troll_token), 403)
+        self.assertTrue(self.until_closed(stream, 8), "their event stream should be closed")
+        self.assertEqual(self.names_in("banned"), {"Host"})
+        self.assertEqual(self.act("banned", host_token), 200)
+        # enabling lets them back in, with a new login and a new seat
+        self.assertEqual(call(self.port, "POST", "/ops/accounts/enable", {"username": "Troll"})[0], 200)
+        _, again = self.seat("banned", "Troll")
+        self.assertEqual(self.act("banned", again), 200)
+
+    def test_deleting_an_account_removes_it_from_a_running_game(self) -> None:
+        self.assertEqual(call(self.port, "POST", "/games", {"name": "deleted"})[0], 200)
+        self.seat("deleted", "Host")
+        session, token = self.seat("deleted", "Leaver")
+        status, _ = call(self.port, "POST", "/account/delete", {"password": "password-Leaver"}, headers={"X-Session": session})
+        self.assertEqual(status, 200)
+        self.assertEqual(self.act("deleted", token), 403)
+        self.assertEqual(self.names_in("deleted"), {"Host"})
+
+    def test_an_account_disabled_by_the_command_line_tool_is_refused_at_the_next_action(self) -> None:
+        self.assertEqual(call(self.port, "POST", "/games", {"name": "offline-ban"})[0], 200)
+        _, token = self.seat("offline-ban", "Cli Victim")
+        self.assertEqual(self.act("offline-ban", token), 200)
+        AccountStore(self.server.accounts.path).set_disabled("Cli Victim", True)   # another process, as accounts_admin.py does
+        self.assertEqual(self.act("offline-ban", token), 403)
+        self.assertEqual(call(self.port, "POST", "/g/offline-ban/ticket", {"player": token})[0], 403)
+        self.assertNotIn("Cli Victim", self.names_in("offline-ban"))
+
+    def test_a_player_held_tile_is_put_down_when_they_are_removed(self) -> None:
+        self.assertEqual(call(self.port, "POST", "/games", {"name": "held"})[0], 200)
+        self.seat("held", "Host")
+        _, token = self.seat("held", "Holder")
+        game = self.server.registry.get("held")
+        element = next(iter(game._discovered))
+        status, tile = call(self.port, "POST", "/g/held/tile/add", {"player": token, "element": element, "x": 0.2, "y": 0.2})
+        self.assertEqual(status, 200)
+        self.assertEqual(call(self.port, "POST", "/g/held/tile/grab", {"player": token, "tile": tile["id"]})[0], 200)
+        self.assertEqual(game.kick("Holder"), 1)
+        self.assertIsNone(game._tiles[tile["id"]].held_by)
+        self.assertEqual(game.kick("Holder"), 0)
 
     def test_a_visitor_on_one_ipv6_64_shares_one_login_limit(self) -> None:
         server = self.server
