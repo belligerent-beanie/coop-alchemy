@@ -160,6 +160,8 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(data["pictures"]["water"], self.index.url_for("water"))   # type: ignore[index]
         self.assertNotIn("water.png", json.dumps(data))
 
+    @unittest.skipUnless((Path(__file__).resolve().parent / "recipes.json").is_file() and (Path(__file__).resolve().parent / "static" / "elements").is_dir(),
+                         "the private recipe book and pictures are not in this checkout")
     def test_the_real_pictures_folder_has_pictures_under_secret_names_only(self) -> None:
         real = load_recipes(Path(__file__).resolve().parent / "recipes.json")
         index = PictureIndex(Path(__file__).resolve().parent / "static" / "elements", real)

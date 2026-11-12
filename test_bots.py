@@ -157,7 +157,10 @@ def real_book() -> Any:
     global REAL
     if REAL is None:
         from pathlib import Path
-        REAL = load_recipes(Path(__file__).resolve().parent / "recipes.json")
+        path = Path(__file__).resolve().parent / "recipes.json"
+        if not path.is_file():   # the real recipe book is private and not in the repository
+            raise unittest.SkipTest("recipes.json is not in this checkout")
+        REAL = load_recipes(path)
     return REAL
 
 

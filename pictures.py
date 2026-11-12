@@ -1,6 +1,6 @@
 """Element pictures, served only to players who have found the element.
 
-Pictures live in static/elements/<name>.png, where <name> is the element's id or its label turned into a slug ("Alarm Clock"
+Pictures live in static/elements/<name>.png (or --elements-dir; the folder is private and not in git), where <name> is the element's id or its label turned into a slug ("Alarm Clock"
 -> alarm-clock.png). If those files were served by name, anyone could list or guess which elements exist, and see them, before
 finding them. So the folder is not served directly: each picture gets an unguessable address, /pic/<token>.png, where the token
 is a keyed hash of the file name, and that address is sent to a page only with the element's own data (the game sends an element

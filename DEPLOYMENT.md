@@ -386,6 +386,9 @@ cursor delay above about 100 ms (run `bench_cursor.py` on the real server), the 
 steps come first: a faster core, a lower cursor rate, then fewer threads; a multi-process redesign is the last resort.
 
 ### Data, backups and storage
+The recipe book and element pictures are private and not in git: in Docker they are `/data/recipes.json` and `/data/elements` (copy them in with
+`docker compose cp`, see the README, "The private recipe book"). Back them up yourself; `ops/backup.py` covers the player data only.
+
 State is in `accounts.json`, `drafts.json`, `daily.json` and `saves/`. Writes are atomic (temp file plus
 `os.replace`) but there is no backup. Run a nightly copy off the machine (the files are small) and test a restore.
 `accounts.json` holds password hashes and should be mode 0600 and owned by the service user. All of it is

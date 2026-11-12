@@ -11,7 +11,9 @@ JavaScript.
 - Python 3.10 or newer (developed and tested on 3.13).
 - A current browser for every player, on a laptop, a tablet or a phone. On a touch screen you tap an element to add it
   and drag tiles together to combine them; the layout changes to suit portrait and landscape.
-- A recipe file (see [Recipes](#recipes)).
+- A recipe file (see [Recipes](#recipes)). The real recipe book and the element pictures are **private**: they are not in the git
+  repository, so a fresh clone has only `test_recipes.json`, a small made-up set that is enough to try the game
+  (`python3 server.py --recipes test_recipes.json`). See [The private recipe book](#the-private-recipe-book).
 
 ## Quick start
 
@@ -327,6 +329,7 @@ python3 server.py [--host 0.0.0.0] [--port 8000]
 | `--host` | `0.0.0.0` | Address to listen on (`127.0.0.1` for this machine only). |
 | `--port` | `8000` | Port to listen on. |
 | `--recipes` | `recipes.json` next to `server.py` | The recipe file. |
+| `--elements-dir` | `static/elements` next to `server.py` | Where the element pictures are (one `<name>.png` each). Not in git, like the recipe file. |
 | `--saves-dir` | `saves` next to `server.py` | Where saved games are kept. |
 | `--accounts-file` | `accounts.json` next to `server.py` | Usernames and password hashes. |
 | `--client-ip-header` | none | Behind a trusted proxy, take the visitor's address from this header (Cloudflare: `CF-Connecting-IP`); otherwise `X-Forwarded-For` is used. |
@@ -432,6 +435,24 @@ Put the server's own LAN address in `subjectAltName`. A certificate you made
 yourself isn't trusted by browsers, so each player sees a warning once and has to
 choose to continue. Everything then works normally, now encrypted. Don't commit
 `key.pem`.
+
+## The private recipe book
+
+`recipes.json` (and the files made from it: `recipes.mmd`, `recipes.svg`, `recipes.html`) and the artists' pictures in `static/elements/` are
+**not in the git repository** (they are in `.gitignore` and `.dockerignore`). The whole game is discovering that book, so anyone who can read the
+repository could read it all. What a clone has instead is `test_recipes.json`, which the tests use.
+
+- **Running it yourself:** put your `recipes.json` next to `server.py` and the pictures in `static/elements/`, or point `--recipes FILE` and
+  `--elements-dir FOLDER` at them.
+- **Docker:** both live in the `/data` volume (`/data/recipes.json`, `/data/elements`), never in the image. Put them there once:
+  `docker compose cp recipes.json alchemy:/data/recipes.json` and `docker compose cp static/elements alchemy:/data/elements`, then
+  `docker compose restart alchemy`.
+- **Back them up yourself.** They are no longer protected by git history, and `ops/backup.py` backs up the player data, not the book.
+  Keep a copy somewhere private (a private repository of their own, or an encrypted backup).
+- **`ops/deploy.py`** leaves the live folder's own `recipes.json` and `static/elements/` alone: it saves them before it moves the live
+  folder to another commit and puts them back afterwards.
+- **History:** the files were public until they were removed, and git remembers them. Anyone who cloned or forked the repository then still has them.
+  Removing them from the history needs a force-push, so it is a separate decision (see `HUMAN_TODO.md`).
 
 ## Recipes
 

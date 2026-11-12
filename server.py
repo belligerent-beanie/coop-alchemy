@@ -1249,6 +1249,9 @@ def main() -> int:
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--recipes", default=str(BASE_DIR / "recipes.json"))
+    parser.add_argument("--elements-dir", default=str(BASE_DIR / "static" / "elements"),
+                        help="where the element pictures are kept, one <name>.png each (default: static/elements); like the recipe file, "
+                             "they are not part of the git repository")
     parser.add_argument("--saves-dir", default=str(BASE_DIR / "saves"),
                         help="where saved games are kept for 3 days (default: ./saves)")
     parser.add_argument("--accounts-file", default=str(BASE_DIR / "accounts.json"),
@@ -1323,11 +1326,14 @@ def main() -> int:
         book = load_recipes(args.recipes)
     except RecipeError as exc:
         print(exc, file=sys.stderr)
+        if not Path(args.recipes).exists():
+            print("The recipe book is private and is not part of the git repository: put your recipes.json next to server.py "
+                  "(or pass --recipes FILE). test_recipes.json is a small made-up set that is enough to try the game.", file=sys.stderr)
         return 1
 
     saves = SaveStore(args.saves_dir)
     registry = GameRegistry(book, max_games=max(1, args.max_games), idle_seconds=args.idle_minutes * 60, saves=saves,
-                            pictures=PictureIndex(BASE_DIR / "static" / "elements", book),
+                            pictures=PictureIndex(Path(args.elements_dir), book),
                             visitors=VisitorPolicy(enabled=args.mr_alchemy == "on", chance=min(1.0, max(0.0, args.mr_alchemy_chance)),
                                                    min_seconds=max(0.0, args.mr_alchemy_min) * 60,
                                                    max_seconds=max(0.0, args.mr_alchemy_max) * 60),

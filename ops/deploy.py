@@ -20,8 +20,10 @@ Every deploy and rollback is appended to <live folder>\\deploys.log.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -39,6 +41,40 @@ from ops import backup as backup_tools  # noqa: E402
 from ops import smoke_test  # noqa: E402
 
 SLOW_TESTS = ("test_aigen.py",)
+# The private recipe book and pictures are not in git, but they were once, and an old commit still has them. Moving the live folder
+# onto a commit that no longer has them would make git delete them, and moving it onto an old one would put old copies back.
+PRIVATE_PATHS = ("recipes.json", "recipes.mmd", "recipes.svg", "recipes.html", "static/elements")
+KEEP_DIR = ".deploy-keep"
+
+
+@contextlib.contextmanager
+def keep_private_files(live_dir: Path):
+    """Whatever git does inside this block, the live folder's own recipe book and pictures are exactly as they were after it."""
+    keep = live_dir / KEEP_DIR
+    shutil.rmtree(keep, ignore_errors=True)
+    saved = [name for name in PRIVATE_PATHS if (live_dir / name).exists()]
+    for name in saved:
+        target = keep / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if (live_dir / name).is_dir():
+            shutil.copytree(live_dir / name, target)
+        else:
+            shutil.copy2(live_dir / name, target)
+    try:
+        yield
+    finally:
+        for name in saved:
+            destination = live_dir / name
+            if destination.is_dir():
+                shutil.rmtree(destination)
+            elif destination.exists():
+                destination.unlink()
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if (keep / name).is_dir():
+                shutil.copytree(keep / name, destination)
+            else:
+                shutil.copy2(keep / name, destination)
+        shutil.rmtree(keep, ignore_errors=True)
 HEALTH_SECONDS = 30.0
 
 
@@ -227,7 +263,8 @@ class Deployer:
 
         self.say("4/6 updating the live folder ...")
         try:
-            git(self.live_dir, "merge", "--ff-only", self.branch)
+            with keep_private_files(self.live_dir):
+                git(self.live_dir, "merge", "--ff-only", self.branch)
         except DeployError as exc:
             self.say(f"NOT DEPLOYED: {exc}")
             return False
@@ -252,7 +289,8 @@ class Deployer:
     def _rollback_to(self, commit: str, why: str) -> bool:
         assert self.restart and self.healthy
         try:
-            git(self.live_dir, "reset", "--hard", commit)
+            with keep_private_files(self.live_dir):
+                git(self.live_dir, "reset", "--hard", commit)
             self.restart()
             problem = self.healthy()
         except Exception as exc:

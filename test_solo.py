@@ -111,6 +111,7 @@ class SoloGameTests(unittest.TestCase):
 
 
 class FreeElementTests(unittest.TestCase):
+    @unittest.skipUnless((Path(__file__).resolve().parent / "recipes.json").is_file(), "the private recipe book is not in this checkout")
     def test_elements_that_need_time_count_towards_the_total(self) -> None:
         """Time is handed out free at 100 elements, and ruins and archeologist are made from it: they must be findable."""
         book = load_recipes(Path(__file__).resolve().parent / "recipes.json")

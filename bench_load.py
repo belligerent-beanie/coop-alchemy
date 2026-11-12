@@ -86,6 +86,12 @@ def parse_scenario(text: str) -> tuple[int, int, int]:
     return int(rooms), int(players), 0
 
 
+def recipe_file(server_dir: Path) -> Path:
+    """The real recipe book if this checkout has it (it is not in git), otherwise the small made-up set."""
+    real = server_dir / "recipes.json"
+    return real if real.is_file() else server_dir / "test_recipes.json"
+
+
 def run_scenario(spec: str, seconds: float, server_dir: Path = BASE_DIR) -> dict[str, Any]:
     rooms, per_room, solo = parse_scenario(spec)
     total = rooms * per_room + solo
@@ -98,7 +104,7 @@ def run_scenario(spec: str, seconds: float, server_dir: Path = BASE_DIR) -> dict
     code = ("import sys; sys.argv = ['server.py'] + sys.argv[1:]; import server, throttle; original = throttle.Throttle; "
             "server.Throttle = lambda limit, window, **kw: original(10**9, window, **kw); sys.exit(server.main())")
     server = subprocess.Popen(
-        [sys.executable, "-c", code, "--host", "127.0.0.1", "--port", str(port), "--recipes", str(server_dir / "recipes.json"),
+        [sys.executable, "-c", code, "--host", "127.0.0.1", "--port", str(port), "--recipes", str(recipe_file(server_dir)),
          "--accounts-file", str(folder / "a.json"), "--saves-dir", str(folder / "saves"), "--drafts-file", str(folder / "d.json"),
          "--daily-file", str(folder / "daily.json"), "--snapshot-file", str(folder / "s.json"), "--pid-file", str(folder / "p.pid"),
          "--reports-file", str(folder / "r.json"), "--max-games", str(max(rooms, 1))],

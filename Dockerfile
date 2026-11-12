@@ -4,7 +4,8 @@
 # keeps accounts and solo progress in /data across a restart, and serves element pictures. Not yet tried on the real server.
 # test_deploy_files.py also checks that every option used below exists.
 #
-# Data (accounts, saved games, logs) lives in the /data volume, never in the image. Extra server options can be added after the
+# Data (accounts, saved games, logs, and the private recipe book and pictures: /data/recipes.json and /data/elements) lives in
+# the /data volume, never in the image. Extra server options can be added after the
 # image name (docker run ... coop-alchemy --trusted-proxy 172.16.0.0/12) or as `command:` in docker-compose.yml.
 FROM python:3.13-slim
 
@@ -24,6 +25,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 ENTRYPOINT ["python", "server.py", "--host", "0.0.0.0", "--port", "8000", \
             "--accounts-file", "/data/accounts.json", "--daily-file", "/data/daily.json", "--drafts-file", "/data/drafts.json", \
             "--invites-file", "/data/invites.json", "--reports-file", "/data/reports.json", "--solo-file", "/data/solo.json", "--profile-file", "/data/profiles.json", "--saves-dir", "/data/saves", \
-            "--snapshot-file", "/data/reload_snapshot.json", "--pid-file", "/data/alchemy.pid", \
+            "--recipes", "/data/recipes.json", "--elements-dir", "/data/elements", "--snapshot-file", "/data/reload_snapshot.json", "--pid-file", "/data/alchemy.pid", \
             "--log-file", "/data/live.log", "--log-days", "14"]
 CMD []

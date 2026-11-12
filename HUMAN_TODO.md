@@ -70,3 +70,9 @@ the exact commands and a check are in [LAUNCH.md](LAUNCH.md). Tick as you go.
 
 Anything marked "code side done" above can be redone or changed on request. Ones that are waiting on you: checking the tunnel and server once they
 exist (send me the errors from `docker compose logs`), making invite batches, rewording the terms, and everything on the bots plan.
+
+- [ ] The recipe book and pictures are out of git going forward, but still in the old history of the public repo. Decide: make the repo
+      private, or rewrite history (`git filter-repo --invert-paths --path recipes.json --path recipes.mmd --path recipes.svg --path static/elements`,
+      then force-push; every clone must be re-cloned, and forks and cached copies on GitHub keep what they had). Before merging the
+      security-hardening branch: copy `recipes.json` and `static/elements/` somewhere safe, because merging a commit that removes tracked
+      files deletes them from the working folder. Then keep a private backup of them (they are not in `ops/backup.py`).
