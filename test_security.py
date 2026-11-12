@@ -5,7 +5,9 @@ from __future__ import annotations
 import email.message
 import http.client
 import io
+import socket
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -13,7 +15,7 @@ import accounts as accounts_module
 from accounts import AccountStore
 from state import GameError
 from games import GameRegistry
-from test_coop import RECIPES, call, load_recipes, serve
+from test_coop import RECIPES, call, load_recipes, login_as, serve
 from server import MAX_DRAIN, Handler
 from throttle import Throttle, TicketStore, client_ip, parse_networks, throttle_key
 
@@ -286,6 +288,111 @@ class ServerHardeningTests(unittest.TestCase):
         self.assertEqual(attempt("198.51.100.2"), 401)  # a different visitor is unaffected
         self.assertEqual(call(self.port, "POST", "/login", {"username": "x", "password": "y"},
                               headers={"X-Session": ""})[0], 401)  # without the header the proxy's own address is used
+
+    # ---- event stream limits -------------------------------------------------------------------
+
+    def join(self, name: str) -> str:
+        self.assertEqual(call(self.port, "POST", "/games", {"name": name})[0], 200)
+        status, joined = call(self.port, "POST", f"/g/{name}/join", {})
+        self.assertEqual(status, 200)
+        return joined["token"]
+
+    def ticket(self, name: str, token: str) -> str:
+        status, data = call(self.port, "POST", f"/g/{name}/ticket", {"player": token})
+        self.assertEqual(status, 200)
+        return data["ticket"]
+
+    def open_stream(self, name: str, ticket: str) -> socket.socket:
+        sock = socket.create_connection(("127.0.0.1", self.port), timeout=8)
+        sock.sendall(f"GET /g/{name}/events?ticket={ticket} HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\n\r\n".encode())
+        self.addCleanup(sock.close)
+        return sock
+
+    @staticmethod
+    def until_closed(sock: socket.socket, seconds: float) -> bool:
+        """True if the server closes the connection within `seconds` (anything it still sends meanwhile is read and dropped)."""
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            sock.settimeout(max(0.1, end - time.monotonic()))
+            try:
+                if sock.recv(65536) == b"":
+                    return True
+            except socket.timeout:
+                return False
+            except OSError:
+                return True
+        return False
+
+    def test_a_player_cannot_ask_for_tickets_without_limit(self) -> None:
+        saved = self.server.ticket_throttle
+        self.addCleanup(lambda: setattr(self.server, "ticket_throttle", saved))
+        self.server.ticket_throttle = Throttle(3, 60.0)
+        token = self.join("ticketlimit")
+        statuses = [call(self.port, "POST", "/g/ticketlimit/ticket", {"player": token})[0] for _ in range(5)]
+        self.assertEqual(statuses, [200, 200, 200, 429, 429])
+        other = call(self.port, "POST", "/g/ticketlimit/join", {}, headers={"X-Session": login_as(self.port, "Second")})[1]["token"]
+        self.assertEqual(call(self.port, "POST", "/g/ticketlimit/ticket", {"player": other})[0], 200)  # another player is unaffected
+
+    def test_a_second_event_stream_replaces_the_first(self) -> None:
+        token = self.join("onestream")
+        first = self.open_stream("onestream", self.ticket("onestream", token))
+        self.assertIn(b"200", first.recv(4096)[:20])
+        second = self.open_stream("onestream", self.ticket("onestream", token))
+        self.assertIn(b"200", second.recv(4096)[:20])
+        self.assertTrue(self.until_closed(first, 8), "the older stream should be closed by the server")
+        self.assertFalse(self.until_closed(second, 1), "the newer stream stays open")
+        game = self.server.registry.get("onestream")
+        self.assertEqual(len(game._subs), 1)
+
+    def test_one_player_opening_many_streams_holds_one_thread(self) -> None:
+        import threading
+        token = self.join("manystreams")
+        before = threading.active_count()
+        for _ in range(25):
+            sock = self.open_stream("manystreams", self.ticket("manystreams", token))
+            sock.recv(1024)
+        time.sleep(4)   # the replaced streams notice within a keepalive
+        self.assertLessEqual(threading.active_count() - before, 3)
+        self.assertEqual(len(self.server.registry.get("manystreams")._subs), 1)
+
+    def test_a_reconnect_keeps_the_players_tiles_and_seat(self) -> None:
+        token = self.join("reconnecting")
+        self.open_stream("reconnecting", self.ticket("reconnecting", token)).recv(1024)
+        game = self.server.registry.get("reconnecting")
+        first_elements = [e["id"] for e in call(self.port, "POST", "/g/reconnecting/journal", {"player": token})[1]["elements"]][:1]
+        status, tile = call(self.port, "POST", "/g/reconnecting/tile/add", {"player": token, "element": first_elements[0], "x": 0.3, "y": 0.3}) \
+            if first_elements else (200, {})
+        self.assertEqual(status, 200)
+        self.open_stream("reconnecting", self.ticket("reconnecting", token)).recv(1024)
+        time.sleep(1)
+        self.assertEqual(len(game._subs), 1)
+        self.assertEqual(len(game._tiles), 1 if first_elements else 0)
+        self.assertEqual(len(game._online_players()), 1)
+
+    def test_connections_beyond_the_limit_are_turned_away_and_the_slot_comes_back(self) -> None:
+        server = self.server
+        saved = server.max_connections
+        self.addCleanup(lambda: setattr(server, "max_connections", saved))
+        idle = [socket.create_connection(("127.0.0.1", self.port), timeout=5) for _ in range(2)]  # half-sent requests hold a slot
+        time.sleep(0.3)
+        server.max_connections = server.open_connections
+        refused = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        refused.request("GET", "/healthz")
+        self.assertEqual(refused.getresponse().status, 503)
+        refused.close()
+        for sock in idle:
+            sock.close()
+        for _ in range(30):   # the slots free up as the server notices the closed sockets
+            time.sleep(0.2)
+            conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+            conn.request("GET", "/healthz")
+            if conn.getresponse().status == 200:
+                conn.close()
+                break
+            conn.close()
+        else:
+            self.fail("connections were still being refused after the idle ones closed")
+        self.assertGreaterEqual(server.stats["connections_refused"], 1)
 
     def test_a_visitor_on_one_ipv6_64_shares_one_login_limit(self) -> None:
         server = self.server

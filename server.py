@@ -136,6 +136,7 @@ BASE_DIR = Path(__file__).resolve().parent
 MAX_BODY = 4096
 MAX_DRAIN = 65536  # an unread request body up to this size is read and thrown away before the connection closes
 KEEPALIVE_SECONDS = 3  # a closed browser is noticed on the second failed write, so about 6 s
+MAX_CONNECTIONS = 600  # open connections at once (each takes a thread; the event streams stay open); more are turned away
 CURSOR_BATCH_SECONDS = 0.03  # after a cursor update, the stream waits this long to send the room's pointer moves together
 
 ACTIONS = ("/end", "/combine", "/cursor", "/emote", "/genie", "/hint", "/journal", "/tile/add", "/tile/grab", "/tile/move",
@@ -269,12 +270,47 @@ class AlchemyServer(ThreadingHTTPServer):
         self.games_throttle = Throttle(10, 3600.0)   # games one account may start per hour
         self.reports_throttle = Throttle(5, 3600.0)  # reports one account may send per hour
         self.tickets = TicketStore()                 # one-time passes for event streams
+        self.ticket_throttle = Throttle(30, 60.0)    # tickets one player token may ask for per minute (a reconnect needs one)
+        self.max_connections = MAX_CONNECTIONS       # see --max-connections
+        self.open_connections = 0
         self.trusted_proxies: list = []              # addresses whose X-Forwarded-* headers are believed (--trusted-proxy)
         self.client_ip_header = ""                   # a header holding the client's address, set by the proxy (--client-ip-header)
 
     def bump(self, counter: str) -> None:
         with self._stats_lock:
             self.stats[counter] += 1
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        """Start a thread for the connection, unless this many are already open (then it is closed at once)."""
+        with self._stats_lock:
+            full = self.open_connections >= self.max_connections
+            if not full:
+                self.open_connections += 1
+        if full:
+            self.bump("connections_refused")
+            if not isinstance(request, ssl.SSLSocket):   # a TLS socket would start a handshake here, in the accept loop
+                try:
+                    request.settimeout(1.0)
+                    request.sendall(b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 5\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                except OSError:
+                    pass
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._connection_closed()
+            raise
+
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._connection_closed()
+
+    def _connection_closed(self) -> None:
+        with self._stats_lock:
+            self.open_connections -= 1
 
     def handle_error(self, request: Any, client_address: Any) -> None:
         if isinstance(sys.exc_info()[1], (ConnectionError, TimeoutError, ssl.SSLError)):
@@ -637,6 +673,9 @@ class Handler(BaseHTTPRequestHandler):
         if game is None:
             raise GameError(404, "that game does not exist (it may have ended)")
         player = game.authorize(token)
+        wait = self.server.ticket_throttle.allow(player.token)
+        if wait:
+            raise GameError(429, f"too many reconnects: try again in {int(wait) + 1} seconds")
         return self.server.tickets.issue(slug, player.token)
 
     def _register(self, body: dict[str, Any]) -> str:
@@ -1217,6 +1256,8 @@ def main() -> int:
                         help="running games one account may have started at once (default 1; 0 for no limit)")
     parser.add_argument("--max-games", type=int, default=MAX_GAMES,
                         help=f"how many games may run at once (default {MAX_GAMES}); daily challenges and races do not count")
+    parser.add_argument("--max-connections", type=int, default=MAX_CONNECTIONS,
+                        help=f"the most connections open at once, event streams included; others are turned away (default {MAX_CONNECTIONS})")
     parser.add_argument("--log-file", help="write the server's messages (logins, failures, admin actions) to this file, "
                                            "starting a new one each midnight, instead of to the console")
     parser.add_argument("--log-days", type=int, default=14, help="how many days of log files to keep (default 14)")
@@ -1247,6 +1288,7 @@ def main() -> int:
     except OSError as exc:
         print(f"cannot listen on {args.host}:{args.port}: {exc}", file=sys.stderr)
         return 1
+    server.max_connections = max(10, args.max_connections)
     if args.require_invite:
         server.invites = InviteStore(args.invites_file)
     if args.turnstile_site_key:

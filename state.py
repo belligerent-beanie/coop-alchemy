@@ -633,6 +633,15 @@ class GameState:
                     return None
             self._connected_once.add(token)
             self._touched = self._clock()
+            for older in [s for s in self._subs if s.player.token == token]:
+                # One event stream per player: a refresh or a reconnect replaces the old one, so a single account cannot
+                # hold hundreds of streams (each keeps a server thread busy).
+                self._subs.remove(older)
+                older.dead = True
+                try:
+                    older.messages.put_nowait(None)
+                except queue.Full:
+                    pass   # it notices `dead` within a keepalive
             sub = Subscriber(player)
             self._assign_color(player.pid)
             self._subs.append(sub)  # before the snapshot, so the player list includes them
