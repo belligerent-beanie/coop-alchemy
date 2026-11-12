@@ -17,6 +17,8 @@ import urllib.error
 import urllib.request
 from typing import Callable
 
+import alchemylog   # also gives the "alchemy" loggers a quiet default handler
+
 API = "https://api.pwnedpasswords.com/range/"
 TIMEOUT_SECONDS = 3.0
 DEADLINE_SECONDS = 4.0     # the whole lookup, name resolution included (urlopen's timeout does not cover that, so a stuck lookup could hang)

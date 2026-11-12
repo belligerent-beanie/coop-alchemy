@@ -11,6 +11,7 @@ import logging.handlers
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -160,6 +161,46 @@ class RealServerOptionTests(unittest.TestCase):
         self.assertIn("login failed", text)
         self.stop(server)  # release the file (Windows) before the folder goes
 
+    def test_every_line_one_request_causes_carries_the_same_tag_and_failures_say_why(self) -> None:
+        log = Path(tempfile.mkdtemp()) / "live.log"
+        port, _, server = self.start("--log-file", str(log))
+        self.post(port, "/register", {"username": "storyteller", "password": "storyteller-pass-1"})
+        self.post(port, "/login", {"username": "storyteller", "password": "wrong-password-xyz"})
+        deadline = time.time() + 5
+        while time.time() < deadline and not (log.exists() and "login failed" in log.read_text(encoding="utf-8")):
+            time.sleep(0.1)
+        self.stop(server)
+        lines = log.read_text(encoding="utf-8").splitlines()
+
+        def tag(line: str) -> str:
+            return line[line.index("[") + 1:line.index("]")]
+
+        def find(text: str) -> str:
+            return next(line for line in lines if text in line)
+
+        register = tag(find("register start"))
+        self.assertTrue(register.startswith("r"), register)
+        for text in ("register ok", "POST /register -> 200"):
+            self.assertEqual(tag(find(text)), register, text)
+        failed = find("login failed")
+        self.assertIn("(401)", failed)
+        self.assertIn("storyteller", failed)
+        self.assertNotEqual(tag(failed), register)
+        self.assertNotIn("wrong-password-xyz", "\n".join(lines))
+
+
+class RequestTagTests(unittest.TestCase):
+    def test_background_work_keeps_the_tag_of_the_request_that_started_it(self) -> None:
+        import alchemylog
+        seen: list[str] = []
+        tag = alchemylog.begin_request("192.0.2.1")
+        worker = threading.Thread(target=alchemylog.in_context(lambda: seen.append(alchemylog._request.get())))
+        worker.start()
+        worker.join()
+        alchemylog.end_request()
+        self.assertEqual(seen, [tag])
+        self.assertEqual(alchemylog._request.get(), "-")
+
 
 class DailySummaryTests(unittest.TestCase):
     SAMPLE = """\
@@ -173,6 +214,10 @@ class DailySummaryTests(unittest.TestCase):
 2026-11-05 12:00:00,000 alchemy.server unexpected error while handling a request
 2026-11-04 23:59:59,000 alchemy.auth register ok client=192.0.2.1 user=yesterdays
 2026-11-06 00:00:01,000 alchemy.auth register ok client=192.0.2.2 user=tomorrows
+2026-11-05 13:00:00,000 INFO    alchemy.auth     [r7 192.0.2.40] register ok, user newstyle
+2026-11-05 13:00:01,000 WARNING alchemy.auth     [r8 192.0.2.41] login failed (401): wrong username or password; user newstyle
+2026-11-05 13:00:02,000 WARNING alchemy.auth     [r9 192.0.2.41] login refused: too many attempts from this address, asked to wait 30 s
+2026-11-05 13:00:03,000 INFO    alchemy.breach   [r7 192.0.2.40] breach lookup ok in 200 ms (800 suffixes)
 """
 
     def setUp(self) -> None:
@@ -188,18 +233,18 @@ class DailySummaryTests(unittest.TestCase):
 
     def test_counts_only_the_requested_day_across_rotated_files(self) -> None:
         counts = daily_summary.summarise(sorted((self.live / "data").glob("live.log*")), "2026-11-05")
-        self.assertEqual(counts["sign-ups"], 1)
+        self.assertEqual(counts["sign-ups"], 2)  # one in the old line format, one in the new
         self.assertEqual(counts["logins"], 2)  # one in each file
-        self.assertEqual(counts["failed logins"], 2)
-        self.assertEqual(counts["rate-limited requests"], 1)
+        self.assertEqual(counts["failed logins"], 3)
+        self.assertEqual(counts["rate-limited requests"], 2)
         self.assertEqual(counts["administrator actions"], 1)
         self.assertEqual(counts["accounts deleted"], 1)
         self.assertEqual(counts["server errors"], 1)
-        self.assertEqual(counts["different network addresses"], 3)
+        self.assertEqual(counts["different network addresses"], 5)
 
     def test_the_summary_has_no_names_or_addresses(self) -> None:
         text = daily_summary.render("2026-11-05", daily_summary.summarise(sorted((self.live / "data").glob("live.log*")), "2026-11-05"), True)
-        for private in ("secretname", "203.0.113", "198.51.100", "opsboss", "client="):
+        for private in ("secretname", "newstyle", "203.0.113", "198.51.100", "192.0.2.4", "opsboss", "client="):
             self.assertNotIn(private, text)
         self.assertIn("sign-ups", text)
 

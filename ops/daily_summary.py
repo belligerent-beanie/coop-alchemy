@@ -18,12 +18,13 @@ sys.path.insert(0, str(ROOT))
 
 from ops import backup as backup_tools  # noqa: E402
 
-# (label, text that identifies the log line)
+# (label, texts that identify the log line; any one will do). Lines look like
+# "2026-11-05 09:00:01,000 INFO    alchemy.auth     [r17 203.0.113.9] register ok, user sam"; older logs had no level or tag.
 EVENTS = (
     ("sign-ups", " alchemy.auth register ok"),
     ("logins", " alchemy.auth login ok"),
     ("failed logins", " alchemy.auth login failed"),
-    ("rate-limited requests", " throttled "),
+    ("rate-limited requests", " throttled ", " refused: too many attempts"),
     ("emails confirmed", " alchemy.auth email verified"),
     ("passwords changed", " alchemy.auth password changed"),
     ("accounts deleted", " alchemy.auth account deleted"),
@@ -32,12 +33,13 @@ EVENTS = (
     ("emails that could not be sent", " alchemy.mail could not send"),
     ("human-check problems", " alchemy.captcha "),
 )
-CLIENT = re.compile(r"\bclient=(\S+)")
+CLIENT = re.compile(r"\bclient=(\S+)|\[r\d+ ([^\]\s]+)\]")
+TAG = re.compile(r"\[[^\]]*\]")
 
 
 def summarise(log_files: list[Path], day: str) -> dict[str, int]:
     """Counts of each event on `day` (YYYY-MM-DD) across the given log files, plus how many different addresses were seen."""
-    counts = {label: 0 for label, _ in EVENTS}
+    counts = {event[0]: 0 for event in EVENTS}
     clients: set[str] = set()
     for path in log_files:
         try:
@@ -47,12 +49,13 @@ def summarise(log_files: list[Path], day: str) -> dict[str, int]:
         for line in lines:
             if not line.startswith(day):
                 continue
-            for label, marker in EVENTS:
-                if marker in line:
+            plain = re.sub(r"\s+", " ", TAG.sub("", line, count=1))   # the padding and the request tag do not matter here
+            for label, *markers in EVENTS:
+                if any(marker in plain for marker in markers):
                     counts[label] += 1
             found = CLIENT.search(line)
             if found:
-                clients.add(found.group(1))
+                clients.add(found.group(1) or found.group(2))
     counts["different network addresses"] = len(clients)
     return counts
 

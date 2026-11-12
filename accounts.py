@@ -20,9 +20,11 @@ import re
 import secrets
 import threading
 import time
+
 from pathlib import Path
 from typing import Any, Callable
 
+import alchemylog   # also gives the "alchemy" loggers a quiet default handler
 from commonpasswords import is_common
 from state import MAX_NAME_LEN, GameError
 
@@ -355,11 +357,12 @@ class AccountStore:
         Call with the lock held; the thread takes it itself later."""
         if self.breach_count is None or self._clock() - float(record.get("breach_checked", 0)) < BREACH_RECHECK_SECONDS:
             return
-        threading.Thread(target=self._check_breach, args=(key, record["salt"], password), daemon=True).start()
+        threading.Thread(target=alchemylog.in_context(self._check_breach), args=(key, record["salt"], password), daemon=True).start()
 
     def _check_breach(self, key: str, salt: str, password: str) -> None:
         count = self.breach_count(password) if self.breach_count else None
         if count is None:
+            log.info("background breach check after login: no answer from the service, will try again at the next login")
             return   # unknown: try again at the next login
         with self._lock:
             accounts = self._load()
@@ -367,6 +370,7 @@ class AccountStore:
             if record is None or record.get("salt") != salt:   # deleted, or the password changed meanwhile
                 return
             record["breach_checked"] = int(self._clock())
+            log.info("background breach check after login: password %s", "is in known breaches (the account is flagged)" if count > 0 else "not found in known breaches")
             if count > 0:
                 record["breached"] = True
             else:

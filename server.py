@@ -105,6 +105,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from accounts import SESSION_MAX_SECONDS, AccountStore, clean_email, key_of
+import alchemylog
 from breach import BreachChecker
 from captcha import ORIGIN as TURNSTILE_ORIGIN
 from captcha import Turnstile
@@ -231,7 +232,8 @@ def configure_logging(log_file: str | None, days: int = 14) -> logging.Handler:
                                                             encoding="utf-8", delay=True)
     else:
         handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(message)s"))
+    handler.setFormatter(logging.Formatter(alchemylog.LOG_FORMAT))
+    handler.addFilter(alchemylog.RequestFilter())
     root = logging.getLogger()
     for old in list(root.handlers):
         root.removeHandler(old)
@@ -403,18 +405,27 @@ class Handler(BaseHTTPRequestHandler):
         self._cookies_out: list[str] = []   # Set-Cookie lines for this request's response only (a connection serves many)
         self._status = 0
         self._began = 0.0
-        super().handle_one_request()
-        if self._began:   # a request was read (an idle keep-alive connection closing has nothing to report)
-            took = time.monotonic() - self._began
-            accounty = self.path in ("/register", "/login") and self.command == "POST"
-            stream = self.path.split("?")[0].endswith("/events")   # an event stream stays open on purpose
-            if accounty or (took >= SLOW_REQUEST_SECONDS and not stream):
-                (log.warning if took >= SLOW_REQUEST_SECONDS else log.info)(
-                    "%s %s -> %s in %.0f ms", self.command, self.path.split("?")[0], self._status, took * 1000)
+        try:
+            super().handle_one_request()
+            if self._began:   # a request was read (an idle keep-alive connection closing has nothing to report)
+                took = time.monotonic() - self._began
+                accounty = self.path in ("/register", "/login") and self.command == "POST"
+                stream = self.path.split("?")[0].endswith("/events")   # an event stream stays open on purpose
+                if accounty or (took >= SLOW_REQUEST_SECONDS and not stream):
+                    (log.warning if took >= SLOW_REQUEST_SECONDS else log.info)(
+                        "%s %s -> %s in %.0f ms", self.command, self.path.split("?")[0], self._status, took * 1000)
+        finally:
+            alchemylog.end_request()
 
     def parse_request(self) -> bool:
-        self._began = time.monotonic()   # the request line and headers are in: from here on the time is ours, not the client's
-        return super().parse_request()
+        ok = super().parse_request()
+        if ok:
+            self._began = time.monotonic()   # the request line and headers are in: from here on the time is ours, not the client's
+            try:
+                alchemylog.begin_request(self._client())   # every log line this request causes carries its id and address
+            except Exception:   # a malformed forwarding header must not stop the request being served
+                alchemylog.begin_request(str(self.client_address[0]))
+        return ok
 
     def log_request(self, code: Any = "-", size: Any = "-") -> None:   # the base class calls this when it answers
         self._status = code
@@ -874,7 +885,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.server.login_throttle.allow(bucket):
                 raise GameError(429, "too many attempts from this address; try again in a minute")
             username = accounts.verify_email(body.get("token"))
-            log.info("email verified client=%s user=%s", client, username)
+            log.info("email verified for user %s", username)
             self._json(200, {"username": username})
             return
         if path in ("/register", "/login"):
@@ -882,11 +893,11 @@ class Handler(BaseHTTPRequestHandler):
             wait = throttle.allow(bucket)
             if wait:
                 self.server.bump("throttled")
-                log.warning("%s throttled client=%s", path[1:], client)
+                log.warning("%s refused: too many attempts from this address, asked to wait %d s", path[1:], int(wait) + 1)
                 raise GameError(429, f"too many attempts from this address; try again in {int(wait) + 1} seconds")
         if path == "/register" and self.server.captcha is not None:
             self.server.captcha.verify(body.get("captcha"), client)  # before anything else: bots learn nothing
-        log.info("%s start client=%s", path[1:], client)   # so a request that never finishes still leaves a trace
+        log.info("%s start", path[1:])   # so a request that never finishes still leaves a trace
         try:
             if path == "/register" and self.server.mailer is not None:
                 username = self._register(body)
@@ -910,9 +921,9 @@ class Handler(BaseHTTPRequestHandler):
         except GameError as exc:
             if path == "/login":
                 self.server.bump("login_failures")
-                log.warning("login failed status=%s client=%s user=%s", exc.status, client, log_safe(body.get("username")))
+            log.warning("%s failed (%s): %s; user %s", path[1:], exc.status, log_safe(str(exc)), log_safe(body.get("username")))
             raise
-        log.info("%s ok client=%s user=%s", path[1:], client, username)
+        log.info("%s ok, user %s", path[1:], username)
 
     def _ops_status(self) -> dict[str, Any]:
         """What the administrator's overview shows: counts only, nothing about individual players."""
@@ -1035,7 +1046,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/account/change-password":
                 session = accounts.change_password(username, body.get("current"), body.get("new"), bucket)
-                log.info("password changed client=%s user=%s", client, username)
+                log.info("password changed for user %s", username)
                 self._set_session_cookie(session)
                 self._json(200, {"session": session})
                 return
@@ -1052,7 +1063,7 @@ class Handler(BaseHTTPRequestHandler):
                                 solo=registry.solo, profiles=registry.profiles)
         self.server.bump("accounts_deleted")
         registry.evict_account(username)
-        log.info("account deleted client=%s user=%s", client, username)
+        log.info("account deleted: user %s", username)
         self._clear_session_cookie()
         self._json(200, {"deleted": summary.as_json()})
 
