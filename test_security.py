@@ -315,6 +315,35 @@ class BreachCheckTests(unittest.TestCase):
         self.assertEqual(self.checker(0)[0].count(self.PASSWORD), 0)
         self.assertIsNone(self.checker(None)[0].count(self.PASSWORD))
 
+    def test_a_lookup_that_hangs_is_cut_off_and_the_service_is_left_alone_for_a_while(self) -> None:
+        import breach
+        import threading
+        release = threading.Event()
+        calls: list[str] = []
+
+        def stuck(prefix: str) -> str:   # like a name lookup that never returns: ignores any timeout it was given
+            calls.append(prefix)
+            release.wait(10)
+            return ""
+        now = [0.0]
+        checker = breach.BreachChecker(stuck, clock=lambda: now[0])
+        saved = breach.DEADLINE_SECONDS
+        breach.DEADLINE_SECONDS = 0.3
+        try:
+            began = time.monotonic()
+            self.assertIsNone(checker.count(self.PASSWORD))
+            self.assertLess(time.monotonic() - began, 2.0)       # cut off long before the 10 s the call would take
+            began = time.monotonic()
+            self.assertIsNone(checker.count("another password"))  # paused: no second wait, no second call
+            self.assertLess(time.monotonic() - began, 0.2)
+            self.assertEqual(len(calls), 1)
+            now[0] += breach.PAUSE_SECONDS + 1                    # after the pause the service is tried again
+            self.assertIsNone(checker.count(self.PASSWORD))
+            self.assertEqual(len(calls), 2)
+        finally:
+            breach.DEADLINE_SECONDS = saved
+            release.set()
+
     def test_lookups_are_logged_with_their_outcome_but_never_the_password(self) -> None:
         with self.assertLogs("alchemy.breach", level="INFO") as logged:
             self.checker(None)[0].count(self.PASSWORD)    # the service is unreachable: a warning that says why
