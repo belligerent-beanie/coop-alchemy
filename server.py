@@ -130,7 +130,7 @@ from recipes import RecipeError, load_recipes
 from reports import REASONS, ReportStore, clean_note
 from saves import SaveStore
 from state import GameError, GameState
-from throttle import Throttle, TicketStore, client_ip, parse_networks
+from throttle import Throttle, TicketStore, client_ip, parse_networks, throttle_key
 
 BASE_DIR = Path(__file__).resolve().parent
 MAX_BODY = 4096
@@ -667,12 +667,13 @@ class Handler(BaseHTTPRequestHandler):
             accounts.logout(self.headers.get("X-Session", ""))
             self._json(200, {})
             return
-        client = self._client()
+        client = self._client()      # the full address: for logs and for Cloudflare's check
+        bucket = throttle_key(client)  # what limits and lockouts count by (an IPv6 /64 counts as one visitor)
         if path == "/resend-verification":
-            self._resend_verification(body, client)
+            self._resend_verification(body, bucket)
             return
         if path == "/verify-email":
-            if self.server.login_throttle.allow(client):
+            if self.server.login_throttle.allow(bucket):
                 raise GameError(429, "too many attempts from this address; try again in a minute")
             username = accounts.verify_email(body.get("token"))
             log.info("email verified client=%s user=%s", client, username)
@@ -680,7 +681,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path in ("/register", "/login"):
             throttle = self.server.register_throttle if path == "/register" else self.server.login_throttle
-            wait = throttle.allow(client)
+            wait = throttle.allow(bucket)
             if wait:
                 self.server.bump("throttled")
                 log.warning("%s throttled client=%s", path[1:], client)
@@ -698,7 +699,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.server.bump("registrations")
                 self._json(200, {"session": accounts.session_for(username), "username": username})
             else:
-                session, username = accounts.login(body.get("username"), body.get("password"), client)
+                session, username = accounts.login(body.get("username"), body.get("password"), bucket)
                 self.server.bump("logins")
                 reply: dict[str, Any] = {"session": session, "username": username}
                 if accounts.must_change_password(username):  # an administrator reset it: the page asks for a new one
@@ -822,17 +823,18 @@ class Handler(BaseHTTPRequestHandler):
         """A logged-in player changing their own password or deleting their own account (both ask for the password again)."""
         username = self._user()
         client = self._client()
-        wait = self.server.login_throttle.allow(client)
+        bucket = throttle_key(client)
+        wait = self.server.login_throttle.allow(bucket)
         if wait:
             raise GameError(429, f"too many attempts from this address; try again in {int(wait) + 1} seconds")
         accounts = self.server.accounts
         try:
             if path == "/account/change-password":
-                session = accounts.change_password(username, body.get("current"), body.get("new"), client)
+                session = accounts.change_password(username, body.get("current"), body.get("new"), bucket)
                 log.info("password changed client=%s user=%s", client, username)
                 self._json(200, {"session": session})
                 return
-            accounts.login(username, body.get("password"), client)  # 403 or 429 unless the password is right
+            accounts.login(username, body.get("password"), bucket)  # 403 or 429 unless the password is right
         except GameError as exc:
             if exc.status == 401:
                 # 401 must keep meaning "you are not logged in": the pages sign a person out when they see it, and a typo

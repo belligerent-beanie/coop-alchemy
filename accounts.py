@@ -25,13 +25,17 @@ from typing import Any, Callable
 from state import MAX_NAME_LEN, GameError
 
 MIN_USERNAME_LEN = 3
-MIN_PASSWORD_LEN = 8
+MIN_PASSWORD_LEN = 10           # for new passwords and password changes; logging in still accepts older, shorter ones
 MAX_PASSWORD_LEN = 128
 MAX_ACCOUNTS = 500
 PBKDF2_ITERATIONS = 600_000
 SESSION_SECONDS = 24 * 3600.0   # a session ends after this long without being used
 MAX_FAILURES = 5                # wrong passwords in a row before the account is locked for a while
 LOCKOUT_SECONDS = 60.0
+ACCOUNT_MAX_FAILURES = 50       # wrong passwords for one account, from anywhere, within ACCOUNT_WINDOW_SECONDS ...
+ACCOUNT_WINDOW_SECONDS = 3600.0
+ACCOUNT_PAUSE_SECONDS = 900.0   # ... and then logging in to that account is paused this long after the latest failure
+MAX_TRACKED_FAILURES = 5000
 MAX_SESSIONS = 2000
 VERIFY_SECONDS = 24 * 3600.0    # an emailed link works this long; an account still unverified then is deleted
 MAX_EMAIL_LEN = 254
@@ -96,7 +100,8 @@ class AccountStore:
         self._iterations = iterations
         self._lock = threading.Lock()
         self._sessions: dict[str, tuple[str, str, float]] = {}   # token -> (key, salt, last used)
-        self._failures: dict[str, tuple[int, float]] = {}        # key -> (count, locked until)
+        self._failures: dict[str, tuple[int, float]] = {}        # key|client -> (count, locked until); oldest first
+        self._account_failures: dict[str, list[float]] = {}      # key -> times of recent wrong passwords, from any client
         self._cache: tuple[tuple[int, int] | None, dict[str, dict[str, Any]]] | None = None  # see _peek()
 
     # ---- file ----------------------------------------------------------
@@ -282,6 +287,9 @@ class AccountStore:
             count, until = self._failures.get(fail_key, (0, 0.0))
             if until > now:
                 raise GameError(429, f"too many wrong passwords; try again in {int(until - now) + 1} seconds")
+            paused = self._account_paused_until(key, now)
+            if paused > now:
+                raise GameError(429, f"too many wrong passwords for this account; try again in {int(paused - now) + 1} seconds")
             record = self._peek().get(key)
         salt = record["salt"] if record else "00" * 16
         iterations = record.get("iterations", self._iterations) if record else self._iterations
@@ -289,19 +297,46 @@ class AccountStore:
         good = record is not None and hmac.compare_digest(digest, record["hash"])
         with self._lock:
             if not good:
-                count = self._failures.get(fail_key, (0, 0.0))[0] + 1
+                count = self._failures.pop(fail_key, (0, 0.0))[0] + 1   # popped and put back last, so the dict stays oldest first
                 locked = now + LOCKOUT_SECONDS if count >= MAX_FAILURES else 0.0
                 self._failures[fail_key] = (0 if locked else count, locked)
-                if len(self._failures) > 5000:
-                    self._failures = {k: v for k, v in self._failures.items() if v[1] > now}
+                self._note_account_failure(key, now)
+                while len(self._failures) > MAX_TRACKED_FAILURES:   # forget the oldest that is not locked, never everybody's at once
+                    stale = next((k for k, v in self._failures.items() if v[1] <= now), next(iter(self._failures)))
+                    del self._failures[stale]
                 raise GameError(401, "wrong username or password")
             self._failures.pop(fail_key, None)
+            self._account_failures.pop(key, None)
             if record.get("verified") is False:  # told only once the password is right
                 raise GameError(403, "please confirm your email address first: open the link we sent you, "
                                      "or ask for a new one below")
             if record.get("disabled") is True:
                 raise GameError(403, "this account has been disabled by an administrator")
             return self._new_session(key, record["salt"]), record["name"]
+
+    def _account_paused_until(self, key: str, now: float) -> float:
+        """When logging in to this account may resume after too many wrong passwords from any clients (0 if it is not paused).
+
+        This is what stops guessing spread over many addresses, which the per-client limits cannot see. The limit is high so
+        that a stranger can hardly lock the owner out, and it also pauses the right password, so it is logged by the caller.
+        Call with the lock held.
+        """
+        recent = [t for t in self._account_failures.get(key, ()) if now - t < ACCOUNT_WINDOW_SECONDS]
+        if not recent:
+            self._account_failures.pop(key, None)
+            return 0.0
+        self._account_failures[key] = recent
+        return recent[-1] + ACCOUNT_PAUSE_SECONDS if len(recent) >= ACCOUNT_MAX_FAILURES else 0.0
+
+    def _note_account_failure(self, key: str, now: float) -> None:
+        """Count one wrong password against the account (call with the lock held)."""
+        recent = [t for t in self._account_failures.pop(key, ()) if now - t < ACCOUNT_WINDOW_SECONDS]
+        recent.append(now)
+        self._account_failures[key] = recent[-ACCOUNT_MAX_FAILURES:]
+        while len(self._account_failures) > MAX_TRACKED_FAILURES:   # forget the oldest account that is not near its limit
+            quiet = next((k for k, v in self._account_failures.items() if len(v) < ACCOUNT_MAX_FAILURES),
+                         next(iter(self._account_failures)))
+            del self._account_failures[quiet]
 
     def _drop_stale_pending(self) -> None:
         """Delete accounts that never confirmed their email within VERIFY_SECONDS (call with the lock held)."""

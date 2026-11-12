@@ -9,12 +9,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import accounts as accounts_module
 from accounts import AccountStore
 from state import GameError
 from games import GameRegistry
 from test_coop import RECIPES, call, load_recipes, serve
 from server import MAX_DRAIN, Handler
-from throttle import Throttle, TicketStore, client_ip, parse_networks
+from throttle import Throttle, TicketStore, client_ip, parse_networks, throttle_key
 
 
 class ThrottleTests(unittest.TestCase):
@@ -70,6 +71,96 @@ class ClientIpTests(unittest.TestCase):
         self.assertEqual(client_ip("127.0.0.1", "6.6.6.6, 198.51.100.7", self.PROXY), "198.51.100.7")
         self.assertEqual(client_ip("127.0.0.1", "198.51.100.7, 10.1.2.3", self.PROXY), "198.51.100.7")
         self.assertEqual(client_ip("127.0.0.1", "not-an-ip", self.PROXY), "127.0.0.1")
+
+
+class ThrottleKeyTests(unittest.TestCase):
+    def test_ipv4_is_used_as_it_is(self) -> None:
+        self.assertEqual(throttle_key("203.0.113.9"), "203.0.113.9")
+
+    def test_an_ipv4_mapped_ipv6_address_counts_as_the_ipv4_address(self) -> None:
+        self.assertEqual(throttle_key("::ffff:203.0.113.9"), "203.0.113.9")
+
+    def test_every_address_in_one_ipv6_64_shares_a_key(self) -> None:
+        self.assertEqual(throttle_key("2001:db8:1:2::1"), throttle_key("2001:db8:1:2:ffff:ffff:ffff:ffff"))
+        self.assertNotEqual(throttle_key("2001:db8:1:2::1"), throttle_key("2001:db8:1:3::1"))
+
+    def test_text_that_is_not_an_address_is_left_alone(self) -> None:
+        self.assertEqual(throttle_key("not-an-ip"), "not-an-ip")
+
+    def test_a_visitor_cannot_get_a_fresh_limit_by_changing_the_end_of_an_ipv6_address(self) -> None:
+        throttle = Throttle(3, 60.0)
+        waits = [throttle.allow(throttle_key(f"2001:db8:aa:bb::{i:x}")) for i in range(1, 6)]
+        self.assertEqual(waits[:3], [0.0, 0.0, 0.0])
+        self.assertTrue(all(wait > 0 for wait in waits[3:]))
+
+
+class AccountFailureCapTests(unittest.TestCase):
+    def make(self) -> tuple[AccountStore, list[float]]:
+        now = [1000.0]
+        accounts = AccountStore(Path(tempfile.mkdtemp()) / "accounts.json", iterations=1000, clock=lambda: now[0])
+        accounts.register("alice", "correct horse battery")
+        return accounts, now
+
+    def fail(self, accounts: AccountStore, client: str) -> int:
+        try:
+            accounts.login("alice", "wrong guess", client=client)
+        except GameError as exc:
+            return exc.status
+        return 200
+
+    def test_guessing_spread_over_many_visitors_is_stopped_for_the_account(self) -> None:
+        accounts, now = self.make()
+        limit = accounts_module.ACCOUNT_MAX_FAILURES
+        for i in range(limit):   # every guess from a different visitor: no single visitor is ever locked
+            self.assertEqual(self.fail(accounts, f"10.0.{i // 250}.{i % 250}"), 401)
+        self.assertEqual(self.fail(accounts, "10.9.9.9"), 429)
+        with self.assertRaises(GameError) as ctx:   # even the right password waits
+            accounts.login("alice", "correct horse battery", client="10.8.8.8")
+        self.assertEqual(ctx.exception.status, 429)
+        now[0] += accounts_module.ACCOUNT_PAUSE_SECONDS + 1
+        self.assertTrue(accounts.login("alice", "correct horse battery", client="10.8.8.8")[0])
+
+    def test_other_accounts_are_not_paused(self) -> None:
+        accounts, _ = self.make()
+        accounts.register("bobby", "another long password")
+        for i in range(accounts_module.ACCOUNT_MAX_FAILURES):
+            self.fail(accounts, f"10.1.0.{i}")
+        self.assertTrue(accounts.login("bobby", "another long password", client="10.8.8.8")[0])
+
+    def test_old_failures_stop_counting(self) -> None:
+        accounts, now = self.make()
+        for i in range(accounts_module.ACCOUNT_MAX_FAILURES - 1):
+            self.fail(accounts, f"10.2.0.{i}")
+        now[0] += accounts_module.ACCOUNT_WINDOW_SECONDS + 1
+        self.assertEqual(self.fail(accounts, "10.2.9.9"), 401)
+
+    def test_flooding_the_failure_table_does_not_reset_a_live_lockout(self) -> None:
+        accounts, _ = self.make()
+        for _ in range(accounts_module.MAX_FAILURES):
+            self.fail(accounts, "10.3.0.1")
+        self.assertEqual(self.fail(accounts, "10.3.0.1"), 429)   # locked for this visitor
+        for i in range(accounts_module.MAX_TRACKED_FAILURES + 50):
+            try:
+                accounts.login(f"nobody{i}", "wrong guess", client="10.4.0.1")
+            except GameError:
+                pass
+        self.assertEqual(self.fail(accounts, "10.3.0.1"), 429)   # still locked
+
+
+class PasswordLengthTests(unittest.TestCase):
+    def test_new_passwords_need_the_new_minimum_but_old_short_ones_still_log_in(self) -> None:
+        accounts = AccountStore(Path(tempfile.mkdtemp()) / "accounts.json", iterations=1000)
+        with self.assertRaises(GameError):
+            accounts.register("shorty", "123456789")   # 9 characters
+        accounts.register("longer", "1234567890")
+        # an account made when 8 characters were enough: written straight into the file
+        records = accounts._load()
+        old = accounts._hash("12345678", "ab" * 16, 1000)
+        records["oldie"] = {"name": "oldie", "salt": "ab" * 16, "hash": old, "iterations": 1000, "created": 1.0}
+        accounts._save(records)
+        self.assertTrue(accounts.login("oldie", "12345678", client="10.0.0.1")[0])
+        with self.assertRaises(GameError):
+            accounts.change_password("oldie", "12345678", "87654321", client="10.0.0.1")
 
 
 class LockoutTests(unittest.TestCase):
@@ -195,6 +286,23 @@ class ServerHardeningTests(unittest.TestCase):
         self.assertEqual(attempt("198.51.100.2"), 401)  # a different visitor is unaffected
         self.assertEqual(call(self.port, "POST", "/login", {"username": "x", "password": "y"},
                               headers={"X-Session": ""})[0], 401)  # without the header the proxy's own address is used
+
+    def test_a_visitor_on_one_ipv6_64_shares_one_login_limit(self) -> None:
+        server = self.server
+        saved = (server.trusted_proxies, server.client_ip_header, server.login_throttle)
+        self.addCleanup(lambda: (setattr(server, "trusted_proxies", saved[0]), setattr(server, "client_ip_header", saved[1]),
+                                 setattr(server, "login_throttle", saved[2])))
+        server.trusted_proxies = parse_networks(["127.0.0.1"])
+        server.client_ip_header = "CF-Connecting-IP"
+        server.login_throttle = Throttle(2, 60.0)
+
+        def attempt(visitor: str) -> int:
+            return call(self.port, "POST", "/login", {"username": "x", "password": "y"},
+                        headers={"CF-Connecting-IP": visitor, "X-Session": ""})[0]
+
+        statuses = [attempt(f"2001:db8:77:88::{i:x}") for i in range(1, 6)]   # five addresses, one /64
+        self.assertEqual(statuses, [401, 401, 429, 429, 429])
+        self.assertEqual(attempt("2001:db8:77:99::1"), 401)   # a different /64 is a different visitor
 
     def test_login_is_rate_limited_per_address(self) -> None:
         statuses = {call(self.port, "POST", "/login", {"username": f"u{i}", "password": "badbadbad"})[0]

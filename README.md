@@ -387,7 +387,7 @@ python3 reload.py
 ## Accounts and passwords
 
 - Usernames are 3 to 24 characters: letters, digits, spaces and `_ - .`.
-  Passwords are 8 to 128 characters.
+  Passwords are 10 to 128 characters (accounts made earlier with 8 or 9 can still log in).
 - Passwords are **never stored**, only a salted PBKDF2-SHA256 hash (600,000
   rounds). This is hashing, not encryption, on purpose: a hash can't be turned
   back into the password, even by someone who has the server's files.
