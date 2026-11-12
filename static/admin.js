@@ -11,7 +11,7 @@ let busy = false;
 let shownId = null;     // proposal currently on screen
 let snippetText = "";
 
-if (!Auth.token()) Auth.toLogin();
+if (!Auth.loggedIn()) Auth.toLogin();
 
 function emojiSpan(el) {
   const span = document.createElement("span");

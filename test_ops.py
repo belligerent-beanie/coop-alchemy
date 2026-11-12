@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 from ops import backup, watchdog
-from ops.deploy import Deployer, git
+from ops.deploy import Deployer, git, keep_private_files
 
 
 class BackupTests(unittest.TestCase):
@@ -260,6 +260,49 @@ class DeployTests(unittest.TestCase):
 
         return Deployer(self.dev, self.live, say=self.messages.append, run_tests=run_tests, smoke=smoke, backup=backup_data,
                         restart=restart, healthy=healthy, **kwargs)  # type: ignore[arg-type]
+
+    def untrack_private_files(self) -> str:
+        """The change that moves the recipe book out of git: the commit removes it, the live folder's copy should survive."""
+        for args in (("rm", "-r", "-q", "--cached", "recipes.json", "static"), ):
+            subprocess.run(["git", "-C", str(self.dev), *args], check=True, capture_output=True)
+        return commit(self.dev, "v3 (book no longer in git)")
+
+    def track_private_files_in_live_history(self) -> None:
+        """Before: both folders hold a recipe book and pictures that git tracks (as the project did until the book moved out)."""
+        for folder in (self.dev,):
+            (folder / "static" / "elements").mkdir(parents=True)
+            (folder / "recipes.json").write_text('{"book": "old"}', encoding="utf-8")
+            (folder / "static" / "elements" / "water.png").write_bytes(b"png-old")
+            subprocess.run(["git", "-C", str(folder), "add", "-A"], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(folder), "commit", "-q", "-m", "book tracked"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(self.live), "merge", "-q", "--ff-only", "main"], check=True, capture_output=True)
+
+    def test_a_deploy_that_removes_the_recipe_book_from_git_keeps_the_live_copy(self) -> None:
+        self.track_private_files_in_live_history()
+        (self.live / "recipes.json").write_text('{"book": "edited live"}', encoding="utf-8")   # untracked changes are not a git concern
+        subprocess.run(["git", "-C", str(self.live), "update-index", "--assume-unchanged", "recipes.json"], check=True)
+        target = self.untrack_private_files()
+        self.assertTrue(self.deployer().deploy())
+        self.assertEqual(self.live_commit(), target)
+        self.assertEqual((self.live / "recipes.json").read_text(encoding="utf-8"), '{"book": "edited live"}')
+        self.assertEqual((self.live / "static" / "elements" / "water.png").read_bytes(), b"png-old")
+        self.assertFalse((self.live / ".deploy-keep").exists())
+
+    def test_a_rollback_to_a_commit_that_still_tracked_the_book_does_not_bring_back_the_old_book(self) -> None:
+        self.track_private_files_in_live_history()
+        before = self.live_commit()
+        self.untrack_private_files()
+        self.assertTrue(self.deployer().deploy())
+        (self.live / "recipes.json").write_text('{"book": "new"}', encoding="utf-8")
+        self.assertTrue(self.deployer().rollback(before))
+        self.assertEqual(self.live_commit(), before)
+        self.assertEqual((self.live / "recipes.json").read_text(encoding="utf-8"), '{"book": "new"}')
+
+    def test_files_that_are_not_there_are_not_invented(self) -> None:
+        with keep_private_files(self.live):
+            pass
+        self.assertFalse((self.live / "recipes.json").exists())
+        self.assertFalse((self.live / ".deploy-keep").exists())
 
     def live_commit(self) -> str:
         return git(self.live, "rev-parse", "HEAD")

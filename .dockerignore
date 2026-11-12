@@ -8,6 +8,12 @@ ops
 test_*.py
 bench_*.py
 aigen
+# the private recipe book and pictures live in the data volume (/data/recipes.json, /data/elements), never in the image
+recipes.json
+recipes.mmd
+recipes.svg
+recipes.html
+static/elements
 # data never goes into the image
 data
 backups

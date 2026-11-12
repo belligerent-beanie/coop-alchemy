@@ -70,6 +70,24 @@ def parse_networks(items: list[str]) -> list[ipaddress.IPv4Network | ipaddress.I
     return [ipaddress.ip_network(item.strip(), strict=False) for item in items if item.strip()]
 
 
+def throttle_key(address: str) -> str:
+    """The key that rate limits and lockouts use for a client address.
+
+    IPv4 addresses are used as they are. An IPv4-mapped IPv6 address (::ffff:1.2.3.4) counts as that IPv4 address. Any other
+    IPv6 address counts as its whole /64 network, because one subscriber is normally given a /64 or more and can switch
+    between billions of addresses in it. Anything that is not an address is returned unchanged.
+    """
+    try:
+        ip = ipaddress.ip_address(address.strip())
+    except ValueError:
+        return address
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip.ipv4_mapped is not None:
+            return str(ip.ipv4_mapped)
+        return str(ipaddress.ip_network(f"{ip}/64", strict=False))
+    return str(ip)
+
+
 def client_ip(peer: str, forwarded: str | None, trusted: list[ipaddress.IPv4Network | ipaddress.IPv6Network],
               direct: str | None = None) -> str:
     """The real client address. Proxy headers are believed only when the peer is a trusted proxy.

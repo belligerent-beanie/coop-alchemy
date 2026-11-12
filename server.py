@@ -11,8 +11,8 @@ username, which is also their name in games, and a password). Then they can star
 http://<ip>:8000/g/<game-id>, which can be shared directly.
 
 HTTP API
-    Everything except the pages, /register and /login needs the header
-    X-Session: <session token> from /register or /login (401 otherwise).
+    Everything except the pages, /register and /login needs the session from /register or /login (401 otherwise):
+    the header X-Session: <token>, or the HttpOnly cookie alchemy_session that those calls also set (the web pages use the cookie).
     POST /register {"username", "password"}  -> {"session", "username"}   (409 if the name is taken)
     POST /login    {"username", "password"}  -> {"session", "username"}   (401 wrong; 429 after 5 wrong in a row)
     POST /logout   {}                        -> {}
@@ -98,12 +98,14 @@ import sys
 import threading
 import time
 from collections import Counter
+from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from accounts import AccountStore, clean_email, key_of
+from accounts import SESSION_MAX_SECONDS, AccountStore, clean_email, key_of
+from breach import BreachChecker
 from captcha import ORIGIN as TURNSTILE_ORIGIN
 from captcha import Turnstile
 from achievements import ACHIEVEMENTS, BADGES, describe_badges
@@ -130,12 +132,17 @@ from recipes import RecipeError, load_recipes
 from reports import REASONS, ReportStore, clean_note
 from saves import SaveStore
 from state import GameError, GameState
-from throttle import Throttle, TicketStore, client_ip, parse_networks
+from ratelimit import ACTION_BURST, ACTION_RATE, MOTION_BURST, MOTION_RATE, TokenBuckets
+from throttle import Throttle, TicketStore, client_ip, parse_networks, throttle_key
 
 BASE_DIR = Path(__file__).resolve().parent
 MAX_BODY = 4096
 MAX_DRAIN = 65536  # an unread request body up to this size is read and thrown away before the connection closes
 KEEPALIVE_SECONDS = 3  # a closed browser is noticed on the second failed write, so about 6 s
+SESSION_COOKIE = "alchemy_session"   # HttpOnly, so scripts on the page cannot read it; also accepted: an X-Session header (API clients)
+MAX_CONNECTIONS_PER_PEER = 60   # open connections from one directly connected address (not a trusted proxy, which carries everybody)
+MAX_STREAMS_PER_CLIENT = 12     # open event streams for one client address, found through the proxy headers (several players may share one)
+MAX_CONNECTIONS = 600  # open connections at once (each takes a thread; the event streams stay open); more are turned away
 CURSOR_BATCH_SECONDS = 0.03  # after a cursor update, the stream waits this long to send the room's pointer moves together
 
 ACTIONS = ("/end", "/combine", "/cursor", "/emote", "/genie", "/hint", "/journal", "/tile/add", "/tile/grab", "/tile/move",
@@ -180,6 +187,14 @@ def run_action(state: GameState, path: str, token: str, body: dict[str, Any]) ->
 
 
 log = logging.getLogger("alchemy.auth")
+
+
+def log_safe(value: object, limit: int = 40) -> str:
+    """Text from a request made safe for a log line: printable ASCII only (anything else becomes '?'), cut to `limit` characters.
+
+    Without this a username containing a line break could write a line of its own, such as a forged "login ok".
+    """
+    return re.sub(r"[^\x20-\x7e]", "?", str(value))[:limit]
 
 
 def cursor_pid(message: str) -> str | None:
@@ -227,7 +242,7 @@ def configure_logging(log_file: str | None, days: int = 14) -> logging.Handler:
 def build_csp(turnstile: bool) -> str:
     """The Content-Security-Policy: our own files only, plus Cloudflare's origin when the Turnstile widget is on."""
     extra = f" {TURNSTILE_ORIGIN}" if turnstile else ""
-    return (f"default-src 'self'; script-src 'self'{extra}; style-src 'self' 'unsafe-inline'; "
+    return (f"default-src 'self'; script-src 'self'{extra}; style-src 'self'; "
             f"img-src 'self' data:; connect-src 'self'{extra}; frame-src 'self'{extra}; object-src 'none'; "
             "base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
@@ -270,12 +285,87 @@ class AlchemyServer(ThreadingHTTPServer):
         self.games_throttle = Throttle(10, 3600.0)   # games one account may start per hour
         self.reports_throttle = Throttle(5, 3600.0)  # reports one account may send per hour
         self.tickets = TicketStore()                 # one-time passes for event streams
+        self.motion_limit = TokenBuckets(MOTION_RATE, MOTION_BURST)   # cursor and tile moves per player (ratelimit.py)
+        self.action_limit = TokenBuckets(ACTION_RATE, ACTION_BURST)   # every other game request per player
+        self.ticket_throttle = Throttle(30, 60.0)    # tickets one player token may ask for per minute (a reconnect needs one)
+        self.max_connections = MAX_CONNECTIONS       # see --max-connections
+        self.open_connections = 0
+        self.per_peer: dict[str, int] = {}           # open connections by directly connected address (never counts trusted proxies)
+        self.client_streams: dict[str, int] = {}     # open event streams by client address bucket
+        self.max_per_peer = MAX_CONNECTIONS_PER_PEER
+        self.max_streams_per_client = MAX_STREAMS_PER_CLIENT
         self.trusted_proxies: list = []              # addresses whose X-Forwarded-* headers are believed (--trusted-proxy)
         self.client_ip_header = ""                   # a header holding the client's address, set by the proxy (--client-ip-header)
 
     def bump(self, counter: str) -> None:
         with self._stats_lock:
             self.stats[counter] += 1
+
+    def _peer_key(self, client_address: Any) -> str | None:
+        """The directly connected address as a counting key, or None for a trusted proxy (all players arrive through it)."""
+        try:
+            peer = ipaddress.ip_address(str(client_address[0]))
+        except (ValueError, IndexError, TypeError):
+            return None
+        if any(peer in net for net in self.trusted_proxies):
+            return None
+        return throttle_key(str(peer))
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        """Start a thread for the connection, unless too many are already open (then it is closed at once)."""
+        peer = self._peer_key(client_address)
+        with self._stats_lock:
+            full = (self.open_connections >= self.max_connections
+                    or (peer is not None and self.per_peer.get(peer, 0) >= self.max_per_peer))
+            if not full:
+                self.open_connections += 1
+                if peer is not None:
+                    self.per_peer[peer] = self.per_peer.get(peer, 0) + 1
+        if full:
+            self.bump("connections_refused")
+            if not isinstance(request, ssl.SSLSocket):   # a TLS socket would start a handshake here, in the accept loop
+                try:
+                    request.settimeout(1.0)
+                    request.sendall(b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 5\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                except OSError:
+                    pass
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._connection_closed(peer)
+            raise
+
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._connection_closed(self._peer_key(client_address))
+
+    def _connection_closed(self, peer: str | None = None) -> None:
+        with self._stats_lock:
+            self.open_connections -= 1
+            if peer is not None and peer in self.per_peer:
+                self.per_peer[peer] -= 1
+                if self.per_peer[peer] <= 0:
+                    del self.per_peer[peer]
+
+    def claim_stream(self, bucket: str) -> bool:
+        """Count one more open event stream for this client; False if it already has its share."""
+        with self._stats_lock:
+            if self.client_streams.get(bucket, 0) >= self.max_streams_per_client:
+                return False
+            self.client_streams[bucket] = self.client_streams.get(bucket, 0) + 1
+            return True
+
+    def release_stream(self, bucket: str) -> None:
+        with self._stats_lock:
+            left = self.client_streams.get(bucket, 0) - 1
+            if left > 0:
+                self.client_streams[bucket] = left
+            else:
+                self.client_streams.pop(bucket, None)
 
     def handle_error(self, request: Any, client_address: Any) -> None:
         if isinstance(sys.exc_info()[1], (ConnectionError, TimeoutError, ssl.SSLError)):
@@ -298,9 +388,45 @@ class Handler(BaseHTTPRequestHandler):
         ("X-Content-Type-Options", "nosniff"),
         ("X-Frame-Options", "DENY"),
         ("Referrer-Policy", "no-referrer"),
+        ("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"),
+        ("Cross-Origin-Opener-Policy", "same-origin"),
     )
 
+    def handle_one_request(self) -> None:
+        self._cookies_out: list[str] = []   # Set-Cookie lines for this request's response only (a connection serves many)
+        super().handle_one_request()
+
+    def _session_token(self) -> tuple[str, bool]:
+        """(the session token the caller sent, whether it came in the cookie). The X-Session header wins if both are present."""
+        header = self.headers.get("X-Session", "")
+        if header:
+            return header, False
+        raw = self.headers.get("Cookie", "")
+        if SESSION_COOKIE in raw:
+            try:
+                jar: SimpleCookie = SimpleCookie()
+                jar.load(raw)
+                if SESSION_COOKIE in jar:
+                    return jar[SESSION_COOKIE].value, True
+            except CookieError:
+                pass
+        return "", False
+
+    def _set_session_cookie(self, token: str) -> None:
+        """Hand the browser its session as an HttpOnly cookie (SameSite=Lax: other sites' requests do not carry it)."""
+        self._cookies_out.append(self._cookie_line(token, int(SESSION_MAX_SECONDS)))
+
+    def _clear_session_cookie(self) -> None:
+        self._cookies_out.append(self._cookie_line("", 0))
+
+    def _cookie_line(self, value: str, max_age: int) -> str:
+        line = f"{SESSION_COOKIE}={value}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax"
+        return line + "; Secure" if self._https() else line   # Secure cookies are refused over plain http, e.g. on a LAN
+
     def end_headers(self) -> None:
+        for line in getattr(self, "_cookies_out", ()):
+            self.send_header("Set-Cookie", line)
+        self._cookies_out = []
         self.send_header("Content-Security-Policy", self.server.csp)
         for name, value in self.SECURITY_HEADERS:
             self.send_header(name, value)
@@ -353,11 +479,27 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- routing ------------------------------------------------------
 
+    # What a login made with an administrator's temporary password may do before the owner chooses their own password.
+    PASSWORD_CHANGE_PATHS = ("/me", "/account/change-password")
+
     def _user(self) -> str:
-        """The username of the logged-in caller (401 if there is no valid session)."""
-        name = self.server.accounts.username(self.headers.get("X-Session", ""))
+        """The username of the logged-in caller (401 if there is no valid session).
+
+        An account whose password an administrator reset (a temporary one) can do nothing else until its owner has chosen a new
+        password (403), so the temporary password is not a working login for anyone who learned it.
+        """
+        accounts = self.server.accounts
+        token, from_cookie = self._session_token()
+        name = accounts.username(token)
         if name is None:
+            if from_cookie:
+                self._clear_session_cookie()   # the server forgot this session: stop sending it
             raise GameError(401, "please log in")
+        if (not from_cookie and token and self.headers.get("Sec-Fetch-Site") == "same-origin"
+                and SESSION_COOKIE not in self.headers.get("Cookie", "")):
+            self._set_session_cookie(token)    # a browser still holding the old localStorage token moves over to the cookie
+        if urlsplit(self.path).path not in self.PASSWORD_CHANGE_PATHS and accounts.must_change_password(name):
+            raise GameError(403, "an administrator gave you a temporary password: choose your own on the home page first")
         return name
 
     def do_GET(self) -> None:
@@ -405,7 +547,8 @@ class Handler(BaseHTTPRequestHandler):
                 username = self._user()
                 accounts = self.server.accounts
                 self._json(200, {"username": username, "admin": accounts.is_admin(username),
-                                 "must_change_password": accounts.must_change_password(username)})
+                                 "must_change_password": accounts.must_change_password(username),
+                                 "password_breached": accounts.password_breached(username)})
             elif path == "/create":
                 self._static("create.html")
             elif path == "/create/data":
@@ -584,6 +727,9 @@ class Handler(BaseHTTPRequestHandler):
                 save = body.get("save")
                 if not isinstance(save, bool):
                     raise GameError(400, "say whether to save the game")
+                ending = self.server.registry.get(match.group(1))
+                if ending is not None:
+                    self._check_account(ending, ending.authorize(body.get("player")))
                 self._json(200, self.server.registry.end(match.group(1), body.get("player"), save))
                 return
             game = self.server.registry.get(match.group(1))
@@ -596,6 +742,14 @@ class Handler(BaseHTTPRequestHandler):
                 token = body.get("player")
                 if not isinstance(token, str):
                     raise GameError(400, "missing player token")
+                self._check_account(game, game.authorize(token))
+                limit = self.server.motion_limit if rest in ("/cursor", "/tile/move") else self.server.action_limit
+                if not limit.allow(token):
+                    self.server.bump("actions_limited")
+                    if rest == "/cursor":   # a pointer position is out of date a moment later: drop it quietly
+                        self._json(200, {})
+                        return
+                    raise GameError(429, "slow down: too many requests")
                 self._json(200, run_action(game, rest, token, body))
         except GameError as exc:
             self._json(exc.status, {"error": exc.message})
@@ -616,6 +770,7 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(token, str):
             raise GameError(400, "missing player token")
         reporter = game.authorize(token)
+        self._check_account(game, reporter)
         target = game.name_of(body.get("target"))
         if target is None:
             raise GameError(404, "that player is not in this game")
@@ -632,12 +787,26 @@ class Handler(BaseHTTPRequestHandler):
             self.server.bump("reports")
             log.info("report: %s about a player (%s)", reason, "with a note" if note else "no note")  # no names in the log
 
+    def _check_account(self, game: GameState, player: Any) -> None:
+        """A player whose account was disabled or deleted after they joined is taken out of the game and refused (403).
+
+        Game requests carry the player's token, not the login session, so ending the session is not enough. People only:
+        computer-controlled players never come through here.
+        """
+        if not self.server.accounts.is_active(player.name):
+            game.kick(player.name)
+            raise GameError(403, "this account can no longer play")
+
     def _event_ticket(self, slug: str, token: object) -> str:
         """A one-time pass for GET /g/<id>/events, so the player token itself never appears in a URL."""
         game = self.server.registry.get(slug)
         if game is None:
             raise GameError(404, "that game does not exist (it may have ended)")
         player = game.authorize(token)
+        self._check_account(game, player)
+        wait = self.server.ticket_throttle.allow(player.token)
+        if wait:
+            raise GameError(429, f"too many reconnects: try again in {int(wait) + 1} seconds")
         return self.server.tickets.issue(slug, player.token)
 
     def _register(self, body: dict[str, Any]) -> str:
@@ -665,15 +834,17 @@ class Handler(BaseHTTPRequestHandler):
     def _account_action(self, path: str, body: dict[str, Any]) -> None:
         accounts = self.server.accounts
         if path == "/logout":
-            accounts.logout(self.headers.get("X-Session", ""))
+            accounts.logout(self._session_token()[0])
+            self._clear_session_cookie()
             self._json(200, {})
             return
-        client = self._client()
+        client = self._client()      # the full address: for logs and for Cloudflare's check
+        bucket = throttle_key(client)  # what limits and lockouts count by (an IPv6 /64 counts as one visitor)
         if path == "/resend-verification":
-            self._resend_verification(body, client)
+            self._resend_verification(body, bucket)
             return
         if path == "/verify-email":
-            if self.server.login_throttle.allow(client):
+            if self.server.login_throttle.allow(bucket):
                 raise GameError(429, "too many attempts from this address; try again in a minute")
             username = accounts.verify_email(body.get("token"))
             log.info("email verified client=%s user=%s", client, username)
@@ -681,7 +852,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path in ("/register", "/login"):
             throttle = self.server.register_throttle if path == "/register" else self.server.login_throttle
-            wait = throttle.allow(client)
+            wait = throttle.allow(bucket)
             if wait:
                 self.server.bump("throttled")
                 log.warning("%s throttled client=%s", path[1:], client)
@@ -697,10 +868,13 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/register":
                 username = self._register(body)
                 self.server.bump("registrations")
-                self._json(200, {"session": accounts.session_for(username), "username": username})
+                session = accounts.session_for(username)
+                self._set_session_cookie(session)
+                self._json(200, {"session": session, "username": username})
             else:
-                session, username = accounts.login(body.get("username"), body.get("password"), client)
+                session, username = accounts.login(body.get("username"), body.get("password"), bucket)
                 self.server.bump("logins")
+                self._set_session_cookie(session)
                 reply: dict[str, Any] = {"session": session, "username": username}
                 if accounts.must_change_password(username):  # an administrator reset it: the page asks for a new one
                     reply["must_change_password"] = True
@@ -708,8 +882,7 @@ class Handler(BaseHTTPRequestHandler):
         except GameError as exc:
             if path == "/login":
                 self.server.bump("login_failures")
-                log.warning("login failed status=%s client=%s user=%s", exc.status, client,
-                            str(body.get("username"))[:40].encode("ascii", "replace").decode())
+                log.warning("login failed status=%s client=%s user=%s", exc.status, client, log_safe(body.get("username")))
             raise
         log.info("%s ok client=%s user=%s", path[1:], client, username)
 
@@ -758,7 +931,7 @@ class Handler(BaseHTTPRequestHandler):
             if runner is None:
                 raise GameError(409, "companions are not set up on this server")
             bot = runner.host_now()
-            log.info("admin %s had companion %s open room %s", admin, bot.name, bot.game.slug)
+            log.info("admin %s had companion %s open room %s", admin, log_safe(bot.name), log_safe(bot.game.slug))
             return {"id": bot.game.slug, "name": bot.name}
         if path in ("/ops/bots/add", "/ops/bots/remove"):
             runner = server.registry.bots
@@ -772,7 +945,7 @@ class Handler(BaseHTTPRequestHandler):
                 if level is not None and level not in (0, 1):
                     raise GameError(400, "level must be 0 or 1")
                 name = runner.add(slug, level)
-                log.info("admin %s added companion %s to game %s", admin, name, slug)
+                log.info("admin %s added companion %s to game %s", admin, log_safe(name), log_safe(slug))
                 return {"name": name}
             slug, name = body.get("id"), body.get("name")
             removed = runner.remove(slug if isinstance(slug, str) else None, name if isinstance(name, str) else None)
@@ -783,14 +956,14 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(slug, str):
                 raise GameError(400, "missing game id")
             result = server.registry.admin_visit(slug)
-            log.info("admin %s sent Mr Alchemy to game %s", admin, slug)
+            log.info("admin %s sent Mr Alchemy to game %s", admin, log_safe(slug))
             return result
         if path == "/ops/games/end":
             slug = body.get("id")
             if not isinstance(slug, str):
                 raise GameError(400, "missing game id")
             server.registry.admin_end(slug)
-            log.info("admin %s ended game %s", admin, slug)
+            log.info("admin %s ended game %s", admin, log_safe(slug))
             return {}
         actions = ("verify", "enable", "disable", "reset-password", "delete")
         action = path[len("/ops/accounts/"):] if path.startswith("/ops/accounts/") else ""
@@ -801,12 +974,14 @@ class Handler(BaseHTTPRequestHandler):
             raise GameError(400, "missing username")
         if action != "verify" and action != "enable" and accounts.is_admin(username):
             raise GameError(403, "administrators cannot be changed here: take the admin role away with accounts_admin.py first")
-        log.info("admin %s: %s %s", admin, action, username)
+        log.info("admin %s: %s %s", admin, action, log_safe(username))
         if action == "verify":
             accounts.set_verified(username)
             return {}
         if action in ("enable", "disable"):
             accounts.set_disabled(username, action == "disable")
+            if action == "disable":
+                server.registry.evict_account(username)   # their login stops at once; so does their seat in a running game
             return {}
         if action == "reset-password":
             temporary = secrets.token_urlsafe(9)
@@ -817,23 +992,26 @@ class Handler(BaseHTTPRequestHandler):
                                 daily=registry.daily, invites=server.invites, reports=server.reports,
                                 solo=registry.solo, profiles=registry.profiles)
         server.bump("accounts_deleted")
+        registry.evict_account(username)
         return {"deleted": summary.as_json()}
 
     def _account_self_service(self, path: str, body: dict[str, Any]) -> None:
         """A logged-in player changing their own password or deleting their own account (both ask for the password again)."""
         username = self._user()
         client = self._client()
-        wait = self.server.login_throttle.allow(client)
+        bucket = throttle_key(client)
+        wait = self.server.login_throttle.allow(bucket)
         if wait:
             raise GameError(429, f"too many attempts from this address; try again in {int(wait) + 1} seconds")
         accounts = self.server.accounts
         try:
             if path == "/account/change-password":
-                session = accounts.change_password(username, body.get("current"), body.get("new"), client)
+                session = accounts.change_password(username, body.get("current"), body.get("new"), bucket)
                 log.info("password changed client=%s user=%s", client, username)
+                self._set_session_cookie(session)
                 self._json(200, {"session": session})
                 return
-            accounts.login(username, body.get("password"), client)  # 403 or 429 unless the password is right
+            accounts.login(username, body.get("password"), bucket)  # 403 or 429 unless the password is right
         except GameError as exc:
             if exc.status == 401:
                 # 401 must keep meaning "you are not logged in": the pages sign a person out when they see it, and a typo
@@ -845,7 +1023,9 @@ class Handler(BaseHTTPRequestHandler):
                                 daily=registry.daily, invites=self.server.invites, reports=self.server.reports,
                                 solo=registry.solo, profiles=registry.profiles)
         self.server.bump("accounts_deleted")
+        registry.evict_account(username)
         log.info("account deleted client=%s user=%s", client, username)
+        self._clear_session_cookie()
         self._json(200, {"deleted": summary.as_json()})
 
     def _send_verification(self, username: str) -> None:
@@ -986,7 +1166,8 @@ class Handler(BaseHTTPRequestHandler):
         body = (
             "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
             "<title>Game not found</title>"
-            "<body style='font:16px system-ui;max-width:30rem;margin:4rem auto;padding:0 1rem'>"
+            "<link rel=stylesheet href='/static/style.css'>"
+            "<body class=notfound>"
             "<h1>That game isn't running</h1>"
             "<p>It may have been ended, or it closed after sitting empty for a while. "
             "If it was saved, you can bring it back from the home page.</p>"
@@ -1077,8 +1258,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def _events(self, game: GameState, slug: str, query: dict[str, list[str]]) -> None:
         token = self.server.tickets.redeem(query.get("ticket", [""])[0], slug)
-        sub = game.subscribe(token) if token else None
+        bucket = throttle_key(self._client())
+        if not self.server.claim_stream(bucket):
+            self.server.bump("streams_refused")
+            raise GameError(429, "too many open connections from your address; close some tabs and try again")
+        try:
+            sub = game.subscribe(token) if token else None
+        except BaseException:
+            self.server.release_stream(bucket)
+            raise
         if sub is None:
+            self.server.release_stream(bucket)
             raise GameError(403, "unknown player")
         self.close_connection = True
         tune_socket(self.connection)
@@ -1118,6 +1308,12 @@ class Handler(BaseHTTPRequestHandler):
             pass  # client went away
         finally:
             game.unsubscribe(sub)
+            self.server.release_stream(bucket)
+
+
+def broad_proxy_trust(networks: list) -> bool:
+    """True if the trusted proxies include a whole range of addresses rather than single machines (loopback excepted)."""
+    return any(net.num_addresses > 1 and not net.is_loopback for net in networks)
 
 
 def tune_socket(sock: socket.socket) -> None:
@@ -1155,6 +1351,9 @@ def main() -> int:
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--recipes", default=str(BASE_DIR / "recipes.json"))
+    parser.add_argument("--elements-dir", default=str(BASE_DIR / "static" / "elements"),
+                        help="where the element pictures are kept, one <name>.png each (default: static/elements); like the recipe file, "
+                             "they are not part of the git repository")
     parser.add_argument("--saves-dir", default=str(BASE_DIR / "saves"),
                         help="where saved games are kept for 3 days (default: ./saves)")
     parser.add_argument("--accounts-file", default=str(BASE_DIR / "accounts.json"),
@@ -1216,6 +1415,14 @@ def main() -> int:
                         help="running games one account may have started at once (default 1; 0 for no limit)")
     parser.add_argument("--max-games", type=int, default=MAX_GAMES,
                         help=f"how many games may run at once (default {MAX_GAMES}); daily challenges and races do not count")
+    parser.add_argument("--no-breach-check", action="store_true",
+                        help="do not ask haveibeenpwned.com whether a password is known from a data breach (only 5 characters of its hash are ever sent)")
+    parser.add_argument("--max-connections-per-address", type=int, default=MAX_CONNECTIONS_PER_PEER,
+                        help=f"the most connections one directly connected address may hold open; a trusted proxy is exempt (default {MAX_CONNECTIONS_PER_PEER})")
+    parser.add_argument("--max-streams-per-client", type=int, default=MAX_STREAMS_PER_CLIENT,
+                        help=f"the most event streams one client address (seen through the proxy) may hold open (default {MAX_STREAMS_PER_CLIENT})")
+    parser.add_argument("--max-connections", type=int, default=MAX_CONNECTIONS,
+                        help=f"the most connections open at once, event streams included; others are turned away (default {MAX_CONNECTIONS})")
     parser.add_argument("--log-file", help="write the server's messages (logins, failures, admin actions) to this file, "
                                            "starting a new one each midnight, instead of to the console")
     parser.add_argument("--log-days", type=int, default=14, help="how many days of log files to keep (default 14)")
@@ -1227,11 +1434,14 @@ def main() -> int:
         book = load_recipes(args.recipes)
     except RecipeError as exc:
         print(exc, file=sys.stderr)
+        if not Path(args.recipes).exists():
+            print("The recipe book is private and is not part of the git repository: put your recipes.json next to server.py "
+                  "(or pass --recipes FILE). test_recipes.json is a small made-up set that is enough to try the game.", file=sys.stderr)
         return 1
 
     saves = SaveStore(args.saves_dir)
     registry = GameRegistry(book, max_games=max(1, args.max_games), idle_seconds=args.idle_minutes * 60, saves=saves,
-                            pictures=PictureIndex(BASE_DIR / "static" / "elements", book),
+                            pictures=PictureIndex(Path(args.elements_dir), book),
                             visitors=VisitorPolicy(enabled=args.mr_alchemy == "on", chance=min(1.0, max(0.0, args.mr_alchemy_chance)),
                                                    min_seconds=max(0.0, args.mr_alchemy_min) * 60,
                                                    max_seconds=max(0.0, args.mr_alchemy_max) * 60),
@@ -1239,6 +1449,8 @@ def main() -> int:
                             profiles=ProfileStore(args.profile_file),
                             max_per_account=max(0, args.max_games_per_account))
     accounts = AccountStore(args.accounts_file)
+    if not args.no_breach_check:
+        accounts.breach_count = BreachChecker().count
     listen_fd = int(os.environ.pop("ALCHEMY_LISTEN_FD")) if "ALCHEMY_LISTEN_FD" in os.environ else None
     try:
         server = AlchemyServer((args.host, args.port), registry, BASE_DIR / "static", accounts, listen_fd,
@@ -1246,6 +1458,9 @@ def main() -> int:
     except OSError as exc:
         print(f"cannot listen on {args.host}:{args.port}: {exc}", file=sys.stderr)
         return 1
+    server.max_connections = max(10, args.max_connections)
+    server.max_per_peer = max(2, args.max_connections_per_address)
+    server.max_streams_per_client = max(1, args.max_streams_per_client)
     if args.require_invite:
         server.invites = InviteStore(args.invites_file)
     if args.turnstile_site_key:
@@ -1272,6 +1487,9 @@ def main() -> int:
     except ValueError as exc:
         print(f"--trusted-proxy: {exc}", file=sys.stderr)
         return 1
+    if broad_proxy_trust(server.trusted_proxies):
+        print("note: --trusted-proxy covers whole address ranges, so anyone who can reach this port from inside them can choose the "
+              "client address that limits and logs use. Make sure only the proxy (the tunnel) can connect to this port.")
     configure_logging(args.log_file, args.log_days)
     try:
         server.names = NameFilter.load(args.blocklist_file)
@@ -1381,7 +1599,7 @@ def visitor_loop(registry: GameRegistry) -> None:
         time.sleep(VISITOR_CHECK_SECONDS)
         try:
             for name in registry.visitor_tick():
-                log.info("Mr Alchemy visited game %s", name)
+                log.info("Mr Alchemy visited game %s", log_safe(name))
         except Exception as exc:
             print(f"warning: Mr Alchemy's rounds failed: {exc}", file=sys.stderr)
 

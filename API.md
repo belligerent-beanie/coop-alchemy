@@ -12,8 +12,9 @@ this file in the same commit (and add a line to the [change log](#change-log)).
 - **Errors.** Every error is `{"error": "<message for a person>"}` with an HTTP status. Statuses used: `400` bad or missing
   input, `401` not logged in (or a wrong password), `403` not allowed, `404` not found, `409` conflict (name taken, game full,
   limits), `429` too many attempts (see Limits), `500` the server could not save, `503` the human check is unavailable.
-- **Logging in.** `POST /register` or `POST /login` returns a session token. Send it as the header `X-Session: <token>` on every
-  request marked *session* below. Sessions end after 24 hours without use, when the account's password changes, or when the
+- **Logging in.** `POST /register` or `POST /login` returns a session token, and also sets it as an `HttpOnly; SameSite=Lax` cookie
+  (`alchemy_session`, `Secure` over HTTPS), which is what the web pages use. API clients send the token as the header `X-Session: <token>` on every
+  request marked *session* below (the header wins if both are sent). `POST /logout` and `POST /account/delete` clear the cookie. Sessions end after 24 hours without use, 14 days after they were made (however often they are used), when the account's password changes, or when the
   server restarts (a hot reload keeps them).
 - **Game requests.** Joining a game returns a *player token*. Every POST under `/g/<id>` except `/join` carries
   `{"player": "<token>"}` in the body. A player token is not a login: it works only for that game.
@@ -22,7 +23,12 @@ this file in the same commit (and add a line to the [change log](#change-log)).
   (JSON) or `no-cache` (files) and carry a Content-Security-Policy, `X-Content-Type-Options`, `X-Frame-Options` and
   `Referrer-Policy` (and `Strict-Transport-Security` over HTTPS).
 - **Limits.** Per client address: 20 login attempts a minute, 5 sign-ups per 10 minutes, 10 verification-email requests an
-  hour. 5 wrong passwords in a row for one account from one address lock that pair for 60 seconds. At most 5 players per
+  hour. An IPv6 address counts as its whole /64 network. 5 wrong passwords in a row for one account from one address lock that
+  pair for 60 seconds, and 50 wrong passwords in an hour for one account from anywhere pause logins to it for 15 minutes, except from addresses that logged in to it in the last 30 days.
+  Per player in a game: cursor and tile-move requests at about 50 a second and everything else at about 10 a second (bursts of
+  100 and 30 are allowed); beyond that `429` (a cursor update is dropped with a `200`). 30 event-stream tickets a minute per
+  player, one open event stream per player (a new one closes the old), and at most 600 open connections on the server (`503`).
+  A disabled or deleted account gets `403` on game requests and is taken out of its games. At most 5 players per
   game. When the server runs behind a reverse proxy, start it with `--trusted-proxy` (and, for Cloudflare, `--client-ip-header CF-Connecting-IP`) so these limits see real addresses.
 
 ## Pages and files (GET, return HTML or files)
@@ -59,7 +65,7 @@ this file in the same commit (and add a line to the [change log](#change-log)).
 | `POST /register` | none | `{"username", "password"}` plus, when the server asks for them (see `/auth-config`), `"invite"` (a single-use invite code), `"captcha"` (the Turnstile answer) and `"email"`. Returns `{"session", "username"}`, or `{"verify_email": true, "username"}` when the account must first confirm its email (no session yet). Errors: `400` invalid username, password or email; `400` also when the username contains a blocked word ("that username is not allowed", which never says which word); `403` invalid invite code; `409` name or email taken; `429`; `503` human check unavailable. |
 | `POST /login` | none | `{"username", "password"}` → `{"session", "username"}`, plus `"must_change_password": true` when an administrator gave the account a temporary password (the page then asks for a new one). Errors: `401` wrong username or password; `403` the email is not confirmed yet, or the account was disabled by an administrator (said only once the password is right); `429` too many attempts or locked. |
 | `POST /logout` | session | `{}` → `{}`. Ends that session. |
-| `GET /me` | session | `{"username", "admin", "must_change_password"}`. |
+| `GET /me` | session | `{"username", "admin", "must_change_password", "password_breached"}` (the last is true when the password was found in a public data breach at login; see `--no-breach-check`). |
 | `POST /verify-email` | none | `{"token"}` → `{"username"}`: confirms the email address the link was sent to. `400` if the token is wrong, used or older than 24 hours. |
 | `POST /resend-verification` | none | `{"email"}` → `{"ok": true}`, always the same answer whether or not such an account exists. `404` ("email verification is not switched on") when the server does not use email verification. |
 | `POST /account/change-password` | session | `{"current", "new"}` → `{"session"}`. Checks the current password (`403` if it is wrong, never `401`, which only ever means "no valid login"; wrong ones count toward the lockout and the login limit), then sets the new one and ends every other login of the account; the returned session replaces the caller's. Also clears a temporary-password flag. `400` for a weak new password. |

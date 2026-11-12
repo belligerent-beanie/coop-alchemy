@@ -22,16 +22,25 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from commonpasswords import is_common
 from state import MAX_NAME_LEN, GameError
 
 MIN_USERNAME_LEN = 3
-MIN_PASSWORD_LEN = 8
+MIN_PASSWORD_LEN = 10           # for new passwords and password changes; logging in still accepts older, shorter ones
 MAX_PASSWORD_LEN = 128
 MAX_ACCOUNTS = 500
 PBKDF2_ITERATIONS = 600_000
-SESSION_SECONDS = 24 * 3600.0   # a session ends after this long without being used
+SESSION_SECONDS = 24 * 3600.0   # a session ends after this long without being used ...
+SESSION_MAX_SECONDS = 14 * 24 * 3600.0   # ... and, however often it is used, this long after it was made (log in again)
 MAX_FAILURES = 5                # wrong passwords in a row before the account is locked for a while
 LOCKOUT_SECONDS = 60.0
+ACCOUNT_MAX_FAILURES = 50       # wrong passwords for one account, from anywhere, within ACCOUNT_WINDOW_SECONDS ...
+ACCOUNT_WINDOW_SECONDS = 3600.0
+ACCOUNT_PAUSE_SECONDS = 900.0   # ... and then logging in to that account is paused this long after the latest failure
+MAX_TRACKED_FAILURES = 5000
+KNOWN_CLIENT_SECONDS = 30 * 24 * 3600.0   # a client address that logged in to an account stays "known" to it this long
+MAX_KNOWN_CLIENTS = 20          # per account
+BREACH_RECHECK_SECONDS = 7 * 24 * 3600.0   # a password is looked up in the breach list at login, then not again for this long
 MAX_SESSIONS = 2000
 VERIFY_SECONDS = 24 * 3600.0    # an emailed link works this long; an account still unverified then is deleted
 MAX_EMAIL_LEN = 254
@@ -57,7 +66,15 @@ def check_password(password: object, username: str = "") -> str:
         raise GameError(400, f"the password must be {MIN_PASSWORD_LEN} to {MAX_PASSWORD_LEN} characters")
     if username and password.casefold() == username.casefold():
         raise GameError(400, "the password must not be the same as the username")
+    if is_common(password):
+        raise GameError(400, "that password is one many people use, so it is easy to guess: please choose another")
     return password
+
+
+def refuse_if_breached(password: str, breach_count: Callable[[str], int | None] | None) -> None:
+    """400 if the password is known from a data breach; does nothing if the check is off or could not be made."""
+    if breach_count is not None and (breach_count(password) or 0) > 0:
+        raise GameError(400, "that password has appeared in a data breach, so attackers already try it: please choose another")
 
 
 def clean_email(raw: object) -> tuple[str, str]:
@@ -95,9 +112,13 @@ class AccountStore:
         self._clock = clock
         self._iterations = iterations
         self._lock = threading.Lock()
-        self._sessions: dict[str, tuple[str, str, float]] = {}   # token -> (key, salt, last used)
-        self._failures: dict[str, tuple[int, float]] = {}        # key -> (count, locked until)
+        self._sessions: dict[str, tuple[str, str, float, float]] = {}   # token -> (key, salt, last used, made)
+        self._failures: dict[str, tuple[int, float]] = {}        # key|client -> (count, locked until); oldest first
+        self._account_failures: dict[str, list[float]] = {}      # key -> times of recent wrong passwords, from any client
+        self._known_clients: dict[str, dict[str, float]] = {}     # key -> {client: when it last logged in}; oldest first, memory only
         self._cache: tuple[tuple[int, int] | None, dict[str, dict[str, Any]]] | None = None  # see _peek()
+        # How many known data breaches a password appears in (None if unknown); set by the server (breach.py). Off when None.
+        self.breach_count: Callable[[str], int | None] | None = None
 
     # ---- file ----------------------------------------------------------
 
@@ -166,6 +187,7 @@ class AccountStore:
         """
         username = clean_username(raw_username)
         password = check_password(raw_password, username)
+        refuse_if_breached(password, self.breach_count)   # asks the network, so before any lock is taken
         key = key_of(username)
         email, email_key = clean_email(raw_email) if raw_email is not None else ("", "")
         with self._lock:
@@ -282,6 +304,9 @@ class AccountStore:
             count, until = self._failures.get(fail_key, (0, 0.0))
             if until > now:
                 raise GameError(429, f"too many wrong passwords; try again in {int(until - now) + 1} seconds")
+            paused = self._account_paused_until(key, now)
+            if paused > now and not self._is_known_client(key, client, now):
+                raise GameError(429, f"too many wrong passwords for this account; try again in {int(paused - now) + 1} seconds")
             record = self._peek().get(key)
         salt = record["salt"] if record else "00" * 16
         iterations = record.get("iterations", self._iterations) if record else self._iterations
@@ -289,19 +314,95 @@ class AccountStore:
         good = record is not None and hmac.compare_digest(digest, record["hash"])
         with self._lock:
             if not good:
-                count = self._failures.get(fail_key, (0, 0.0))[0] + 1
+                count = self._failures.pop(fail_key, (0, 0.0))[0] + 1   # popped and put back last, so the dict stays oldest first
                 locked = now + LOCKOUT_SECONDS if count >= MAX_FAILURES else 0.0
                 self._failures[fail_key] = (0 if locked else count, locked)
-                if len(self._failures) > 5000:
-                    self._failures = {k: v for k, v in self._failures.items() if v[1] > now}
+                self._note_account_failure(key, now)
+                while len(self._failures) > MAX_TRACKED_FAILURES:   # forget the oldest that is not locked, never everybody's at once
+                    stale = next((k for k, v in self._failures.items() if v[1] <= now), next(iter(self._failures)))
+                    del self._failures[stale]
                 raise GameError(401, "wrong username or password")
             self._failures.pop(fail_key, None)
+            if paused <= now:   # a known address getting in during a pause must not wipe the count of guesses being made
+                self._account_failures.pop(key, None)
+            self._remember_client(key, client, now)
             if record.get("verified") is False:  # told only once the password is right
                 raise GameError(403, "please confirm your email address first: open the link we sent you, "
                                      "or ask for a new one below")
             if record.get("disabled") is True:
                 raise GameError(403, "this account has been disabled by an administrator")
+            self._maybe_check_breach(key, record, raw_password)
             return self._new_session(key, record["salt"]), record["name"]
+
+    def _maybe_check_breach(self, key: str, record: dict[str, Any], password: str) -> None:
+        """After a right password: if it has not been looked up lately, do so in the background (the login does not wait).
+
+        Call with the lock held; the thread takes it itself later."""
+        if self.breach_count is None or self._clock() - float(record.get("breach_checked", 0)) < BREACH_RECHECK_SECONDS:
+            return
+        threading.Thread(target=self._check_breach, args=(key, record["salt"], password), daemon=True).start()
+
+    def _check_breach(self, key: str, salt: str, password: str) -> None:
+        count = self.breach_count(password) if self.breach_count else None
+        if count is None:
+            return   # unknown: try again at the next login
+        with self._lock:
+            accounts = self._load()
+            record = accounts.get(key)
+            if record is None or record.get("salt") != salt:   # deleted, or the password changed meanwhile
+                return
+            record["breach_checked"] = int(self._clock())
+            if count > 0:
+                record["breached"] = True
+            else:
+                record.pop("breached", None)
+            self._save(accounts)
+
+    def password_breached(self, username: str) -> bool:
+        """True if the account's password was found in a known data breach when last checked (at login)."""
+        with self._lock:
+            record = self._peek().get(key_of(username))
+            return bool(record and record.get("breached") is True)
+
+    def _is_known_client(self, key: str, client: str, now: float) -> bool:
+        """True if this address has logged in to the account lately: it is not held up by the account-wide pause (call with the lock held)."""
+        return bool(client) and now - self._known_clients.get(key, {}).get(client, -KNOWN_CLIENT_SECONDS) < KNOWN_CLIENT_SECONDS
+
+    def _remember_client(self, key: str, client: str, now: float) -> None:
+        if not client:
+            return
+        known = {c: t for c, t in self._known_clients.pop(key, {}).items() if now - t < KNOWN_CLIENT_SECONDS and c != client}
+        known[client] = now
+        while len(known) > MAX_KNOWN_CLIENTS:
+            del known[next(iter(known))]
+        self._known_clients[key] = known
+        while len(self._known_clients) > MAX_TRACKED_FAILURES:
+            del self._known_clients[next(iter(self._known_clients))]
+
+    def _account_paused_until(self, key: str, now: float) -> float:
+        """When logging in to this account may resume after too many wrong passwords from any clients (0 if it is not paused).
+
+        This is what stops guessing spread over many addresses, which the per-client limits cannot see. The limit is high, and
+        addresses that have logged in to the account before are not held up by it (see _is_known_client), so a stranger cannot
+        lock the owner out from their usual connection; it does pause the right password from a new address.
+        Call with the lock held.
+        """
+        recent = [t for t in self._account_failures.get(key, ()) if now - t < ACCOUNT_WINDOW_SECONDS]
+        if not recent:
+            self._account_failures.pop(key, None)
+            return 0.0
+        self._account_failures[key] = recent
+        return recent[-1] + ACCOUNT_PAUSE_SECONDS if len(recent) >= ACCOUNT_MAX_FAILURES else 0.0
+
+    def _note_account_failure(self, key: str, now: float) -> None:
+        """Count one wrong password against the account (call with the lock held)."""
+        recent = [t for t in self._account_failures.pop(key, ()) if now - t < ACCOUNT_WINDOW_SECONDS]
+        recent.append(now)
+        self._account_failures[key] = recent[-ACCOUNT_MAX_FAILURES:]
+        while len(self._account_failures) > MAX_TRACKED_FAILURES:   # forget the oldest account that is not near its limit
+            quiet = next((k for k, v in self._account_failures.items() if len(v) < ACCOUNT_MAX_FAILURES),
+                         next(iter(self._account_failures)))
+            del self._account_failures[quiet]
 
     def _drop_stale_pending(self) -> None:
         """Delete accounts that never confirmed their email within VERIFY_SECONDS (call with the lock held)."""
@@ -319,11 +420,11 @@ class AccountStore:
     def _new_session(self, key: str, salt: str) -> str:
         now = self._clock()
         if len(self._sessions) >= MAX_SESSIONS:
-            self._sessions = {t: s for t, s in self._sessions.items() if now - s[2] < SESSION_SECONDS}
+            self._sessions = {t: s for t, s in self._sessions.items() if now - s[2] < SESSION_SECONDS and now - s[3] < SESSION_MAX_SECONDS}
             while len(self._sessions) >= MAX_SESSIONS:  # still full: drop the least recently used
                 del self._sessions[min(self._sessions, key=lambda t: self._sessions[t][2])]
         token = secrets.token_urlsafe(24)
-        self._sessions[token] = (key, salt, now)
+        self._sessions[token] = (key, salt, now, now)
         return token
 
     def session_for(self, username: str) -> str:
@@ -342,21 +443,22 @@ class AccountStore:
             entry = self._sessions.get(token)
             if entry is None:
                 return None
-            key, salt, last = entry
+            key, salt, last, made = entry
             now = self._clock()
             record = self._peek().get(key)
-            if now - last >= SESSION_SECONDS or record is None or record["salt"] != salt or record.get("disabled") is True:
-                del self._sessions[token]  # expired, deleted account, password reset, or disabled by an administrator
+            if now - last >= SESSION_SECONDS or now - made >= SESSION_MAX_SECONDS \
+                    or record is None or record["salt"] != salt or record.get("disabled") is True:
+                del self._sessions[token]  # expired, too old, deleted account, password reset, or disabled by an administrator
                 return None
-            self._sessions[token] = (key, salt, now)
+            self._sessions[token] = (key, salt, now, made)
             return str(record["name"])
 
     def export_sessions(self) -> list[dict[str, Any]]:
         """Logged-in sessions as ages, so a restarted server (see hotreload.py) can keep everyone logged in."""
         with self._lock:
             now = self._clock()
-            return [{"token": t, "key": key, "salt": salt, "age": max(0.0, now - last)}
-                    for t, (key, salt, last) in self._sessions.items() if now - last < SESSION_SECONDS]
+            return [{"token": t, "key": key, "salt": salt, "age": max(0.0, now - last), "made": max(0.0, now - made)}
+                    for t, (key, salt, last, made) in self._sessions.items() if now - last < SESSION_SECONDS and now - made < SESSION_MAX_SECONDS]
 
     def import_sessions(self, items: object) -> int:
         """Load export_sessions() output; returns how many were kept. Each is still checked against the account's salt."""
@@ -370,9 +472,13 @@ class AccountStore:
                     token, key, salt, age = item["token"], item["key"], item["salt"], float(item["age"])
                 except (KeyError, TypeError, ValueError):
                     continue
+                try:
+                    made_ago = float(item.get("made", age))   # a snapshot from before this existed: treat it as made when last used
+                except (TypeError, ValueError):
+                    continue
                 if isinstance(token, str) and isinstance(key, str) and isinstance(salt, str) \
-                        and 0 <= age < SESSION_SECONDS:
-                    self._sessions[token] = (key, salt, now - age)
+                        and 0 <= age < SESSION_SECONDS and age <= made_ago < SESSION_MAX_SECONDS:
+                    self._sessions[token] = (key, salt, now - age, now - made_ago)
                     kept += 1
         return kept
 
@@ -408,7 +514,7 @@ class AccountStore:
         """How many logins are active right now."""
         with self._lock:
             now = self._clock()
-            return sum(1 for _, _, last in self._sessions.values() if now - last < SESSION_SECONDS)
+            return sum(1 for _, _, last, made in self._sessions.values() if now - last < SESSION_SECONDS and now - made < SESSION_MAX_SECONDS)
 
     def set_password(self, username: str, password: str, must_change: bool = False) -> None:
         """Replace an account's password (this ends all its sessions). With must_change the owner has to pick their own
@@ -425,6 +531,8 @@ class AccountStore:
             if key not in accounts:
                 raise GameError(404, f"there is no account called {username!r}")
             accounts[key].update(salt=salt, hash=digest, iterations=self._iterations)
+            accounts[key].pop("breached", None)   # the new password gets checked at its first login
+            accounts[key].pop("breach_checked", None)
             if must_change:
                 accounts[key]["must_change"] = True
             else:
@@ -439,7 +547,7 @@ class AccountStore:
         """
         token, name = self.login(username, current, client)  # 401/403/429 exactly as at login
         self.logout(token)
-        check_password(new, name)
+        refuse_if_breached(check_password(new, name), self.breach_count)
         self.set_password(name, str(new))
         return self.session_for(name)
 
@@ -466,6 +574,12 @@ class AccountStore:
         with self._lock:
             record = self._peek().get(key_of(username))
             return bool(record and record.get("disabled") is True)
+
+    def is_active(self, username: str) -> bool:
+        """True if the account exists and is not disabled (what a running game checks before it obeys one of its players)."""
+        with self._lock:
+            record = self._peek().get(key_of(username))
+            return record is not None and record.get("disabled") is not True
 
     def is_admin(self, username: str) -> bool:
         """True for accounts an administrator has marked as admins (see accounts_admin.py make-admin)."""

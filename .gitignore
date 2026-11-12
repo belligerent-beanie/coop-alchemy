@@ -1,3 +1,11 @@
+# The recipe book and the artists' element pictures are private: they are not in the repository (see README "The recipe book")
+recipes.json
+recipes.mmd
+recipes.svg
+recipes.html
+static/elements/
+.deploy-keep/
+
 # Secrets and per-machine runtime state (see README "Files" section)
 accounts.json
 invites.json

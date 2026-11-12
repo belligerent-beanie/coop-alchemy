@@ -203,7 +203,8 @@ class RealReloadTests(unittest.TestCase):
 
         self.assertEqual(self.proc.poll(), None)  # same process, still running
         self.assertEqual(json.loads(self.pid_file.read_text())["pid"], self.proc.pid)
-        self.assertEqual(self.call("GET", "/me", session=session)[1], {"username": "Annie", "admin": False})
+        self.assertEqual(self.call("GET", "/me", session=session)[1], {"username": "Annie", "admin": False, "must_change_password": False,
+                                                                                 "password_breached": False})
         self.assertEqual([g["id"] for g in self.call("GET", "/games", session=session)[1]["games"]], ["live"])
         snap = self.first_snapshot("live", player["token"])
         self.assertEqual(snap["you"], player["pid"])

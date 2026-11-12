@@ -8,7 +8,7 @@ const $ = (id) => document.getElementById(id);
 const DRAG_THRESHOLD = 5;
 const MAX_TILES = 150;
 
-if (!Auth.token()) Auth.toLogin();
+if (!Auth.loggedIn()) Auth.toLogin();
 
 const elements = new Map();   // id -> {id, label, emoji, draft}
 const itemEls = new Map();    // id -> sidebar item

@@ -46,6 +46,7 @@ class RarityTests(unittest.TestCase):
         self.assertTrue(all(e["rarity"] in RARITIES for e in entries))
         self.assertTrue(all(e["rarity"] == "common" for e in entries if e["starter"]))
 
+    @unittest.skipUnless((Path(__file__).resolve().parent / "recipes.json").is_file(), "the private recipe book is not in this checkout")
     def test_the_deepest_real_elements_are_epic_and_the_starters_common(self) -> None:
         book = load_recipes(Path(__file__).resolve().parent / "recipes.json")
         game = GameState(book, rng=random.Random(1))

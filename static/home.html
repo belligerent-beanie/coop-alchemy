@@ -144,11 +144,12 @@
 
   <dialog id="account-dialog" class="dialog">
     <h2 id="account-title">Account</h2>
+    <p id="breach-note" class="error" hidden>The password you log in with has appeared in a public data breach, so attackers already try it. Please choose a new one.</p>
     <p id="forced-note" class="muted" hidden>An administrator gave you a temporary password. Choose your own to continue.</p>
     <form id="password-form" autocomplete="off">
       <label for="pw-current">Current password</label>
       <input id="pw-current" type="password" autocomplete="current-password" maxlength="128" required>
-      <label for="pw-new">New password (at least 8 characters)</label>
+      <label for="pw-new">New password (at least 10 characters)</label>
       <input id="pw-new" type="password" autocomplete="new-password" maxlength="128" required>
       <label for="pw-new2">New password again</label>
       <input id="pw-new2" type="password" autocomplete="new-password" maxlength="128" required>

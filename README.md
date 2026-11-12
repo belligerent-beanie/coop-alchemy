@@ -11,7 +11,9 @@ JavaScript.
 - Python 3.10 or newer (developed and tested on 3.13).
 - A current browser for every player, on a laptop, a tablet or a phone. On a touch screen you tap an element to add it
   and drag tiles together to combine them; the layout changes to suit portrait and landscape.
-- A recipe file (see [Recipes](#recipes)).
+- A recipe file (see [Recipes](#recipes)). The real recipe book and the element pictures are **private**: they are not in the git
+  repository, so a fresh clone has only `test_recipes.json`, a small made-up set that is enough to try the game
+  (`python3 server.py --recipes test_recipes.json`). See [The private recipe book](#the-private-recipe-book).
 
 ## Quick start
 
@@ -327,6 +329,7 @@ python3 server.py [--host 0.0.0.0] [--port 8000]
 | `--host` | `0.0.0.0` | Address to listen on (`127.0.0.1` for this machine only). |
 | `--port` | `8000` | Port to listen on. |
 | `--recipes` | `recipes.json` next to `server.py` | The recipe file. |
+| `--elements-dir` | `static/elements` next to `server.py` | Where the element pictures are (one `<name>.png` each). Not in git, like the recipe file. |
 | `--saves-dir` | `saves` next to `server.py` | Where saved games are kept. |
 | `--accounts-file` | `accounts.json` next to `server.py` | Usernames and password hashes. |
 | `--client-ip-header` | none | Behind a trusted proxy, take the visitor's address from this header (Cloudflare: `CF-Connecting-IP`); otherwise `X-Forwarded-For` is used. |
@@ -347,6 +350,10 @@ python3 server.py [--host 0.0.0.0] [--port 8000]
 | `--mr-alchemy-chance` | `1` | The chance (0 to 1) that a game gets his visit at all. |
 | `--mr-alchemy-min`, `--mr-alchemy-max` | `4`, `15` | He comes after a random number of minutes in this range, counting only time with two or more players together. |
 | `--max-games` | `3` | How many games may run at once (daily challenges and races do not count). |
+| `--max-connections` | `600` | The most connections open at once, event streams included. More are turned away with a 503, so one visitor cannot use up every server thread. |
+| `--max-connections-per-address` | `60` | The most connections one directly connected address may hold open. A trusted proxy is exempt, since every player arrives through it. |
+| `--max-streams-per-client` | `12` | The most event streams one client address (as seen through the proxy headers) may hold open. More get a 429. |
+| `--no-breach-check` | off | By default a new password is checked against Have I Been Pwned's breach list (only the first 5 characters of its SHA-1 hash are sent), and a password already in a breach is refused. At login the same check runs in the background (at most weekly per account) and the home page then asks the player to change it. If the service cannot be reached the check is skipped. This flag turns it all off. |
 | `--log-file`, `--log-days` | console, 14 | Write the server's messages (logins, failures, admin actions) to a file that starts afresh each midnight, keeping this many days. |
 | `--idle-minutes` | `10` | How long an empty game stays open. |
 | `--drafts-file` | `drafts.json` next to `server.py` | Players' draft recipes and promotion proposals. |
@@ -387,13 +394,13 @@ python3 reload.py
 ## Accounts and passwords
 
 - Usernames are 3 to 24 characters: letters, digits, spaces and `_ - .`.
-  Passwords are 8 to 128 characters.
+  Passwords are 10 to 128 characters (accounts made earlier with 8 or 9 can still log in). New passwords on `common-passwords.txt` (about 33,000 of the most-used passwords of 10+ characters, from public lists, checked locally in any capitals) or that are one or two repeated characters or an obvious run (`1234567890`) are refused; older accounts keep working but must choose a better one when they change it.
 - Passwords are **never stored**, only a salted PBKDF2-SHA256 hash (600,000
   rounds). This is hashing, not encryption, on purpose: a hash can't be turned
   back into the password, even by someone who has the server's files.
 - After 5 wrong passwords in a row, that account is locked for a minute. There is
   no limit per IP address.
-- A login lasts 24 hours since you last used it. Sessions are kept in memory, so
+- A login lasts 24 hours since you last used it, and 14 days at most whatever you do (then you log in again). Sessions are kept in memory, so
   **restarting the server logs everybody out** (and ends the games that were
   running).
 - `accounts.json` is created when the first person registers. Keep it private; it
@@ -431,6 +438,24 @@ Put the server's own LAN address in `subjectAltName`. A certificate you made
 yourself isn't trusted by browsers, so each player sees a warning once and has to
 choose to continue. Everything then works normally, now encrypted. Don't commit
 `key.pem`.
+
+## The private recipe book
+
+`recipes.json` (and the files made from it: `recipes.mmd`, `recipes.svg`, `recipes.html`) and the artists' pictures in `static/elements/` are
+**not in the git repository** (they are in `.gitignore` and `.dockerignore`). The whole game is discovering that book, so anyone who can read the
+repository could read it all. What a clone has instead is `test_recipes.json`, which the tests use.
+
+- **Running it yourself:** put your `recipes.json` next to `server.py` and the pictures in `static/elements/`, or point `--recipes FILE` and
+  `--elements-dir FOLDER` at them.
+- **Docker:** both live in the `/data` volume (`/data/recipes.json`, `/data/elements`), never in the image. Put them there once:
+  `docker compose cp recipes.json alchemy:/data/recipes.json` and `docker compose cp static/elements alchemy:/data/elements`, then
+  `docker compose restart alchemy`.
+- **Back them up yourself.** They are no longer protected by git history, and `ops/backup.py` backs up the player data, not the book.
+  Keep a copy somewhere private (a private repository of their own, or an encrypted backup).
+- **`ops/deploy.py`** leaves the live folder's own `recipes.json` and `static/elements/` alone: it saves them before it moves the live
+  folder to another commit and puts them back afterwards.
+- **History:** the files were public until they were removed, and git remembers them. Anyone who cloned or forked the repository then still has them.
+  Removing them from the history needs a force-push, so it is a separate decision (see `HUMAN_TODO.md`).
 
 ## Recipes
 

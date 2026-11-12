@@ -5,16 +5,22 @@ from __future__ import annotations
 import email.message
 import http.client
 import io
+import socket
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
+import accounts as accounts_module
+import hotreload
 from accounts import AccountStore
+from commonpasswords import is_common, load_common
 from state import GameError
 from games import GameRegistry
-from test_coop import RECIPES, call, load_recipes, serve
-from server import MAX_DRAIN, Handler
-from throttle import Throttle, TicketStore, client_ip, parse_networks
+from test_coop import RECIPES, call, load_recipes, login_as, serve
+from server import MAX_DRAIN, Handler, broad_proxy_trust, log_safe
+from ratelimit import ACTION_BURST, ACTION_RATE, MOTION_BURST, MOTION_RATE, TokenBuckets
+from throttle import Throttle, TicketStore, client_ip, parse_networks, throttle_key
 
 
 class ThrottleTests(unittest.TestCase):
@@ -72,6 +78,454 @@ class ClientIpTests(unittest.TestCase):
         self.assertEqual(client_ip("127.0.0.1", "not-an-ip", self.PROXY), "127.0.0.1")
 
 
+class ProxyTrustWarningTests(unittest.TestCase):
+    def test_only_whole_ranges_trigger_the_note(self) -> None:
+        self.assertFalse(broad_proxy_trust(parse_networks(["127.0.0.1", "::1", "10.1.2.3"])))
+        self.assertFalse(broad_proxy_trust([]))
+        self.assertTrue(broad_proxy_trust(parse_networks(["172.16.0.0/12"])))
+        self.assertTrue(broad_proxy_trust(parse_networks(["127.0.0.1", "192.168.0.0/16"])))
+
+
+class LogSafeTests(unittest.TestCase):
+    def test_line_breaks_and_odd_characters_cannot_make_a_new_log_line(self) -> None:
+        forged = "x\n2026-11-12 alchemy.auth login failed\r\x1b[2Jé\u2028"
+        safe = log_safe(forged)
+        self.assertEqual(len(safe.splitlines()), 1)
+        self.assertTrue(safe.isascii() and safe.isprintable())
+        self.assertLessEqual(len(log_safe("a" * 500)), 40)
+        self.assertEqual(log_safe("Alice 2_b"), "Alice 2_b")
+        self.assertEqual(log_safe(None), "None")
+
+
+class TokenBucketTests(unittest.TestCase):
+    def test_a_burst_is_allowed_then_refused_then_refills(self) -> None:
+        now = [0.0]
+        buckets = TokenBuckets(2.0, 3, clock=lambda: now[0])
+        self.assertEqual([buckets.allow("a") for _ in range(5)], [True, True, True, False, False])
+        now[0] = 0.5   # one request's worth has come back
+        self.assertEqual([buckets.allow("a"), buckets.allow("a")], [True, False])
+        now[0] = 100.0   # a long rest saves up only the burst
+        self.assertEqual([buckets.allow("a") for _ in range(4)], [True, True, True, False])
+
+    def test_keys_are_independent_and_the_table_stays_bounded(self) -> None:
+        now = [0.0]
+        buckets = TokenBuckets(1.0, 1, clock=lambda: now[0], limit=10)
+        self.assertTrue(buckets.allow("a"))
+        self.assertFalse(buckets.allow("a"))
+        self.assertTrue(buckets.allow("b"))
+        for i in range(100):
+            buckets.allow(f"k{i}")
+        self.assertLessEqual(len(buckets._buckets), 10)
+
+    def test_honest_play_never_meets_the_limits(self) -> None:
+        """What the page really does, replayed on a clock: 20 cursor updates a second all the time, tile moves every 40 ms
+        for the first second of every 5, a click every half second, and a burst of ten quick actions every 20 seconds."""
+        motion_times = [i * 0.05 for i in range(20 * 60)]
+        motion_times += [t + i * 0.04 for t in range(0, 60, 5) for i in range(25)]
+        action_times = [i * 0.5 for i in range(120)] + [t + i * 0.01 for t in range(0, 60, 20) for i in range(10)]
+        now = [0.0]
+        motion = TokenBuckets(MOTION_RATE, MOTION_BURST, clock=lambda: now[0])
+        action = TokenBuckets(ACTION_RATE, ACTION_BURST, clock=lambda: now[0])
+        for bucket, times in ((motion, motion_times), (action, action_times)):
+            now[0] = 0.0
+            for moment in sorted(times):
+                now[0] = moment
+                self.assertTrue(bucket.allow("p"), moment)
+
+    def test_a_flood_is_cut_off(self) -> None:
+        now = [0.0]
+        action = TokenBuckets(ACTION_RATE, ACTION_BURST, clock=lambda: now[0])
+        allowed = sum(action.allow("p") for _ in range(1000))   # 1000 requests in one instant
+        self.assertEqual(allowed, ACTION_BURST)
+
+
+class ThrottleKeyTests(unittest.TestCase):
+    def test_ipv4_is_used_as_it_is(self) -> None:
+        self.assertEqual(throttle_key("203.0.113.9"), "203.0.113.9")
+
+    def test_an_ipv4_mapped_ipv6_address_counts_as_the_ipv4_address(self) -> None:
+        self.assertEqual(throttle_key("::ffff:203.0.113.9"), "203.0.113.9")
+
+    def test_every_address_in_one_ipv6_64_shares_a_key(self) -> None:
+        self.assertEqual(throttle_key("2001:db8:1:2::1"), throttle_key("2001:db8:1:2:ffff:ffff:ffff:ffff"))
+        self.assertNotEqual(throttle_key("2001:db8:1:2::1"), throttle_key("2001:db8:1:3::1"))
+
+    def test_text_that_is_not_an_address_is_left_alone(self) -> None:
+        self.assertEqual(throttle_key("not-an-ip"), "not-an-ip")
+
+    def test_a_visitor_cannot_get_a_fresh_limit_by_changing_the_end_of_an_ipv6_address(self) -> None:
+        throttle = Throttle(3, 60.0)
+        waits = [throttle.allow(throttle_key(f"2001:db8:aa:bb::{i:x}")) for i in range(1, 6)]
+        self.assertEqual(waits[:3], [0.0, 0.0, 0.0])
+        self.assertTrue(all(wait > 0 for wait in waits[3:]))
+
+
+class AccountFailureCapTests(unittest.TestCase):
+    def make(self) -> tuple[AccountStore, list[float]]:
+        now = [1000.0]
+        accounts = AccountStore(Path(tempfile.mkdtemp()) / "accounts.json", iterations=1000, clock=lambda: now[0])
+        accounts.register("alice", "correct horse battery")
+        return accounts, now
+
+    def fail(self, accounts: AccountStore, client: str) -> int:
+        try:
+            accounts.login("alice", "wrong guess", client=client)
+        except GameError as exc:
+            return exc.status
+        return 200
+
+    def test_guessing_spread_over_many_visitors_is_stopped_for_the_account(self) -> None:
+        accounts, now = self.make()
+        limit = accounts_module.ACCOUNT_MAX_FAILURES
+        for i in range(limit):   # every guess from a different visitor: no single visitor is ever locked
+            self.assertEqual(self.fail(accounts, f"10.0.{i // 250}.{i % 250}"), 401)
+        self.assertEqual(self.fail(accounts, "10.9.9.9"), 429)
+        with self.assertRaises(GameError) as ctx:   # even the right password waits
+            accounts.login("alice", "correct horse battery", client="10.8.8.8")
+        self.assertEqual(ctx.exception.status, 429)
+        now[0] += accounts_module.ACCOUNT_PAUSE_SECONDS + 1
+        self.assertTrue(accounts.login("alice", "correct horse battery", client="10.8.8.8")[0])
+
+    def test_the_owner_from_a_known_address_is_not_locked_out_by_strangers(self) -> None:
+        accounts, now = self.make()
+        self.assertTrue(accounts.login("alice", "correct horse battery", client="10.7.7.7")[0])   # her usual connection
+        for i in range(accounts_module.ACCOUNT_MAX_FAILURES):
+            self.fail(accounts, f"10.5.{i // 250}.{i % 250}")
+        self.assertTrue(accounts.login("alice", "correct horse battery", client="10.7.7.7")[0])   # still gets in
+        with self.assertRaises(GameError) as ctx:   # a new address still waits
+            accounts.login("alice", "correct horse battery", client="10.6.6.6")
+        self.assertEqual(ctx.exception.status, 429)
+        now[0] += accounts_module.KNOWN_CLIENT_SECONDS + 1   # an old acquaintance is forgotten
+        self.assertEqual(self.fail(accounts, "10.5.9.9"), 401)
+
+    def test_other_accounts_are_not_paused(self) -> None:
+        accounts, _ = self.make()
+        accounts.register("bobby", "another long password")
+        for i in range(accounts_module.ACCOUNT_MAX_FAILURES):
+            self.fail(accounts, f"10.1.0.{i}")
+        self.assertTrue(accounts.login("bobby", "another long password", client="10.8.8.8")[0])
+
+    def test_old_failures_stop_counting(self) -> None:
+        accounts, now = self.make()
+        for i in range(accounts_module.ACCOUNT_MAX_FAILURES - 1):
+            self.fail(accounts, f"10.2.0.{i}")
+        now[0] += accounts_module.ACCOUNT_WINDOW_SECONDS + 1
+        self.assertEqual(self.fail(accounts, "10.2.9.9"), 401)
+
+    def test_flooding_the_failure_table_does_not_reset_a_live_lockout(self) -> None:
+        accounts, _ = self.make()
+        for _ in range(accounts_module.MAX_FAILURES):
+            self.fail(accounts, "10.3.0.1")
+        self.assertEqual(self.fail(accounts, "10.3.0.1"), 429)   # locked for this visitor
+        for i in range(accounts_module.MAX_TRACKED_FAILURES + 50):
+            try:
+                accounts.login(f"nobody{i}", "wrong guess", client="10.4.0.1")
+            except GameError:
+                pass
+        self.assertEqual(self.fail(accounts, "10.3.0.1"), 429)   # still locked
+
+
+class SessionLifetimeTests(unittest.TestCase):
+    def make(self) -> tuple[AccountStore, list[float]]:
+        now = [1000.0]
+        accounts = AccountStore(Path(tempfile.mkdtemp()) / "accounts.json", iterations=1000, clock=lambda: now[0])
+        accounts.register("alice", "correct horse battery")
+        return accounts, now
+
+    @staticmethod
+    def use_until(accounts: AccountStore, now: list[float], token: str, seconds: float, check: bool = True) -> None:
+        """Move the clock forward by `seconds`, using the session at least every 23 hours on the way so it never goes idle."""
+        end = now[0] + seconds
+        while end - now[0] > 23 * 3600:
+            now[0] += 23 * 3600
+            if check:
+                assert accounts.username(token) == "alice"
+            else:
+                accounts.username(token)
+        now[0] = end
+
+    def test_a_session_used_every_day_still_ends_after_the_maximum_age(self) -> None:
+        accounts, now = self.make()
+        token = accounts.login("alice", "correct horse battery", client="10.0.0.1")[0]
+        self.use_until(accounts, now, token, accounts_module.SESSION_MAX_SECONDS - 60)
+        self.assertEqual(accounts.username(token), "alice")      # just under the maximum
+        now[0] += 120
+        self.assertIsNone(accounts.username(token))              # just over it, though it was used a moment ago
+        self.assertEqual(accounts.session_count(), 0)
+        self.assertTrue(accounts.login("alice", "correct horse battery", client="10.0.0.1")[0])   # logging in again works
+
+    def test_the_idle_rule_still_applies(self) -> None:
+        accounts, now = self.make()
+        token = accounts.login("alice", "correct horse battery", client="10.0.0.1")[0]
+        now[0] += accounts_module.SESSION_SECONDS + 1
+        self.assertIsNone(accounts.username(token))
+
+    def test_a_reload_keeps_when_the_session_was_made(self) -> None:
+        accounts, now = self.make()
+        token = accounts.login("alice", "correct horse battery", client="10.0.0.1")[0]
+        self.use_until(accounts, now, token, 13 * 86400)
+        self.assertEqual(accounts.username(token), "alice")      # used on day 13
+        exported = accounts.export_sessions()
+        self.assertEqual(exported[0]["made"], 13 * 86400)
+        fresh = AccountStore(accounts.path, iterations=1000, clock=lambda: now[0])
+        self.assertEqual(fresh.import_sessions(exported), 1)
+        self.assertEqual(fresh.username(token), "alice")
+        self.use_until(fresh, now, token, 2 * 86400, check=False)   # day 15, with the session used on the way
+        self.assertIsNone(fresh.username(token))
+
+    def test_a_snapshot_from_before_the_maximum_age_existed_still_loads(self) -> None:
+        accounts, now = self.make()
+        token = accounts.login("alice", "correct horse battery", client="10.0.0.1")[0]
+        old_style = [{k: v for k, v in item.items() if k != "made"} for item in accounts.export_sessions()]
+        fresh = AccountStore(accounts.path, iterations=1000, clock=lambda: now[0])
+        self.assertEqual(fresh.import_sessions(old_style), 1)
+        self.assertEqual(fresh.username(token), "alice")
+
+    def test_nonsense_in_a_snapshot_is_skipped(self) -> None:
+        accounts, _ = self.make()
+        bad = [{"token": "t", "key": "alice", "salt": "s", "age": 1.0, "made": "soon"},
+               {"token": "u", "key": "alice", "salt": "s", "age": 100.0, "made": 50.0},   # made after it was last used: impossible
+               {"token": "v", "key": "alice", "salt": "s", "age": 1.0, "made": 10**9}]
+        self.assertEqual(accounts.import_sessions(bad), 0)
+
+
+class BreachCheckTests(unittest.TestCase):
+    PASSWORD = "correct horse battery"
+
+    @staticmethod
+    def answer_for(password: str, count: int) -> str:
+        import hashlib
+        digest = hashlib.sha1(password.encode(), usedforsecurity=False).hexdigest().upper()
+        filler = "".join(f"{i:035X}:{i + 1}\r\n" for i in range(1, 30))
+        return filler + (f"{digest[5:]}:{count}\r\n" if count else "")
+
+    def checker(self, count: int | None):
+        from breach import BreachChecker
+        calls: list[str] = []
+
+        def fetch(prefix: str) -> str:
+            calls.append(prefix)
+            if count is None:
+                raise OSError("no network")
+            return self.answer_for(self.PASSWORD, count)
+        return BreachChecker(fetch), calls
+
+    def test_count_found_missing_and_unknown(self) -> None:
+        self.assertEqual(self.checker(7)[0].count(self.PASSWORD), 7)
+        self.assertEqual(self.checker(0)[0].count(self.PASSWORD), 0)
+        self.assertIsNone(self.checker(None)[0].count(self.PASSWORD))
+
+    def test_only_five_hash_characters_are_sent_and_answers_are_cached(self) -> None:
+        checker, calls = self.checker(3)
+        checker.count(self.PASSWORD)
+        checker.count(self.PASSWORD)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(calls[0]), 5)
+        self.assertNotIn(self.PASSWORD, calls[0])
+
+    def test_garbled_or_empty_answer_is_unknown(self) -> None:
+        from breach import BreachChecker
+        self.assertIsNone(BreachChecker(lambda prefix: "").count(self.PASSWORD))
+        self.assertIsNone(BreachChecker(lambda prefix: "<html>oops</html>").count(self.PASSWORD))
+
+    def store(self, count: int | None) -> AccountStore:
+        accounts = AccountStore(Path(tempfile.mkdtemp()) / "accounts.json", iterations=1000)
+        accounts.breach_count = self.checker(count)[0].count
+        return accounts
+
+    def test_a_breached_password_is_refused_at_signup_and_change(self) -> None:
+        accounts = self.store(5)
+        with self.assertRaises(GameError) as caught:
+            accounts.register("alice", self.PASSWORD)
+        self.assertEqual(caught.exception.status, 400)
+        plain = AccountStore(accounts.path, iterations=1000)   # same file, check off
+        plain.register("alice", "an unbreached passphrase")
+        with self.assertRaises(GameError) as changed:
+            accounts.change_password("alice", "an unbreached passphrase", self.PASSWORD)   # the new one is the one checked
+        self.assertEqual(changed.exception.status, 400)
+        self.assertEqual(accounts.login("alice", "an unbreached passphrase")[1], "alice")   # still the old password
+
+    def test_an_outage_never_blocks_signup_or_login(self) -> None:
+        accounts = self.store(None)
+        accounts.register("bob", self.PASSWORD)
+        accounts.login("bob", self.PASSWORD)
+        time.sleep(0.2)
+        self.assertFalse(accounts.password_breached("bob"))
+
+    def test_login_flags_a_breached_password_in_the_background_and_a_change_clears_it(self) -> None:
+        accounts = self.store(0)
+        accounts.register("carol", self.PASSWORD)
+        accounts.breach_count = self.checker(9)[0].count   # it appears in a breach after she signed up
+        accounts.login("carol", self.PASSWORD)
+        for _ in range(50):
+            if accounts.password_breached("carol"):
+                break
+            time.sleep(0.05)
+        self.assertTrue(accounts.password_breached("carol"))
+        accounts.breach_count = None
+        accounts.set_password("carol", "a different long password")
+        self.assertFalse(accounts.password_breached("carol"))
+
+
+class CookieSessionTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.server, cls.port = serve(GameRegistry(load_recipes(RECIPES), max_games=10))
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def raw(self, method: str, path: str, body: dict | None = None, headers: dict[str, str] | None = None):
+        """(status, parsed json, Set-Cookie lines) for a request that carries only the headers given (no automatic X-Session)."""
+        import json
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        sent = dict(headers or {})
+        payload = None
+        if body is not None:
+            payload = json.dumps(body).encode()
+            sent["Content-Type"] = "application/json"
+        conn.request(method, path, body=payload, headers=sent)
+        resp = conn.getresponse()
+        data = resp.read()
+        cookies = [value for name, value in resp.getheaders() if name.lower() == "set-cookie"]
+        conn.close()
+        return resp.status, (json.loads(data) if data[:1] in (b"{", b"[") else data), cookies
+
+    def login(self, name: str = "cookieuser") -> tuple[str, str]:
+        body = {"username": name, "password": f"password-{name}"}
+        status, data, cookies = self.raw("POST", "/register", body)
+        if status == 409:
+            status, data, cookies = self.raw("POST", "/login", body)
+        self.assertEqual(status, 200)
+        return data["session"], cookies[0]
+
+    def test_login_sets_an_httponly_samesite_cookie(self) -> None:
+        token, line = self.login()
+        self.assertTrue(line.startswith(f"alchemy_session={token};"))
+        for part in ("HttpOnly", "SameSite=Lax", "Path=/", "Max-Age=1209600"):
+            self.assertIn(part, line)
+        self.assertNotIn("Secure", line)   # plain http (a LAN): a Secure cookie would be refused
+
+    def test_the_cookie_is_secure_when_the_site_is_https(self) -> None:
+        server = self.server
+        saved = server.public_base
+        self.addCleanup(lambda: setattr(server, "public_base", saved))
+        server.public_base = "https://alchemy.example"
+        self.assertIn("; Secure", self.login("cookieuser2")[1])
+
+    def test_the_cookie_alone_logs_you_in_and_logout_clears_it(self) -> None:
+        token, _ = self.login()
+        cookie = {"Cookie": f"alchemy_session={token}"}
+        status, me, _ = self.raw("GET", "/me", headers=cookie)
+        self.assertEqual((status, me["username"]), (200, "cookieuser"))
+        status, _, cleared = self.raw("POST", "/logout", {}, headers=cookie)
+        self.assertEqual(status, 200)
+        self.assertTrue(cleared and "Max-Age=0" in cleared[0] and cleared[0].startswith("alchemy_session=;"))
+        self.assertEqual(self.raw("GET", "/me", headers=cookie)[0], 401)   # the session is really gone, not just the cookie
+
+    def test_the_header_still_works_for_api_clients_and_wins_over_the_cookie(self) -> None:
+        token, _ = self.login()
+        self.assertEqual(self.raw("GET", "/me", headers={"X-Session": token})[0], 200)
+        status, _, _ = self.raw("GET", "/me", headers={"X-Session": "bogus", "Cookie": f"alchemy_session={token}"})
+        self.assertEqual(status, 401)
+
+    def test_a_dead_cookie_is_refused_and_cleared(self) -> None:
+        status, _, cookies = self.raw("GET", "/me", headers={"Cookie": "alchemy_session=nonsense"})
+        self.assertEqual(status, 401)
+        self.assertTrue(cookies and "Max-Age=0" in cookies[0])
+
+    def test_junk_in_the_cookie_header_is_harmless(self) -> None:
+        for junk in ("alchemy_session", "alchemy_session=\x01\x02; ;;=", "a=b; alchemy_session=\"unterminated", "\xff" * 5):
+            try:
+                status = self.raw("GET", "/me", headers={"Cookie": junk})[0]
+            except UnicodeEncodeError:
+                continue   # http.client refuses to send it at all
+            self.assertEqual(status, 401)
+
+    def test_an_old_browser_token_is_swapped_for_a_cookie_once(self) -> None:
+        token, _ = self.login()
+        browser = {"X-Session": token, "Sec-Fetch-Site": "same-origin"}
+        status, _, cookies = self.raw("GET", "/me", headers=browser)
+        self.assertEqual(status, 200)
+        self.assertTrue(cookies and cookies[0].startswith(f"alchemy_session={token};"))
+        with_cookie = dict(browser, Cookie=f"alchemy_session={token}")
+        self.assertEqual(self.raw("GET", "/me", headers=with_cookie)[2], [])   # already has it: nothing more is set
+        self.assertEqual(self.raw("GET", "/me", headers={"X-Session": token})[2], [])   # API clients never get cookies pushed on them
+
+    def test_a_cross_site_post_with_the_cookie_is_refused(self) -> None:
+        token, _ = self.login()
+        status, _, _ = self.raw("POST", "/games", {"name": "forged"},
+                                headers={"Cookie": f"alchemy_session={token}", "Origin": "http://evil.example"})
+        self.assertEqual(status, 403)
+
+    def test_changing_the_password_issues_a_new_cookie(self) -> None:
+        token, _ = self.login("cookieuser3")
+        cookie = {"Cookie": f"alchemy_session={token}"}
+        status, data, cookies = self.raw("POST", "/account/change-password",
+                                         {"current": "password-cookieuser3", "new": "a brand new passphrase"}, headers=cookie)
+        self.assertEqual(status, 200)
+        self.assertTrue(cookies[0].startswith(f"alchemy_session={data['session']};"))
+        self.assertEqual(self.raw("GET", "/me", headers=cookie)[0], 401)   # the old session ended
+
+
+class CommonPasswordTests(unittest.TestCase):
+    def test_the_list_is_there_and_catches_the_usual_suspects(self) -> None:
+        self.assertGreater(len(load_common()), 10_000)
+        for weak in ("password123456", "Password123456", "PASSWORD123456", "1234567890", "qwertyuiop", "aaaaaaaaaaaa", "abababababab",
+                     "abcdefghijkl", "9876543210"):
+            self.assertTrue(is_common(weak), weak)
+
+    def test_ordinary_good_passwords_pass(self) -> None:
+        for fine in ("correct horse battery", "my-own-fresh-passphrase", "k7#Qv!2mRt9z", "purple giraffes eat 4 pies"):
+            self.assertFalse(is_common(fine), fine)
+
+    def test_a_missing_list_file_switches_the_list_check_off_but_not_the_pattern_check(self) -> None:
+        empty = frozenset()
+        self.assertFalse(is_common("password123456", empty))
+        self.assertTrue(is_common("aaaaaaaaaaaa", empty))
+
+    def test_new_passwords_on_the_list_are_refused_everywhere_a_password_is_chosen(self) -> None:
+        accounts = AccountStore(Path(tempfile.mkdtemp()) / "accounts.json", iterations=1000)
+        with self.assertRaises(GameError) as ctx:
+            accounts.register("weakling", "Password123456")
+        self.assertEqual(ctx.exception.status, 400)
+        accounts.register("sturdy", "k7#Qv!2mRt9z")
+        with self.assertRaises(GameError):
+            accounts.change_password("sturdy", "k7#Qv!2mRt9z", "1234567890")
+        with self.assertRaises(GameError):
+            accounts.set_password("sturdy", "qwertyuiop")
+        self.assertTrue(accounts.login("sturdy", "k7#Qv!2mRt9z", client="10.0.0.1")[0])   # unchanged
+
+    def test_an_old_account_whose_password_is_on_the_list_can_still_log_in_and_must_pick_a_better_one_to_change(self) -> None:
+        accounts = AccountStore(Path(tempfile.mkdtemp()) / "accounts.json", iterations=1000)
+        records = accounts._load()
+        records["oldtimer"] = {"name": "oldtimer", "salt": "cd" * 16, "hash": accounts._hash("Password123456", "cd" * 16, 1000),
+                               "iterations": 1000, "created": 1.0}
+        accounts._save(records)
+        self.assertTrue(accounts.login("oldtimer", "Password123456", client="10.0.0.1")[0])
+        with self.assertRaises(GameError):
+            accounts.change_password("oldtimer", "Password123456", "iloveyou1234")
+        self.assertTrue(accounts.change_password("oldtimer", "Password123456", "a much better one 42"))
+
+
+class PasswordLengthTests(unittest.TestCase):
+    def test_new_passwords_need_the_new_minimum_but_old_short_ones_still_log_in(self) -> None:
+        accounts = AccountStore(Path(tempfile.mkdtemp()) / "accounts.json", iterations=1000)
+        with self.assertRaises(GameError):
+            accounts.register("shorty", "123456789")   # 9 characters
+        accounts.register("longer", "lemon-ocean")
+        # an account made when 8 characters were enough: written straight into the file
+        records = accounts._load()
+        old = accounts._hash("12345678", "ab" * 16, 1000)
+        records["oldie"] = {"name": "oldie", "salt": "ab" * 16, "hash": old, "iterations": 1000, "created": 1.0}
+        accounts._save(records)
+        self.assertTrue(accounts.login("oldie", "12345678", client="10.0.0.1")[0])
+        with self.assertRaises(GameError):
+            accounts.change_password("oldie", "12345678", "87654321", client="10.0.0.1")
+
+
 class LockoutTests(unittest.TestCase):
     def test_a_stranger_cannot_lock_you_out(self) -> None:
         accounts = AccountStore(Path(tempfile.mkdtemp()) / "accounts.json", iterations=1000)
@@ -123,7 +577,7 @@ class UnreadBodyTests(unittest.TestCase):
 class ServerHardeningTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.server, cls.port = serve(GameRegistry(load_recipes(RECIPES), max_games=5))
+        cls.server, cls.port = serve(GameRegistry(load_recipes(RECIPES), max_games=60))
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -148,9 +602,36 @@ class ServerHardeningTests(unittest.TestCase):
         resp = conn.getresponse()
         resp.read()
         conn.close()
-        self.assertIn("script-src 'self'", resp.getheader("Content-Security-Policy"))
+        csp = resp.getheader("Content-Security-Policy")
+        self.assertIn("script-src 'self'", csp)
+        self.assertNotIn("unsafe-inline", csp)
+
+    def test_missing_game_page_has_no_inline_style(self) -> None:
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("GET", "/g/nope")
+        resp = conn.getresponse()
+        body = resp.read().decode()
+        conn.close()
+        self.assertEqual(resp.status, 404)
+        self.assertNotIn("style=", body)
+        self.assertIn("/static/style.css", body)
         self.assertEqual(resp.getheader("X-Content-Type-Options"), "nosniff")
         self.assertEqual(resp.getheader("X-Frame-Options"), "DENY")
+        self.assertEqual(resp.getheader("Cross-Origin-Opener-Policy"), "same-origin")
+        self.assertIn("camera=()", resp.getheader("Permissions-Policy"))
+
+    def test_the_extra_headers_are_on_json_replies_and_the_event_stream_too(self) -> None:
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("GET", "/healthz")
+        resp = conn.getresponse()
+        resp.read()
+        conn.close()
+        self.assertEqual(resp.getheader("Cross-Origin-Opener-Policy"), "same-origin")
+        token = self.join("headers-stream")
+        stream = self.open_stream("headers-stream", self.ticket("headers-stream", token))
+        head = stream.recv(4096).decode("latin-1").lower()
+        self.assertIn("cross-origin-opener-policy: same-origin", head)
+        self.assertIn("permissions-policy:", head)
 
     def test_cross_site_posts_are_refused(self) -> None:
         status, _ = call(self.port, "POST", "/login", {"username": "x", "password": "y"},
@@ -195,6 +676,311 @@ class ServerHardeningTests(unittest.TestCase):
         self.assertEqual(attempt("198.51.100.2"), 401)  # a different visitor is unaffected
         self.assertEqual(call(self.port, "POST", "/login", {"username": "x", "password": "y"},
                               headers={"X-Session": ""})[0], 401)  # without the header the proxy's own address is used
+
+    # ---- event stream limits -------------------------------------------------------------------
+
+    def join(self, name: str) -> str:
+        self.assertEqual(call(self.port, "POST", "/games", {"name": name})[0], 200)
+        status, joined = call(self.port, "POST", f"/g/{name}/join", {})
+        self.assertEqual(status, 200)
+        return joined["token"]
+
+    def ticket(self, name: str, token: str) -> str:
+        status, data = call(self.port, "POST", f"/g/{name}/ticket", {"player": token})
+        self.assertEqual(status, 200)
+        return data["ticket"]
+
+    def open_stream(self, name: str, ticket: str) -> socket.socket:
+        sock = socket.create_connection(("127.0.0.1", self.port), timeout=8)
+        sock.sendall(f"GET /g/{name}/events?ticket={ticket} HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\n\r\n".encode())
+        self.addCleanup(sock.close)
+        return sock
+
+    @staticmethod
+    def until_closed(sock: socket.socket, seconds: float) -> bool:
+        """True if the server closes the connection within `seconds` (anything it still sends meanwhile is read and dropped)."""
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            sock.settimeout(max(0.1, end - time.monotonic()))
+            try:
+                if sock.recv(65536) == b"":
+                    return True
+            except socket.timeout:
+                return False
+            except OSError:
+                return True
+        return False
+
+    def test_a_player_cannot_ask_for_tickets_without_limit(self) -> None:
+        saved = self.server.ticket_throttle
+        self.addCleanup(lambda: setattr(self.server, "ticket_throttle", saved))
+        self.server.ticket_throttle = Throttle(3, 60.0)
+        token = self.join("ticketlimit")
+        statuses = [call(self.port, "POST", "/g/ticketlimit/ticket", {"player": token})[0] for _ in range(5)]
+        self.assertEqual(statuses, [200, 200, 200, 429, 429])
+        other = call(self.port, "POST", "/g/ticketlimit/join", {}, headers={"X-Session": login_as(self.port, "Second")})[1]["token"]
+        self.assertEqual(call(self.port, "POST", "/g/ticketlimit/ticket", {"player": other})[0], 200)  # another player is unaffected
+
+    def test_a_second_event_stream_replaces_the_first(self) -> None:
+        token = self.join("onestream")
+        first = self.open_stream("onestream", self.ticket("onestream", token))
+        self.assertIn(b"200", first.recv(4096)[:20])
+        second = self.open_stream("onestream", self.ticket("onestream", token))
+        self.assertIn(b"200", second.recv(4096)[:20])
+        self.assertTrue(self.until_closed(first, 8), "the older stream should be closed by the server")
+        self.assertFalse(self.until_closed(second, 1), "the newer stream stays open")
+        game = self.server.registry.get("onestream")
+        self.assertEqual(len(game._subs), 1)
+
+    def test_one_player_opening_many_streams_holds_one_thread(self) -> None:
+        import threading
+        token = self.join("manystreams")
+        before = threading.active_count()
+        for _ in range(25):
+            sock = self.open_stream("manystreams", self.ticket("manystreams", token))
+            sock.recv(1024)
+        time.sleep(4)   # the replaced streams notice within a keepalive
+        self.assertLessEqual(threading.active_count() - before, 3)
+        self.assertEqual(len(self.server.registry.get("manystreams")._subs), 1)
+
+    def test_a_reconnect_keeps_the_players_tiles_and_seat(self) -> None:
+        token = self.join("reconnecting")
+        self.open_stream("reconnecting", self.ticket("reconnecting", token)).recv(1024)
+        game = self.server.registry.get("reconnecting")
+        first_elements = [e["id"] for e in call(self.port, "POST", "/g/reconnecting/journal", {"player": token})[1]["elements"]][:1]
+        status, tile = call(self.port, "POST", "/g/reconnecting/tile/add", {"player": token, "element": first_elements[0], "x": 0.3, "y": 0.3}) \
+            if first_elements else (200, {})
+        self.assertEqual(status, 200)
+        self.open_stream("reconnecting", self.ticket("reconnecting", token)).recv(1024)
+        time.sleep(1)
+        self.assertEqual(len(game._subs), 1)
+        self.assertEqual(len(game._tiles), 1 if first_elements else 0)
+        self.assertEqual(len(game._online_players()), 1)
+
+    def test_connections_beyond_the_limit_are_turned_away_and_the_slot_comes_back(self) -> None:
+        server = self.server
+        saved = server.max_connections
+        self.addCleanup(lambda: setattr(server, "max_connections", saved))
+        idle = [socket.create_connection(("127.0.0.1", self.port), timeout=5) for _ in range(2)]  # half-sent requests hold a slot
+        time.sleep(0.3)
+        server.max_connections = server.open_connections
+        refused = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        refused.request("GET", "/healthz")
+        self.assertEqual(refused.getresponse().status, 503)
+        refused.close()
+        for sock in idle:
+            sock.close()
+        for _ in range(30):   # the slots free up as the server notices the closed sockets
+            time.sleep(0.2)
+            conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+            conn.request("GET", "/healthz")
+            if conn.getresponse().status == 200:
+                conn.close()
+                break
+            conn.close()
+        else:
+            self.fail("connections were still being refused after the idle ones closed")
+        self.assertGreaterEqual(server.stats["connections_refused"], 1)
+
+    def test_one_address_cannot_hold_every_connection(self) -> None:
+        server = self.server
+        saved = server.max_per_peer
+        self.addCleanup(lambda: setattr(server, "max_per_peer", saved))
+        server.max_per_peer = 2
+        idle = [socket.create_connection(("127.0.0.1", self.port), timeout=5) for _ in range(2)]
+        time.sleep(0.3)
+        refused = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        refused.request("GET", "/healthz")
+        self.assertEqual(refused.getresponse().status, 503)
+        refused.close()
+        for sock in idle:
+            sock.close()
+        for _ in range(30):
+            time.sleep(0.2)
+            conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+            conn.request("GET", "/healthz")
+            ok = conn.getresponse().status == 200
+            conn.close()
+            if ok:
+                break
+        else:
+            self.fail("the address was still refused after its idle connections closed")
+
+    def test_a_trusted_proxy_is_not_limited_per_address(self) -> None:
+        import ipaddress
+        server = self.server
+        saved = (server.max_per_peer, server.trusted_proxies)
+        self.addCleanup(lambda: (setattr(server, "max_per_peer", saved[0]), setattr(server, "trusted_proxies", saved[1])))
+        server.max_per_peer = 1
+        server.trusted_proxies = [ipaddress.ip_network("127.0.0.1/32")]
+        idle = [socket.create_connection(("127.0.0.1", self.port), timeout=5) for _ in range(3)]
+        time.sleep(0.3)
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("GET", "/healthz")
+        self.assertEqual(conn.getresponse().status, 200)
+        conn.close()
+        for sock in idle:
+            sock.close()
+
+    def test_one_client_cannot_open_unlimited_event_streams(self) -> None:
+        server = self.server
+        saved = server.max_streams_per_client
+        self.addCleanup(lambda: setattr(server, "max_streams_per_client", saved))
+        server.max_streams_per_client = 2
+        games = ["streamcap1", "streamcap2", "streamcap3"]
+        tokens = [self.join(g) for g in games]
+        socks = [self.open_stream(g, self.ticket(g, t)) for g, t in zip(games[:2], tokens[:2])]
+        for sock in socks:
+            sock.recv(1024)
+        third = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        status, data = call(self.port, "POST", "/g/streamcap3/ticket", {"player": tokens[2]})
+        third.request("GET", f"/g/streamcap3/events?ticket={data['ticket']}")
+        self.assertEqual(third.getresponse().status, 429)
+        third.close()
+        socks[0].close()
+        for _ in range(30):   # the slot frees once the server notices the closed stream
+            time.sleep(0.2)
+            status, data = call(self.port, "POST", "/g/streamcap3/ticket", {"player": tokens[2]})
+            retry = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+            retry.request("GET", f"/g/streamcap3/events?ticket={data['ticket']}")
+            code = retry.getresponse().status
+            retry.close()
+            if code == 200:
+                break
+        else:
+            self.fail("the stream slot never came back")
+        socks[1].close()
+
+    # ---- disabled and deleted accounts leave running games ---------------------------------------------
+
+    def seat(self, game: str, name: str) -> tuple[str, str]:
+        """Log `name` in, have them join `game`, and return (their session, their player token)."""
+        session = login_as(self.port, name)
+        status, joined = call(self.port, "POST", f"/g/{game}/join", {}, headers={"X-Session": session})
+        self.assertEqual(status, 200)
+        return session, joined["token"]
+
+    def names_in(self, game: str) -> set[str]:
+        return {p.name for p in self.server.registry.get(game)._players.values()}
+
+    def act(self, game: str, token: str) -> int:
+        return call(self.port, "POST", f"/g/{game}/cursor", {"player": token, "x": 0.5, "y": 0.5})[0]
+
+    def test_disabling_an_account_removes_it_from_a_running_game(self) -> None:
+        self.server.accounts.set_admin("Host", True)
+        self.assertEqual(call(self.port, "POST", "/games", {"name": "banned"})[0], 200)
+        _, host_token = self.seat("banned", "Host")
+        _, troll_token = self.seat("banned", "Troll")
+        stream = self.open_stream("banned", self.ticket("banned", troll_token))
+        stream.recv(4096)
+        self.assertEqual(self.act("banned", troll_token), 200)
+        self.assertEqual(call(self.port, "POST", "/ops/accounts/disable", {"username": "Troll"})[0], 200)
+        self.assertEqual(self.act("banned", troll_token), 403)
+        self.assertTrue(self.until_closed(stream, 8), "their event stream should be closed")
+        self.assertEqual(self.names_in("banned"), {"Host"})
+        self.assertEqual(self.act("banned", host_token), 200)
+        # enabling lets them back in, with a new login and a new seat
+        self.assertEqual(call(self.port, "POST", "/ops/accounts/enable", {"username": "Troll"})[0], 200)
+        _, again = self.seat("banned", "Troll")
+        self.assertEqual(self.act("banned", again), 200)
+
+    def test_deleting_an_account_removes_it_from_a_running_game(self) -> None:
+        self.assertEqual(call(self.port, "POST", "/games", {"name": "deleted"})[0], 200)
+        self.seat("deleted", "Host")
+        session, token = self.seat("deleted", "Leaver")
+        status, _ = call(self.port, "POST", "/account/delete", {"password": "password-Leaver"}, headers={"X-Session": session})
+        self.assertEqual(status, 200)
+        self.assertEqual(self.act("deleted", token), 403)
+        self.assertEqual(self.names_in("deleted"), {"Host"})
+
+    def test_an_account_disabled_by_the_command_line_tool_is_refused_at_the_next_action(self) -> None:
+        self.assertEqual(call(self.port, "POST", "/games", {"name": "offline-ban"})[0], 200)
+        _, token = self.seat("offline-ban", "Cli Victim")
+        self.assertEqual(self.act("offline-ban", token), 200)
+        AccountStore(self.server.accounts.path).set_disabled("Cli Victim", True)   # another process, as accounts_admin.py does
+        self.assertEqual(self.act("offline-ban", token), 403)
+        self.assertEqual(call(self.port, "POST", "/g/offline-ban/ticket", {"player": token})[0], 403)
+        self.assertNotIn("Cli Victim", self.names_in("offline-ban"))
+
+    def test_a_player_held_tile_is_put_down_when_they_are_removed(self) -> None:
+        self.assertEqual(call(self.port, "POST", "/games", {"name": "held"})[0], 200)
+        self.seat("held", "Host")
+        _, token = self.seat("held", "Holder")
+        game = self.server.registry.get("held")
+        element = next(iter(game._discovered))
+        status, tile = call(self.port, "POST", "/g/held/tile/add", {"player": token, "element": element, "x": 0.2, "y": 0.2})
+        self.assertEqual(status, 200)
+        self.assertEqual(call(self.port, "POST", "/g/held/tile/grab", {"player": token, "tile": tile["id"]})[0], 200)
+        self.assertEqual(game.kick("Holder"), 1)
+        self.assertIsNone(game._tiles[tile["id"]].held_by)
+        self.assertEqual(game.kick("Holder"), 0)
+
+    def test_a_flood_of_game_requests_is_limited_and_the_game_stays_sound(self) -> None:
+        token = self.join("flooded")
+        game = self.server.registry.get("flooded")
+        element = next(iter(game._discovered))
+        statuses = [call(self.port, "POST", "/g/flooded/tile/add", {"player": token, "element": element, "x": 0.1, "y": 0.1})[0]
+                    for _ in range(80)]
+        self.assertIn(429, statuses)
+        self.assertIn(200, statuses)
+        self.assertLessEqual(len(game._tiles), 300)
+        self.assertEqual(len(game._tiles), statuses.count(200))
+        cursor = [call(self.port, "POST", "/g/flooded/cursor", {"player": token, "x": 0.5, "y": 0.5})[0] for _ in range(150)]
+        self.assertEqual(set(cursor), {200})   # excess pointer updates are dropped without an error
+        self.assertGreaterEqual(self.server.stats["actions_limited"], 1)
+        other = self.seat("flooded", "Flood Neighbour")[1]   # another player's budget is separate
+        self.assertEqual(call(self.port, "POST", "/g/flooded/tile/add", {"player": other, "element": element, "x": 0.2, "y": 0.2})[0], 200)
+
+    def test_a_temporary_password_only_lets_the_owner_choose_a_new_one(self) -> None:
+        self.server.accounts.set_admin("Host", True)
+        login_as(self.port, "Forgetful")
+        status, reset = call(self.port, "POST", "/ops/accounts/reset-password", {"username": "Forgetful"})
+        self.assertEqual(status, 200)
+        temporary = reset["temporary_password"]
+        status, data = call(self.port, "POST", "/login", {"username": "Forgetful", "password": temporary}, headers={"X-Session": ""})
+        self.assertEqual((status, data.get("must_change_password")), (200, True))
+        session = {"X-Session": data["session"]}
+        self.assertEqual(call(self.port, "GET", "/me", headers=session)[1]["must_change_password"], True)
+        for method, path, body in (("GET", "/games", None), ("GET", "/saved", None), ("GET", "/profile", None),
+                                   ("POST", "/games", {"name": "sneaky"}), ("POST", "/solo/start", {}),
+                                   ("POST", "/races", {"goal": "count"}), ("GET", "/ops/status", None),
+                                   ("POST", "/account/delete", {"password": temporary})):
+            self.assertEqual(call(self.port, method, path, body, headers=session)[0], 403, path)
+        self.assertEqual(call(self.port, "POST", "/account/change-password", {"current": temporary, "new": "x"}, headers=session)[0], 400)
+        status, changed = call(self.port, "POST", "/account/change-password",
+                               {"current": temporary, "new": "my own new password"}, headers=session)
+        self.assertEqual(status, 200)
+        session = {"X-Session": changed["session"]}
+        self.assertEqual(call(self.port, "GET", "/me", headers=session)[1]["must_change_password"], False)
+        self.assertEqual(call(self.port, "GET", "/games", headers=session)[0], 200)
+
+    def test_a_username_with_a_line_break_writes_one_log_line(self) -> None:
+        with self.assertLogs("alchemy.auth", level="WARNING") as captured:
+            status, _ = call(self.port, "POST", "/login",
+                             {"username": "x\n2026-11-12 alchemy.auth login failed status=401 client=1.2.3.4", "password": "whatever"},
+                             headers={"X-Session": "", "CF-Connecting-IP": "198.51.100.200"})
+        self.assertIn(status, (401, 429))
+        failed = [r.getMessage() for r in captured.records if r.getMessage().startswith("login failed")]
+        self.assertTrue(failed)
+        for line in failed:
+            self.assertEqual(len(line.splitlines()), 1, line)
+
+    def test_a_visitor_on_one_ipv6_64_shares_one_login_limit(self) -> None:
+        server = self.server
+        saved = (server.trusted_proxies, server.client_ip_header, server.login_throttle)
+        self.addCleanup(lambda: (setattr(server, "trusted_proxies", saved[0]), setattr(server, "client_ip_header", saved[1]),
+                                 setattr(server, "login_throttle", saved[2])))
+        server.trusted_proxies = parse_networks(["127.0.0.1"])
+        server.client_ip_header = "CF-Connecting-IP"
+        server.login_throttle = Throttle(2, 60.0)
+
+        def attempt(visitor: str) -> int:
+            return call(self.port, "POST", "/login", {"username": "x", "password": "y"},
+                        headers={"CF-Connecting-IP": visitor, "X-Session": ""})[0]
+
+        statuses = [attempt(f"2001:db8:77:88::{i:x}") for i in range(1, 6)]   # five addresses, one /64
+        self.assertEqual(statuses, [401, 401, 429, 429, 429])
+        self.assertEqual(attempt("2001:db8:77:99::1"), 401)   # a different /64 is a different visitor
 
     def test_login_is_rate_limited_per_address(self) -> None:
         statuses = {call(self.port, "POST", "/login", {"username": f"u{i}", "password": "badbadbad"})[0]

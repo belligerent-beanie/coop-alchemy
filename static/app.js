@@ -1778,7 +1778,7 @@ $("cat").addEventListener("click", () => {
 });
 
 (function start() {
-  if (!Auth.token()) {
+  if (!Auth.loggedIn()) {
     Auth.toLogin();
     return;
   }

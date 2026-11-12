@@ -17,6 +17,7 @@ REAL = Path(__file__).resolve().parent / "recipes.json"
 SOON = VisitorPolicy(enabled=True, chance=1.0, min_seconds=60.0, max_seconds=60.0)
 
 
+@unittest.skipUnless(REAL.is_file(), "the private recipe book is not in this checkout")
 class GiftTests(unittest.TestCase):
     def setUp(self) -> None:
         self.real = load_recipes(REAL)

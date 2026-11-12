@@ -209,13 +209,22 @@ On Windows a deploy means a restart, which ends every running game.
 | Lockout after 5 wrong passwords, per account **and** client address, so strangers can't lock you out | `accounts.py` |
 | 20 logins/min and 5 signups/10 min per client address | `throttle.py`, `server.py` |
 | CSP (`script-src 'self'`), `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, HSTS behind HTTPS | `server.py` |
-| Cross-site POSTs refused (`Origin` must match `Host`) | `server.py` |
+| Cross-site POSTs refused (`Origin` must match `Host`); the session cookie is `HttpOnly`, `SameSite=Lax`, `Secure` over HTTPS | `server.py` |
 | 30 s read timeout; 4 KB request bodies | `server.py` |
 | Event streams use a one-time, 30-second ticket, never the player token in a URL | `throttle.py`, `server.py`, `static/app.js` |
 | Single-use, hashed invite codes for signup (`--require-invite`) | `invites.py`, `accounts_admin.py` |
 | Cloudflare Turnstile on signup (`--turnstile-site-key`) | `captcha.py` |
 | Confirmed email addresses, 24-hour expiry of unconfirmed accounts (`--require-email-verification`) | `accounts.py`, `mailer.py` |
 | Auth audit log (logins, failures, throttling, signups, with client address) to stderr | `server.py` |
+| IPv6 clients are limited by their /64 network, not by single address | `throttle.py` (`throttle_key`) |
+| Sessions end after 24 hours idle or 14 days at most; common passwords are refused | `accounts.py`, `commonpasswords.py` |
+| 50 wrong passwords an hour for one account, from anywhere, pause logins to it for 15 minutes (addresses that logged in to it in the last 30 days are exempt, so a stranger cannot lock the owner out) | `accounts.py` |
+| One event stream per player, 30 stream tickets a minute, at most `--max-connections` (600) open connections, 60 per directly connected address and 12 event streams per client address | `state.py`, `server.py` |
+| Per-player limits on game requests (about twice what the page sends at its peak) | `ratelimit.py`, `server.py` |
+| A disabled or deleted account is taken out of its running games and refused at its next request | `state.py`, `games.py`, `server.py` |
+| A temporary password can only be used to choose a new one | `server.py` (`_user`) |
+| Request values are made safe before they reach the log (no forged lines) | `server.py` (`log_safe`) |
+| `Permissions-Policy` and `Cross-Origin-Opener-Policy` headers | `server.py` |
 
 ## 3. The rest, in detail
 
@@ -378,6 +387,9 @@ cursor delay above about 100 ms (run `bench_cursor.py` on the real server), the 
 steps come first: a faster core, a lower cursor rate, then fewer threads; a multi-process redesign is the last resort.
 
 ### Data, backups and storage
+The recipe book and element pictures are private and not in git: in Docker they are `/data/recipes.json` and `/data/elements` (copy them in with
+`docker compose cp`, see the README, "The private recipe book"). Back them up yourself; `ops/backup.py` covers the player data only.
+
 State is in `accounts.json`, `drafts.json`, `daily.json` and `saves/`. Writes are atomic (temp file plus
 `os.replace`) but there is no backup. Run a nightly copy off the machine (the files are small) and test a restore.
 `accounts.json` holds password hashes and should be mode 0600 and owned by the service user. All of it is
@@ -394,12 +406,10 @@ A privacy notice (what you store: username, password hash, game history, IP addr
 and a contact address. If anyone under 13 could play, check COPPA and similar rules. Add a retention rule for logs.
 
 ### Remaining hardening
-- Drop `'unsafe-inline'` from `style-src` once the inline `style=` attributes in the pages and scripts are
-  moved into `style.css`.
-- Session tokens still live in `localStorage`, which any XSS could read. The CSP makes XSS much harder, but
-  moving to an `HttpOnly; Secure; SameSite=Strict` cookie plus a CSRF header would remove the exposure. It's a
-  larger change touching every page.
-- No breached-password check and no absolute session lifetime (sessions slide for 24 hours of use, forever).
+- (Done: `style-src` no longer allows `'unsafe-inline'`; sessions live in an `HttpOnly; SameSite=Lax` cookie, `Secure` over HTTPS, so
+  injected script cannot read them, and the page keeps only the username. Cross-site POSTs are still refused by the `Origin` check.
+  The `X-Session` header is still accepted for API clients and bots, so a leaked token from an API client is still a bearer token.)
+- (Done: sessions end after 24 hours idle or 14 days at most, and new passwords are checked against a local list of common ones: `commonpasswords.py`.)
 - Keep Python patched, and run `pip`-free as now: the stdlib-only design means no dependency to track.
 - Run an automated scan (OWASP ZAP) against a staging copy and fix what it finds.
 - Keep `aigen/` and `/admin` away from the public. Put `/admin*` behind the proxy's own auth (basic auth or an

@@ -40,16 +40,26 @@ def compose_flags() -> set[str]:
 
 
 def image_contents(destination: Path) -> None:
-    """Copy into `destination` what `docker build` would put in the image, following .dockerignore."""
+    """Copy into `destination` what `docker build` would put in the image, following .dockerignore (names and paths)."""
     patterns = [line.strip().rstrip("/") for line in (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
                 if line.strip() and not line.startswith("#")]
-    for entry in ROOT.iterdir():
-        if any(fnmatch.fnmatch(entry.name, pattern) for pattern in patterns):
-            continue
-        if entry.is_dir():
-            shutil.copytree(entry, destination / entry.name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-        else:
-            shutil.copy2(entry, destination / entry.name)
+
+    def ignored(relative: str) -> bool:
+        return any(fnmatch.fnmatch(relative, pattern) or ("/" not in pattern and fnmatch.fnmatch(relative.rsplit("/", 1)[-1], pattern))
+                   for pattern in patterns)
+
+    def copy(folder: Path, target: Path, prefix: str) -> None:
+        target.mkdir(exist_ok=True)
+        for entry in folder.iterdir():
+            relative = prefix + entry.name
+            if ignored(relative) or entry.name in ("__pycache__",) or entry.suffix == ".pyc":
+                continue
+            if entry.is_dir():
+                copy(entry, target / entry.name, relative + "/")
+            else:
+                shutil.copy2(entry, target / entry.name)
+
+    copy(ROOT, destination, "")
 
 
 class ContainerFileTests(unittest.TestCase):
@@ -78,10 +88,24 @@ class ContainerFileTests(unittest.TestCase):
 
     def test_the_data_stays_out_of_the_image(self) -> None:
         ignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
-        for private in ("accounts.json", "reports.json", ".env", "data", "backups", "*.pem"):
+        for private in ("accounts.json", "reports.json", ".env", "data", "backups", "*.pem", "recipes.json", "static/elements"):
             self.assertIn(private, ignore)
-        for flag in ("--accounts-file", "--saves-dir", "--log-file"):
+        for flag in ("--accounts-file", "--saves-dir", "--log-file", "--recipes", "--elements-dir"):
             self.assertRegex(DOCKERFILE, rf'"{flag}", "/data')  # pointed at the volume
+
+    def test_the_recipe_book_and_pictures_are_not_in_git_and_not_in_the_image(self) -> None:
+        ignored = [line.strip() for line in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()]
+        for private in ("recipes.json", "static/elements/"):
+            self.assertIn(private, ignored)
+        tracked = subprocess.run(["git", "-C", str(ROOT), "ls-files", "recipes.json", "recipes.mmd", "recipes.svg", "static/elements"],
+                                 capture_output=True, text=True)
+        if tracked.returncode == 0:   # a copy of the sources that is not a git checkout cannot be asked
+            self.assertEqual(tracked.stdout.strip(), "", "the private recipe book and pictures must not be tracked by git")
+        with tempfile.TemporaryDirectory() as tmp:
+            image_contents(Path(tmp))
+            self.assertFalse((Path(tmp) / "recipes.json").exists())
+            self.assertFalse((Path(tmp) / "static" / "elements").exists())
+            self.assertTrue((Path(tmp) / "static" / "app.js").is_file())
 
     def test_the_files_the_image_would_hold_are_enough_to_run_and_serve(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -89,7 +113,9 @@ class ContainerFileTests(unittest.TestCase):
             image.mkdir()
             data.mkdir()
             image_contents(image)
-            self.assertTrue((image / "server.py").is_file() and (image / "recipes.json").is_file() and (image / "static").is_dir())
+            self.assertTrue((image / "server.py").is_file() and (image / "static").is_dir())
+            self.assertFalse((image / "recipes.json").exists())   # the book comes from the data volume
+            shutil.copy2(ROOT / "test_recipes.json", data / "recipes.json")
             self.assertFalse((image / "test_coop.py").exists() or (image / "ops").exists() or (image / "accounts.json").exists())
             imports = subprocess.run([sys.executable, "-c", "import server, accounts_admin"], cwd=image, capture_output=True, text=True)
             self.assertEqual(imports.returncode, 0, imports.stderr)
@@ -97,7 +123,8 @@ class ContainerFileTests(unittest.TestCase):
             args = [sys.executable, "server.py", "--host", "127.0.0.1", "--port", str(port)]
             for flag in ("accounts-file", "daily-file", "drafts-file", "invites-file", "reports-file", "solo-file", "profile-file"):
                 args += [f"--{flag}", str(data / f"{flag}.json")]
-            args += ["--saves-dir", str(data / "saves"), "--snapshot-file", str(data / "snap.json"),
+            args += ["--recipes", str(data / "recipes.json"), "--elements-dir", str(data / "elements"),
+                     "--saves-dir", str(data / "saves"), "--snapshot-file", str(data / "snap.json"),
                      "--pid-file", str(data / "pid"), "--log-file", str(data / "live.log"), "--log-days", "14",
                      "--client-ip-header", "CF-Connecting-IP", "--trusted-proxy", "127.0.0.1", "--max-games", "10"]
             server = subprocess.Popen(args, cwd=image, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

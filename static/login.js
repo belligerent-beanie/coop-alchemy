@@ -79,7 +79,7 @@ $("auth-form").addEventListener("submit", async (e) => {
       $("auth-submit").disabled = false;
       return;
     }
-    Auth.set(data.session, data.username);
+    Auth.set(data.username);   // the session itself arrives as an HttpOnly cookie
     location.replace(data.must_change_password ? "/" : nextPage()); // a temporary password is replaced on the home page
   } catch (err) {
     $("auth-error").textContent = err.name === "QuotaExceededError" || err.name === "SecurityError"
@@ -91,7 +91,7 @@ $("auth-form").addEventListener("submit", async (e) => {
 });
 
 // Already logged in? Skip this page.
-if (Auth.token()) {
+if (Auth.loggedIn()) {
   fetch("/me", { headers: Auth.headers() }).then((res) => { if (res.ok) location.replace(nextPage()); });
 }
 
