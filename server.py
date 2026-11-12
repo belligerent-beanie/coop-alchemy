@@ -108,7 +108,7 @@ from accounts import SESSION_MAX_SECONDS, AccountStore, clean_email, key_of
 from breach import BreachChecker
 from captcha import ORIGIN as TURNSTILE_ORIGIN
 from captcha import Turnstile
-from achievements import ACHIEVEMENTS, BADGES, describe_badges
+from achievements import ACHIEVEMENTS, BADGES, MULTIPLAYER_UNLOCK_AT, describe_badges
 from achievements import describe as describe_achievements
 from achievements import one as achievement_json
 from daily import DailyStore
@@ -660,6 +660,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/games":
                 raw_name = self._read_json().get("name")
                 user = self._user()
+                self._require_multiplayer(user)
                 if isinstance(raw_name, str) and raw_name.strip():
                     self.server.names.check(raw_name, "game name")
                 self._limit_game_starts(user)
@@ -697,6 +698,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/games/resume":
                 saved_id, user = self._read_json().get("id"), self._user()
+                self._require_multiplayer(user)
                 self._limit_game_starts(user)
                 game = self.server.registry.resume(saved_id, user)
                 self._json(200, {"id": game.slug, "name": game.name, "url": f"/g/{game.slug}"})
@@ -736,6 +738,8 @@ class Handler(BaseHTTPRequestHandler):
             if game is None:
                 raise GameError(404, "that game does not exist (it may have ended)")
             if rest == "/join":
+                if not game.private:   # solo, daily and race worlds are not shared games
+                    self._require_multiplayer(username)
                 player = game.join(username)
                 self._json(200, {"token": player.token, "pid": player.pid, "name": player.name})
             else:
@@ -1091,6 +1095,7 @@ class Handler(BaseHTTPRequestHandler):
     def _solo_status(self) -> dict[str, Any]:
         username = self._user()
         return {**self.server.registry.solo_status(username), "may_create": self._may_create(username),
+                "multiplayer": self._multiplayer(username),
                 "achievements": describe_achievements(self.server.registry.solo.achievements(username))}
 
     def _create_data(self) -> dict[str, Any]:
@@ -1133,9 +1138,20 @@ class Handler(BaseHTTPRequestHandler):
             return drafts.promote(username, book, body.get("id"), body.get("note"))
         raise GameError(404, "not found")
 
+    def _multiplayer(self, username: str) -> dict[str, Any]:
+        return self.server.registry.multiplayer_status(username, self.server.accounts.is_admin(username))
+
+    def _require_multiplayer(self, username: str) -> None:
+        """403 until the account has unlocked shared games (10 achievements; see achievements.py)."""
+        status = self._multiplayer(username)
+        if not status["unlocked"]:
+            raise GameError(403, f"Multiplayer unlocks after {status['needed']} achievements: you have {status['earned']}. "
+                                 "Play Solo and the daily challenge to earn them.")
+
     def _game_list(self) -> dict[str, Any]:
         registry = self.server.registry
-        return {"games": registry.list(self._user()), "max_games": registry.max_games}
+        user = self._user()
+        return {"games": registry.list(user), "max_games": registry.max_games, "multiplayer": self._multiplayer(user)}
 
     def _read_json(self) -> dict[str, Any]:
         try:
@@ -1415,6 +1431,8 @@ def main() -> int:
                         help="running games one account may have started at once (default 1; 0 for no limit)")
     parser.add_argument("--max-games", type=int, default=MAX_GAMES,
                         help=f"how many games may run at once (default {MAX_GAMES}); daily challenges and races do not count")
+    parser.add_argument("--multiplayer-unlock", type=int, default=MULTIPLAYER_UNLOCK_AT,
+                        help=f"achievements an account needs before it can create or join shared games; 0 opens them to everyone (default {MULTIPLAYER_UNLOCK_AT})")
     parser.add_argument("--no-breach-check", action="store_true",
                         help="do not ask haveibeenpwned.com whether a password is known from a data breach (only 5 characters of its hash are ever sent)")
     parser.add_argument("--max-connections-per-address", type=int, default=MAX_CONNECTIONS_PER_PEER,
@@ -1458,6 +1476,7 @@ def main() -> int:
     except OSError as exc:
         print(f"cannot listen on {args.host}:{args.port}: {exc}", file=sys.stderr)
         return 1
+    registry.multiplayer_unlock_at = max(0, args.multiplayer_unlock)
     server.max_connections = max(10, args.max_connections)
     server.max_per_peer = max(2, args.max_connections_per_address)
     server.max_streams_per_client = max(1, args.max_streams_per_client)

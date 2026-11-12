@@ -28,6 +28,7 @@ from profiles import ProfileStore
 from race import GOALS, RaceRoom
 from recipes import RecipeBook, depths
 from saves import SaveStore
+from achievements import MULTIPLAYER_UNLOCK_AT, unlock_progress
 from solo import SoloStore
 from state import Challenge, GameError, GameState
 from visitor import VisitorPolicy
@@ -75,6 +76,7 @@ class GameRegistry:
         self.saves = saves or SaveStore(None)
         self.daily = daily or DailyStore(None, book)
         self.solo = solo or SoloStore(None)
+        self.multiplayer_unlock_at = MULTIPLAYER_UNLOCK_AT   # achievements an account needs before shared games open (0: open to all)
         self.pictures = pictures   # None: no element has a picture
         self.visitors = visitors   # when Mr Alchemy visits public games; None: never
         self.profiles = profiles or ProfileStore(None)   # account-wide counters and achievements (profiles.py)
@@ -154,6 +156,11 @@ class GameRegistry:
         def save(export: dict[str, Any], found: int, total: int, complete: bool, earned: set[str]) -> list[str]:
             return self.solo.record(username, export, found, total, complete, earned)
         return save
+
+    def multiplayer_status(self, username: str, admin: bool = False) -> dict[str, Any]:
+        """Whether this account may play shared games yet, and its progress towards the unlock (see achievements.unlock_progress)."""
+        return unlock_progress(self.solo.achievements(username), self.profiles.achievements(username),
+                               self.profiles.counters(username), admin, self.multiplayer_unlock_at)
 
     def solo_status(self, username: str) -> dict[str, Any]:
         """{"found", "total", "complete"}: the account's solo progress. A running game is more up to date than the file."""

@@ -1472,6 +1472,7 @@ SESSIONS: dict[int, str] = {}  # port -> login session that call() sends by defa
 def serve(registry: GameRegistry) -> tuple[AlchemyServer, int]:
     tmp = tempfile.TemporaryDirectory()
     accounts = AccountStore(Path(tmp.name) / "accounts.json", iterations=1000)  # few iterations: fast tests
+    registry.multiplayer_unlock_at = 0                  # the gate has its own tests (test_gate.py); everywhere else shared games are open
     server = AlchemyServer(("127.0.0.1", 0), registry, BASE_DIR / "static", accounts)
     server.register_throttle = Throttle(10_000, 1.0)  # the tests make many accounts from one address
     server.games_throttle = Throttle(10_000, 1.0)     # ... and many games from one account

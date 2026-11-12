@@ -136,7 +136,7 @@ class RealReloadTests(unittest.TestCase):
             [sys.executable, str(BASE_DIR / "server.py"), "--host", "127.0.0.1", "--port", str(self.port),
              "--recipes", str(BASE_DIR / "test_recipes.json"), "--saves-dir", str(self.dir / "saves"),
              "--accounts-file", str(self.dir / "accounts.json"), "--snapshot-file", str(self.dir / "snap.json"),
-             "--pid-file", str(self.pid_file)],
+             "--pid-file", str(self.pid_file), "--multiplayer-unlock", "0"],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         for _ in range(100):
             if self.pid_file.exists():

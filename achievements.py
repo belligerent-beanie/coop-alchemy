@@ -121,3 +121,29 @@ def describe_badges(earned: dict[str, int]) -> dict[str, list[dict[str, Any]]]:
     for b in BADGES:
         out[b.scope].append({"id": b.id, "icon": b.icon, "title": b.title, "description": b.description, "earned_at": earned.get(b.id)})
     return out
+
+
+# ---- the multiplayer unlock ---------------------------------------------------------------------------------------------
+#
+# Shared games open once an account has MULTIPLAYER_UNLOCK_AT achievements. What counts is what can be earned without them: every
+# solo achievement, plus the daily-challenge and race ones ("challenges"). Shared-game achievements do not count, since they
+# can only be earned inside shared games. An account that has already played a shared game keeps its access (it was playing before
+# the unlock existed), and administrators are never locked out.
+
+MULTIPLAYER_UNLOCK_AT = 10
+
+
+def unlock_progress(solo_earned: dict[str, int], badges_earned: dict[str, int], counters: dict[str, int],
+                    admin: bool = False, needed: int = MULTIPLAYER_UNLOCK_AT) -> dict[str, Any]:
+    """{"unlocked", "earned", "needed", "reason"}: whether shared games are open to an account, and how far it has got."""
+    earned = sum(1 for a in solo_earned if a in BY_ID) + sum(
+        1 for b in badges_earned if b in BADGES_BY_ID and BADGES_BY_ID[b].scope == "challenges")
+    if admin:
+        reason = "admin"
+    elif counters.get("games", 0) >= 1:
+        reason = "played"
+    elif earned >= needed:
+        reason = "achievements"
+    else:
+        reason = ""
+    return {"unlocked": bool(reason), "earned": earned, "needed": needed, "reason": reason}
