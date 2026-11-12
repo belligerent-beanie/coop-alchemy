@@ -315,6 +315,18 @@ class BreachCheckTests(unittest.TestCase):
         self.assertEqual(self.checker(0)[0].count(self.PASSWORD), 0)
         self.assertIsNone(self.checker(None)[0].count(self.PASSWORD))
 
+    def test_lookups_are_logged_with_their_outcome_but_never_the_password(self) -> None:
+        with self.assertLogs("alchemy.breach", level="INFO") as logged:
+            self.checker(None)[0].count(self.PASSWORD)    # the service is unreachable: a warning that says why
+            checker, _ = self.checker(2)
+            checker.count(self.PASSWORD)                  # fetched
+            checker.count(self.PASSWORD)                  # from the cache
+        text = "\n".join(logged.output)
+        self.assertIn("failed", text)
+        self.assertIn("ok in", text)
+        self.assertIn("cache", text)
+        self.assertNotIn(self.PASSWORD, text)
+
     def test_only_five_hash_characters_are_sent_and_answers_are_cached(self) -> None:
         checker, calls = self.checker(3)
         checker.count(self.PASSWORD)

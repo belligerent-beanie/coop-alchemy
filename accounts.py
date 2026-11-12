@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import secrets
@@ -105,6 +106,9 @@ def key_of(username: str) -> str:
     return " ".join(username.split()).casefold()
 
 
+log = logging.getLogger("alchemy.accounts")
+
+
 class AccountStore:
     def __init__(self, path: str | Path, *, clock: Callable[[], float] = time.time,
                  iterations: int = PBKDF2_ITERATIONS) -> None:
@@ -187,14 +191,20 @@ class AccountStore:
         """
         username = clean_username(raw_username)
         password = check_password(raw_password, username)
-        refuse_if_breached(password, self.breach_count)   # asks the network, so before any lock is taken
+        began = time.monotonic()
+        try:
+            refuse_if_breached(password, self.breach_count)   # asks the network, so before any lock is taken
+        finally:
+            breach_ms = (time.monotonic() - began) * 1000
         key = key_of(username)
         email, email_key = clean_email(raw_email) if raw_email is not None else ("", "")
         with self._lock:
             accounts = self._load()
             self._claim_free(accounts, key, email_key)
         salt = secrets.token_hex(16)
+        hashing = time.monotonic()
         digest = self._hash(password, salt, self._iterations)  # slow, so done outside the lock
+        hash_ms = (time.monotonic() - hashing) * 1000
         with self._lock:
             accounts = self._load()
             self._claim_free(accounts, key, email_key)
@@ -202,7 +212,10 @@ class AccountStore:
                              "iterations": self._iterations, "created": self._clock()}
             if email:
                 accounts[key].update(email=email, email_key=email_key, verified=False)
+            saving = time.monotonic()
             self._save(accounts)
+        log.info("register timing: breach check %.0f ms, password hash %.0f ms, save %.0f ms",
+                 breach_ms, hash_ms, (time.monotonic() - saving) * 1000)
         return username
 
     def _claim_free(self, accounts: dict[str, dict[str, Any]], key: str, email_key: str) -> None:
@@ -310,7 +323,9 @@ class AccountStore:
             record = self._peek().get(key)
         salt = record["salt"] if record else "00" * 16
         iterations = record.get("iterations", self._iterations) if record else self._iterations
+        hashing = time.monotonic()
         digest = self._hash(raw_password, salt, iterations)  # unknown names cost the same time as wrong passwords
+        log.info("login timing: password hash %.0f ms (%d iterations)", (time.monotonic() - hashing) * 1000, iterations)
         good = record is not None and hmac.compare_digest(digest, record["hash"])
         with self._lock:
             if not good:

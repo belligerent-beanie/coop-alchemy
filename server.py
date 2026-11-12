@@ -187,6 +187,7 @@ def run_action(state: GameState, path: str, token: str, body: dict[str, Any]) ->
 
 
 log = logging.getLogger("alchemy.auth")
+SLOW_REQUEST_SECONDS = 1.0   # a request slower than this is logged as a warning, whatever it was
 
 
 def log_safe(value: object, limit: int = 40) -> str:
@@ -394,7 +395,23 @@ class Handler(BaseHTTPRequestHandler):
 
     def handle_one_request(self) -> None:
         self._cookies_out: list[str] = []   # Set-Cookie lines for this request's response only (a connection serves many)
+        self._status = 0
+        self._began = 0.0
         super().handle_one_request()
+        if self._began:   # a request was read (an idle keep-alive connection closing has nothing to report)
+            took = time.monotonic() - self._began
+            accounty = self.path in ("/register", "/login") and self.command == "POST"
+            stream = self.path.split("?")[0].endswith("/events")   # an event stream stays open on purpose
+            if accounty or (took >= SLOW_REQUEST_SECONDS and not stream):
+                (log.warning if took >= SLOW_REQUEST_SECONDS else log.info)(
+                    "%s %s -> %s in %.0f ms", self.command, self.path.split("?")[0], self._status, took * 1000)
+
+    def parse_request(self) -> bool:
+        self._began = time.monotonic()   # the request line and headers are in: from here on the time is ours, not the client's
+        return super().parse_request()
+
+    def log_request(self, code: Any = "-", size: Any = "-") -> None:   # the base class calls this when it answers
+        self._status = code
 
     def _session_token(self) -> tuple[str, bool]:
         """(the session token the caller sent, whether it came in the cookie). The X-Session header wins if both are present."""
@@ -863,6 +880,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise GameError(429, f"too many attempts from this address; try again in {int(wait) + 1} seconds")
         if path == "/register" and self.server.captcha is not None:
             self.server.captcha.verify(body.get("captcha"), client)  # before anything else: bots learn nothing
+        log.info("%s start client=%s", path[1:], client)   # so a request that never finishes still leaves a trace
         try:
             if path == "/register" and self.server.mailer is not None:
                 username = self._register(body)

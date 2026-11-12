@@ -10,6 +10,7 @@ safety net, so an outage at the service must never stop anyone signing up or log
 from __future__ import annotations
 
 import hashlib
+import logging
 import threading
 import time
 import urllib.error
@@ -23,6 +24,8 @@ MAX_CACHED = 2000
 MAX_RESPONSE_BYTES = 2_000_000    # a real answer is about 40 KB
 
 Fetch = Callable[[str], str]
+SLOW_SECONDS = 1.0   # a lookup slower than this is logged as a warning
+log = logging.getLogger("alchemy.breach")
 
 
 def fetch_range(prefix: str) -> str:
@@ -44,18 +47,26 @@ class BreachChecker:
         with self._lock:
             hit = self._cache.get(prefix)
             if hit and now - hit[0] < CACHE_SECONDS:
+                log.info("breach lookup: answered from the cache")
                 return hit[1]
+        began = time.monotonic()
         try:
             text = self._fetch(prefix)
-        except (OSError, ValueError, urllib.error.URLError):
+        except (OSError, ValueError, urllib.error.URLError) as exc:
+            log.warning("breach lookup failed after %.0f ms (%s: %s): treated as unknown",
+                        (time.monotonic() - began) * 1000, type(exc).__name__, exc)
             return None
+        elapsed = time.monotonic() - began
         found: dict[str, int] = {}
         for line in text.splitlines():
             suffix, _, count = line.strip().partition(":")
             if len(suffix) == 35 and count.isdigit():
                 found[suffix.upper()] = int(count)
         if not found:   # a real answer always has hundreds of lines: treat an empty or garbled one as unknown
+            log.warning("breach lookup gave an empty or garbled answer after %.0f ms: treated as unknown", elapsed * 1000)
             return None
+        (log.warning if elapsed > SLOW_SECONDS else log.info)(
+            "breach lookup ok in %.0f ms (%d suffixes)", elapsed * 1000, len(found))
         with self._lock:
             self._cache.pop(prefix, None)
             self._cache[prefix] = (now, found)
