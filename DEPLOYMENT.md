@@ -216,6 +216,14 @@ On Windows a deploy means a restart, which ends every running game.
 | Cloudflare Turnstile on signup (`--turnstile-site-key`) | `captcha.py` |
 | Confirmed email addresses, 24-hour expiry of unconfirmed accounts (`--require-email-verification`) | `accounts.py`, `mailer.py` |
 | Auth audit log (logins, failures, throttling, signups, with client address) to stderr | `server.py` |
+| IPv6 clients are limited by their /64 network, not by single address | `throttle.py` (`throttle_key`) |
+| 50 wrong passwords an hour for one account, from anywhere, pause logins to it for 15 minutes | `accounts.py` |
+| One event stream per player, 30 stream tickets a minute, at most `--max-connections` (600) open connections | `state.py`, `server.py` |
+| Per-player limits on game requests (about twice what the page sends at its peak) | `ratelimit.py`, `server.py` |
+| A disabled or deleted account is taken out of its running games and refused at its next request | `state.py`, `games.py`, `server.py` |
+| A temporary password can only be used to choose a new one | `server.py` (`_user`) |
+| Request values are made safe before they reach the log (no forged lines) | `server.py` (`log_safe`) |
+| `Permissions-Policy` and `Cross-Origin-Opener-Policy` headers | `server.py` |
 
 ## 3. The rest, in detail
 

@@ -183,6 +183,14 @@ def run_action(state: GameState, path: str, token: str, body: dict[str, Any]) ->
 log = logging.getLogger("alchemy.auth")
 
 
+def log_safe(value: object, limit: int = 40) -> str:
+    """Text from a request made safe for a log line: printable ASCII only (anything else becomes '?'), cut to `limit` characters.
+
+    Without this a username containing a line break could write a line of its own, such as a forged "login ok".
+    """
+    return re.sub(r"[^\x20-\x7e]", "?", str(value))[:limit]
+
+
 def cursor_pid(message: str) -> str | None:
     """The player a cursor event is about, or None if `message` is any other kind of event."""
     if not message.startswith("event: cursor\n"):
@@ -336,6 +344,8 @@ class Handler(BaseHTTPRequestHandler):
         ("X-Content-Type-Options", "nosniff"),
         ("X-Frame-Options", "DENY"),
         ("Referrer-Policy", "no-referrer"),
+        ("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"),
+        ("Cross-Origin-Opener-Policy", "same-origin"),
     )
 
     def end_headers(self) -> None:
@@ -391,11 +401,21 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- routing ------------------------------------------------------
 
+    # What a login made with an administrator's temporary password may do before the owner chooses their own password.
+    PASSWORD_CHANGE_PATHS = ("/me", "/account/change-password")
+
     def _user(self) -> str:
-        """The username of the logged-in caller (401 if there is no valid session)."""
-        name = self.server.accounts.username(self.headers.get("X-Session", ""))
+        """The username of the logged-in caller (401 if there is no valid session).
+
+        An account whose password an administrator reset (a temporary one) can do nothing else until its owner has chosen a new
+        password (403), so the temporary password is not a working login for anyone who learned it.
+        """
+        accounts = self.server.accounts
+        name = accounts.username(self.headers.get("X-Session", ""))
         if name is None:
             raise GameError(401, "please log in")
+        if urlsplit(self.path).path not in self.PASSWORD_CHANGE_PATHS and accounts.must_change_password(name):
+            raise GameError(403, "an administrator gave you a temporary password: choose your own on the home page first")
         return name
 
     def do_GET(self) -> None:
@@ -773,8 +793,7 @@ class Handler(BaseHTTPRequestHandler):
         except GameError as exc:
             if path == "/login":
                 self.server.bump("login_failures")
-                log.warning("login failed status=%s client=%s user=%s", exc.status, client,
-                            str(body.get("username"))[:40].encode("ascii", "replace").decode())
+                log.warning("login failed status=%s client=%s user=%s", exc.status, client, log_safe(body.get("username")))
             raise
         log.info("%s ok client=%s user=%s", path[1:], client, username)
 
@@ -823,7 +842,7 @@ class Handler(BaseHTTPRequestHandler):
             if runner is None:
                 raise GameError(409, "companions are not set up on this server")
             bot = runner.host_now()
-            log.info("admin %s had companion %s open room %s", admin, bot.name, bot.game.slug)
+            log.info("admin %s had companion %s open room %s", admin, log_safe(bot.name), log_safe(bot.game.slug))
             return {"id": bot.game.slug, "name": bot.name}
         if path in ("/ops/bots/add", "/ops/bots/remove"):
             runner = server.registry.bots
@@ -837,7 +856,7 @@ class Handler(BaseHTTPRequestHandler):
                 if level is not None and level not in (0, 1):
                     raise GameError(400, "level must be 0 or 1")
                 name = runner.add(slug, level)
-                log.info("admin %s added companion %s to game %s", admin, name, slug)
+                log.info("admin %s added companion %s to game %s", admin, log_safe(name), log_safe(slug))
                 return {"name": name}
             slug, name = body.get("id"), body.get("name")
             removed = runner.remove(slug if isinstance(slug, str) else None, name if isinstance(name, str) else None)
@@ -848,14 +867,14 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(slug, str):
                 raise GameError(400, "missing game id")
             result = server.registry.admin_visit(slug)
-            log.info("admin %s sent Mr Alchemy to game %s", admin, slug)
+            log.info("admin %s sent Mr Alchemy to game %s", admin, log_safe(slug))
             return result
         if path == "/ops/games/end":
             slug = body.get("id")
             if not isinstance(slug, str):
                 raise GameError(400, "missing game id")
             server.registry.admin_end(slug)
-            log.info("admin %s ended game %s", admin, slug)
+            log.info("admin %s ended game %s", admin, log_safe(slug))
             return {}
         actions = ("verify", "enable", "disable", "reset-password", "delete")
         action = path[len("/ops/accounts/"):] if path.startswith("/ops/accounts/") else ""
@@ -866,7 +885,7 @@ class Handler(BaseHTTPRequestHandler):
             raise GameError(400, "missing username")
         if action != "verify" and action != "enable" and accounts.is_admin(username):
             raise GameError(403, "administrators cannot be changed here: take the admin role away with accounts_admin.py first")
-        log.info("admin %s: %s %s", admin, action, username)
+        log.info("admin %s: %s %s", admin, action, log_safe(username))
         if action == "verify":
             accounts.set_verified(username)
             return {}
@@ -1190,6 +1209,11 @@ class Handler(BaseHTTPRequestHandler):
             game.unsubscribe(sub)
 
 
+def broad_proxy_trust(networks: list) -> bool:
+    """True if the trusted proxies include a whole range of addresses rather than single machines (loopback excepted)."""
+    return any(net.num_addresses > 1 and not net.is_loopback for net in networks)
+
+
 def tune_socket(sock: socket.socket) -> None:
     """Make the OS notice vanished clients (Wi-Fi dropped, laptop closed) within ~20 s.
 
@@ -1345,6 +1369,9 @@ def main() -> int:
     except ValueError as exc:
         print(f"--trusted-proxy: {exc}", file=sys.stderr)
         return 1
+    if broad_proxy_trust(server.trusted_proxies):
+        print("note: --trusted-proxy covers whole address ranges, so anyone who can reach this port from inside them can choose the "
+              "client address that limits and logs use. Make sure only the proxy (the tunnel) can connect to this port.")
     configure_logging(args.log_file, args.log_days)
     try:
         server.names = NameFilter.load(args.blocklist_file)
@@ -1454,7 +1481,7 @@ def visitor_loop(registry: GameRegistry) -> None:
         time.sleep(VISITOR_CHECK_SECONDS)
         try:
             for name in registry.visitor_tick():
-                log.info("Mr Alchemy visited game %s", name)
+                log.info("Mr Alchemy visited game %s", log_safe(name))
         except Exception as exc:
             print(f"warning: Mr Alchemy's rounds failed: {exc}", file=sys.stderr)
 

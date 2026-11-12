@@ -16,7 +16,7 @@ from accounts import AccountStore
 from state import GameError
 from games import GameRegistry
 from test_coop import RECIPES, call, load_recipes, login_as, serve
-from server import MAX_DRAIN, Handler
+from server import MAX_DRAIN, Handler, broad_proxy_trust, log_safe
 from ratelimit import ACTION_BURST, ACTION_RATE, MOTION_BURST, MOTION_RATE, TokenBuckets
 from throttle import Throttle, TicketStore, client_ip, parse_networks, throttle_key
 
@@ -74,6 +74,25 @@ class ClientIpTests(unittest.TestCase):
         self.assertEqual(client_ip("127.0.0.1", "6.6.6.6, 198.51.100.7", self.PROXY), "198.51.100.7")
         self.assertEqual(client_ip("127.0.0.1", "198.51.100.7, 10.1.2.3", self.PROXY), "198.51.100.7")
         self.assertEqual(client_ip("127.0.0.1", "not-an-ip", self.PROXY), "127.0.0.1")
+
+
+class ProxyTrustWarningTests(unittest.TestCase):
+    def test_only_whole_ranges_trigger_the_note(self) -> None:
+        self.assertFalse(broad_proxy_trust(parse_networks(["127.0.0.1", "::1", "10.1.2.3"])))
+        self.assertFalse(broad_proxy_trust([]))
+        self.assertTrue(broad_proxy_trust(parse_networks(["172.16.0.0/12"])))
+        self.assertTrue(broad_proxy_trust(parse_networks(["127.0.0.1", "192.168.0.0/16"])))
+
+
+class LogSafeTests(unittest.TestCase):
+    def test_line_breaks_and_odd_characters_cannot_make_a_new_log_line(self) -> None:
+        forged = "x\n2026-11-12 alchemy.auth login failed\r\x1b[2Jé\u2028"
+        safe = log_safe(forged)
+        self.assertEqual(len(safe.splitlines()), 1)
+        self.assertTrue(safe.isascii() and safe.isprintable())
+        self.assertLessEqual(len(log_safe("a" * 500)), 40)
+        self.assertEqual(log_safe("Alice 2_b"), "Alice 2_b")
+        self.assertEqual(log_safe(None), "None")
 
 
 class TokenBucketTests(unittest.TestCase):
@@ -287,6 +306,21 @@ class ServerHardeningTests(unittest.TestCase):
         self.assertIn("script-src 'self'", resp.getheader("Content-Security-Policy"))
         self.assertEqual(resp.getheader("X-Content-Type-Options"), "nosniff")
         self.assertEqual(resp.getheader("X-Frame-Options"), "DENY")
+        self.assertEqual(resp.getheader("Cross-Origin-Opener-Policy"), "same-origin")
+        self.assertIn("camera=()", resp.getheader("Permissions-Policy"))
+
+    def test_the_extra_headers_are_on_json_replies_and_the_event_stream_too(self) -> None:
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("GET", "/healthz")
+        resp = conn.getresponse()
+        resp.read()
+        conn.close()
+        self.assertEqual(resp.getheader("Cross-Origin-Opener-Policy"), "same-origin")
+        token = self.join("headers-stream")
+        stream = self.open_stream("headers-stream", self.ticket("headers-stream", token))
+        head = stream.recv(4096).decode("latin-1").lower()
+        self.assertIn("cross-origin-opener-policy: same-origin", head)
+        self.assertIn("permissions-policy:", head)
 
     def test_cross_site_posts_are_refused(self) -> None:
         status, _ = call(self.port, "POST", "/login", {"username": "x", "password": "y"},
@@ -516,6 +550,40 @@ class ServerHardeningTests(unittest.TestCase):
         self.assertGreaterEqual(self.server.stats["actions_limited"], 1)
         other = self.seat("flooded", "Flood Neighbour")[1]   # another player's budget is separate
         self.assertEqual(call(self.port, "POST", "/g/flooded/tile/add", {"player": other, "element": element, "x": 0.2, "y": 0.2})[0], 200)
+
+    def test_a_temporary_password_only_lets_the_owner_choose_a_new_one(self) -> None:
+        self.server.accounts.set_admin("Host", True)
+        login_as(self.port, "Forgetful")
+        status, reset = call(self.port, "POST", "/ops/accounts/reset-password", {"username": "Forgetful"})
+        self.assertEqual(status, 200)
+        temporary = reset["temporary_password"]
+        status, data = call(self.port, "POST", "/login", {"username": "Forgetful", "password": temporary}, headers={"X-Session": ""})
+        self.assertEqual((status, data.get("must_change_password")), (200, True))
+        session = {"X-Session": data["session"]}
+        self.assertEqual(call(self.port, "GET", "/me", headers=session)[1]["must_change_password"], True)
+        for method, path, body in (("GET", "/games", None), ("GET", "/saved", None), ("GET", "/profile", None),
+                                   ("POST", "/games", {"name": "sneaky"}), ("POST", "/solo/start", {}),
+                                   ("POST", "/races", {"goal": "count"}), ("GET", "/ops/status", None),
+                                   ("POST", "/account/delete", {"password": temporary})):
+            self.assertEqual(call(self.port, method, path, body, headers=session)[0], 403, path)
+        self.assertEqual(call(self.port, "POST", "/account/change-password", {"current": temporary, "new": "x"}, headers=session)[0], 400)
+        status, changed = call(self.port, "POST", "/account/change-password",
+                               {"current": temporary, "new": "my own new password"}, headers=session)
+        self.assertEqual(status, 200)
+        session = {"X-Session": changed["session"]}
+        self.assertEqual(call(self.port, "GET", "/me", headers=session)[1]["must_change_password"], False)
+        self.assertEqual(call(self.port, "GET", "/games", headers=session)[0], 200)
+
+    def test_a_username_with_a_line_break_writes_one_log_line(self) -> None:
+        with self.assertLogs("alchemy.auth", level="WARNING") as captured:
+            status, _ = call(self.port, "POST", "/login",
+                             {"username": "x\n2026-11-12 alchemy.auth login failed status=401 client=1.2.3.4", "password": "whatever"},
+                             headers={"X-Session": "", "CF-Connecting-IP": "198.51.100.200"})
+        self.assertIn(status, (401, 429))
+        failed = [r.getMessage() for r in captured.records if r.getMessage().startswith("login failed")]
+        self.assertTrue(failed)
+        for line in failed:
+            self.assertEqual(len(line.splitlines()), 1, line)
 
     def test_a_visitor_on_one_ipv6_64_shares_one_login_limit(self) -> None:
         server = self.server
