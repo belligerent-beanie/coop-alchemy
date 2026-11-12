@@ -218,7 +218,7 @@ On Windows a deploy means a restart, which ends every running game.
 | Auth audit log (logins, failures, throttling, signups, with client address) to stderr | `server.py` |
 | IPv6 clients are limited by their /64 network, not by single address | `throttle.py` (`throttle_key`) |
 | Sessions end after 24 hours idle or 14 days at most; common passwords are refused | `accounts.py`, `commonpasswords.py` |
-| 50 wrong passwords an hour for one account, from anywhere, pause logins to it for 15 minutes | `accounts.py` |
+| 50 wrong passwords an hour for one account, from anywhere, pause logins to it for 15 minutes (addresses that logged in to it in the last 30 days are exempt, so a stranger cannot lock the owner out) | `accounts.py` |
 | One event stream per player, 30 stream tickets a minute, at most `--max-connections` (600) open connections, 60 per directly connected address and 12 event streams per client address | `state.py`, `server.py` |
 | Per-player limits on game requests (about twice what the page sends at its peak) | `ratelimit.py`, `server.py` |
 | A disabled or deleted account is taken out of its running games and refused at its next request | `state.py`, `games.py`, `server.py` |

@@ -38,6 +38,8 @@ ACCOUNT_MAX_FAILURES = 50       # wrong passwords for one account, from anywhere
 ACCOUNT_WINDOW_SECONDS = 3600.0
 ACCOUNT_PAUSE_SECONDS = 900.0   # ... and then logging in to that account is paused this long after the latest failure
 MAX_TRACKED_FAILURES = 5000
+KNOWN_CLIENT_SECONDS = 30 * 24 * 3600.0   # a client address that logged in to an account stays "known" to it this long
+MAX_KNOWN_CLIENTS = 20          # per account
 BREACH_RECHECK_SECONDS = 7 * 24 * 3600.0   # a password is looked up in the breach list at login, then not again for this long
 MAX_SESSIONS = 2000
 VERIFY_SECONDS = 24 * 3600.0    # an emailed link works this long; an account still unverified then is deleted
@@ -113,6 +115,7 @@ class AccountStore:
         self._sessions: dict[str, tuple[str, str, float, float]] = {}   # token -> (key, salt, last used, made)
         self._failures: dict[str, tuple[int, float]] = {}        # key|client -> (count, locked until); oldest first
         self._account_failures: dict[str, list[float]] = {}      # key -> times of recent wrong passwords, from any client
+        self._known_clients: dict[str, dict[str, float]] = {}     # key -> {client: when it last logged in}; oldest first, memory only
         self._cache: tuple[tuple[int, int] | None, dict[str, dict[str, Any]]] | None = None  # see _peek()
         # How many known data breaches a password appears in (None if unknown); set by the server (breach.py). Off when None.
         self.breach_count: Callable[[str], int | None] | None = None
@@ -302,7 +305,7 @@ class AccountStore:
             if until > now:
                 raise GameError(429, f"too many wrong passwords; try again in {int(until - now) + 1} seconds")
             paused = self._account_paused_until(key, now)
-            if paused > now:
+            if paused > now and not self._is_known_client(key, client, now):
                 raise GameError(429, f"too many wrong passwords for this account; try again in {int(paused - now) + 1} seconds")
             record = self._peek().get(key)
         salt = record["salt"] if record else "00" * 16
@@ -320,7 +323,9 @@ class AccountStore:
                     del self._failures[stale]
                 raise GameError(401, "wrong username or password")
             self._failures.pop(fail_key, None)
-            self._account_failures.pop(key, None)
+            if paused <= now:   # a known address getting in during a pause must not wipe the count of guesses being made
+                self._account_failures.pop(key, None)
+            self._remember_client(key, client, now)
             if record.get("verified") is False:  # told only once the password is right
                 raise GameError(403, "please confirm your email address first: open the link we sent you, "
                                      "or ask for a new one below")
@@ -359,11 +364,27 @@ class AccountStore:
             record = self._peek().get(key_of(username))
             return bool(record and record.get("breached") is True)
 
+    def _is_known_client(self, key: str, client: str, now: float) -> bool:
+        """True if this address has logged in to the account lately: it is not held up by the account-wide pause (call with the lock held)."""
+        return bool(client) and now - self._known_clients.get(key, {}).get(client, -KNOWN_CLIENT_SECONDS) < KNOWN_CLIENT_SECONDS
+
+    def _remember_client(self, key: str, client: str, now: float) -> None:
+        if not client:
+            return
+        known = {c: t for c, t in self._known_clients.pop(key, {}).items() if now - t < KNOWN_CLIENT_SECONDS and c != client}
+        known[client] = now
+        while len(known) > MAX_KNOWN_CLIENTS:
+            del known[next(iter(known))]
+        self._known_clients[key] = known
+        while len(self._known_clients) > MAX_TRACKED_FAILURES:
+            del self._known_clients[next(iter(self._known_clients))]
+
     def _account_paused_until(self, key: str, now: float) -> float:
         """When logging in to this account may resume after too many wrong passwords from any clients (0 if it is not paused).
 
-        This is what stops guessing spread over many addresses, which the per-client limits cannot see. The limit is high so
-        that a stranger can hardly lock the owner out, and it also pauses the right password, so it is logged by the caller.
+        This is what stops guessing spread over many addresses, which the per-client limits cannot see. The limit is high, and
+        addresses that have logged in to the account before are not held up by it (see _is_known_client), so a stranger cannot
+        lock the owner out from their usual connection; it does pause the right password from a new address.
         Call with the lock held.
         """
         recent = [t for t in self._account_failures.get(key, ()) if now - t < ACCOUNT_WINDOW_SECONDS]

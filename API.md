@@ -23,7 +23,7 @@ this file in the same commit (and add a line to the [change log](#change-log)).
   `Referrer-Policy` (and `Strict-Transport-Security` over HTTPS).
 - **Limits.** Per client address: 20 login attempts a minute, 5 sign-ups per 10 minutes, 10 verification-email requests an
   hour. An IPv6 address counts as its whole /64 network. 5 wrong passwords in a row for one account from one address lock that
-  pair for 60 seconds, and 50 wrong passwords in an hour for one account from anywhere pause logins to it for 15 minutes.
+  pair for 60 seconds, and 50 wrong passwords in an hour for one account from anywhere pause logins to it for 15 minutes, except from addresses that logged in to it in the last 30 days.
   Per player in a game: cursor and tile-move requests at about 50 a second and everything else at about 10 a second (bursts of
   100 and 30 are allowed); beyond that `429` (a cursor update is dropped with a `200`). 30 event-stream tickets a minute per
   player, one open event stream per player (a new one closes the old), and at most 600 open connections on the server (`503`).

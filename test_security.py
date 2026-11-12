@@ -186,6 +186,18 @@ class AccountFailureCapTests(unittest.TestCase):
         now[0] += accounts_module.ACCOUNT_PAUSE_SECONDS + 1
         self.assertTrue(accounts.login("alice", "correct horse battery", client="10.8.8.8")[0])
 
+    def test_the_owner_from_a_known_address_is_not_locked_out_by_strangers(self) -> None:
+        accounts, now = self.make()
+        self.assertTrue(accounts.login("alice", "correct horse battery", client="10.7.7.7")[0])   # her usual connection
+        for i in range(accounts_module.ACCOUNT_MAX_FAILURES):
+            self.fail(accounts, f"10.5.{i // 250}.{i % 250}")
+        self.assertTrue(accounts.login("alice", "correct horse battery", client="10.7.7.7")[0])   # still gets in
+        with self.assertRaises(GameError) as ctx:   # a new address still waits
+            accounts.login("alice", "correct horse battery", client="10.6.6.6")
+        self.assertEqual(ctx.exception.status, 429)
+        now[0] += accounts_module.KNOWN_CLIENT_SECONDS + 1   # an old acquaintance is forgotten
+        self.assertEqual(self.fail(accounts, "10.5.9.9"), 401)
+
     def test_other_accounts_are_not_paused(self) -> None:
         accounts, _ = self.make()
         accounts.register("bobby", "another long password")
