@@ -328,6 +328,12 @@ class AlchemyServer(ThreadingHTTPServer):
                 try:
                     request.settimeout(1.0)
                     request.sendall(b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 5\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                    # Closing a socket with the client's request still unread makes Windows (and sometimes Linux) reset the
+                    # connection, and the reset can destroy the 503 before the client reads it: finish sending, then take what
+                    # has already arrived (briefly: this runs in the accept loop) before closing.
+                    request.shutdown(socket.SHUT_WR)
+                    request.settimeout(0.05)
+                    request.recv(65536)
                 except OSError:
                     pass
             self.shutdown_request(request)
