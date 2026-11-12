@@ -426,7 +426,7 @@ function paintMultiplayer(mp) {
   bar.setAttribute("aria-valuenow", String(Math.min(mp.earned, mp.needed)));
 }
 for (const button of document.querySelectorAll("[data-goto]")) {
-  button.addEventListener("click", () => { showHomeTab(button.dataset.goto); history.replaceState(null, "", `#${button.dataset.goto}`); });
+  button.addEventListener("click", () => showHomeTab(button.dataset.goto));   // the address stays as it is: a click is not a new page
 }
 loadSolo();
 loadAchievements();
@@ -532,10 +532,7 @@ function showHomeTab(name, remember = true) {
     try { sessionStorage.setItem("home-tab", name); } catch (_) { /* private window: the tab is just not remembered */ }
   }
 }
-for (const tab of HOME_TABS) $(`home-tab-${tab}`).addEventListener("click", () => {
-  showHomeTab(tab);
-  history.replaceState(null, "", `#${tab}`);
-});
+for (const tab of HOME_TABS) $(`home-tab-${tab}`).addEventListener("click", () => showHomeTab(tab));   // no #tab in the address: a click is not a new page
 {
   let wanted = location.hash.slice(1);
   if (!HOME_TABS.includes(wanted)) {
