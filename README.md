@@ -181,6 +181,12 @@ undoes it; `list` shows them). They are meant for automated proposers such as `p
 200-draft and 40-proposal limits do not apply to them, and nothing else changes (a bot is not an admin).
 The account must exist first, so sign up for it on the site, then mark it.
 
+**Designers** are accounts marked with `python3 accounts_admin.py make-designer <username>` (`remove-designer` undoes it).
+Their pages get a small UI picker: press Alt+Shift+P (or the Design button), click an element, then use Fill, Border or Text
+(↑ selects the parent, ↓ a child, Enter opens the tools, Esc closes them). Edits are only in that browser tab and are
+gone on reload; "Changes" copies or downloads them as Markdown (selector, before → after) to hand to a developer or an AI.
+It changes nothing for other players and is a convenience, not a security feature.
+
 A first administrator can be made with `python3 accounts_admin.py create-admin` (an account called `admin`, with a random temporary password saved to `admin-first-password.txt` beside the accounts file and never printed; it must be changed at first login), and **admins** are accounts marked with `python3 accounts_admin.py make-admin <username>`
 (`remove-admin` undoes it; `list` shows them). Admins see **Review proposals** on the home
 page, with the number waiting. The review page works like a swipe deck: one proposal at a

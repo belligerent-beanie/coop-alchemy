@@ -513,12 +513,12 @@ class AccountStore:
             return sorted((r["name"] for r in self._peek().values()), key=str.casefold)
 
     def listing(self) -> list[dict[str, object]]:
-        """Every account as {"name", "admin", "bot", "pending", "disabled", "created"} (created is a date), by name.
+        """Every account as {"name", "admin", "designer", "bot", "pending", "disabled", "created"} (created is a date), by name.
 
         Nothing private: no password hashes, and no email addresses.
         """
         with self._lock:
-            rows = [{"name": r["name"], "admin": r.get("admin") is True, "bot": r.get("bot") is True,
+            rows = [{"name": r["name"], "admin": r.get("admin") is True, "designer": r.get("designer") is True, "bot": r.get("bot") is True,
                      "pending": r.get("verified") is False, "disabled": r.get("disabled") is True,
                      "created": time.strftime("%Y-%m-%d", time.localtime(r["created"])) if isinstance(r.get("created"), (int, float)) else ""}
                     for r in self._peek().values()]
@@ -617,6 +617,28 @@ class AccountStore:
             else:
                 accounts[key].pop("admin", None)
             self._save(accounts)
+
+    def is_designer(self, username: str) -> bool:
+        """True for accounts marked as designers (accounts_admin.py make-designer): they get the on-page UI picker (static/designer.js)."""
+        with self._lock:
+            record = self._peek().get(key_of(username))
+            return bool(record and record.get("designer") is True)
+
+    def set_designer(self, username: str, designer: bool) -> None:
+        key = key_of(username)
+        with self._lock:
+            accounts = self._load()
+            if key not in accounts:
+                raise GameError(404, f"there is no account called {username!r}")
+            if designer:
+                accounts[key]["designer"] = True
+            else:
+                accounts[key].pop("designer", None)
+            self._save(accounts)
+
+    def designers(self) -> list[str]:
+        with self._lock:
+            return sorted((r["name"] for r in self._peek().values() if r.get("designer") is True), key=str.casefold)
 
     def admins(self) -> list[str]:
         with self._lock:

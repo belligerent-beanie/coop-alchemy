@@ -105,12 +105,49 @@ class AccountToolTests(unittest.TestCase):
         self.store.set_admin("bob", True)
         self.store.set_disabled("ann", True)
         rows = {row["name"]: row for row in self.store.listing()}
-        self.assertEqual(set(rows["ann"]), {"name", "admin", "bot", "pending", "disabled", "created"})
+        self.assertEqual(set(rows["ann"]), {"name", "admin", "designer", "bot", "pending", "disabled", "created"})
         self.assertTrue(rows["ann"]["disabled"] and rows["bob"]["admin"])
         self.assertNotIn("hash", json.dumps(rows))
         self.assertEqual(self.store.counts(), {"total": 2, "pending": 0, "disabled": 1, "admins": 1})
         self.store.login("bob", PASSWORD)
         self.assertEqual(self.store.session_count(), 1)
+
+
+class DesignerRoleTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "accounts.json"
+        self.store = AccountStore(self.path, iterations=1000)
+        self.store.register("Dee", PASSWORD)
+        self.store.register("Eve", PASSWORD)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_it_is_set_and_removed_by_name_in_any_spelling_and_survives_a_restart(self) -> None:
+        self.store.set_designer("dEE", True)
+        self.assertTrue(self.store.is_designer("Dee"))
+        self.assertFalse(self.store.is_designer("Eve"))
+        self.assertEqual(self.store.designers(), ["Dee"])
+        self.assertTrue(AccountStore(self.path, iterations=1000).is_designer("Dee"))
+        self.store.set_designer("Dee", False)
+        self.assertEqual(self.store.designers(), [])
+        with self.assertRaises(GameError):
+            self.store.set_designer("nobody", True)
+
+    def test_the_command_line_tool_makes_and_removes_designers(self) -> None:
+        import contextlib
+        import io
+
+        import accounts_admin
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(accounts_admin.main(["x", "--file", str(self.path), "make-designer", "Eve"]), 0)
+            self.assertEqual(accounts_admin.main(["x", "--file", str(self.path), "list"]), 0)
+        self.assertIn("Eve  (designer)", out.getvalue())
+        self.assertTrue(AccountStore(self.path, iterations=1000).is_designer("Eve"))
+        with contextlib.redirect_stdout(io.StringIO()):
+            accounts_admin.main(["x", "--file", str(self.path), "remove-designer", "Eve"])
+        self.assertFalse(AccountStore(self.path, iterations=1000).is_designer("Eve"))
 
 
 class ErasureTests(unittest.TestCase):
@@ -210,6 +247,16 @@ class AccountEndpointTests(unittest.TestCase):
 
     def as_user(self, session: str, method: str, path: str, body: Any = None) -> tuple[int, Any]:
         return call(self.port, method, path, body, headers={"X-Session": session})
+
+    def test_the_designer_flag_is_separate_from_admin_and_shows_on_me(self) -> None:
+        name, session = self.user()
+        self.assertIs(self.as_user(session, "GET", "/me")[1]["designer"], False)
+        self.server.accounts.set_designer(name, True)
+        me = self.as_user(session, "GET", "/me")[1]
+        self.assertIs(me["designer"], True)
+        self.assertIs(me["admin"], False)   # a designer is not an administrator
+        self.server.accounts.set_designer(name, False)
+        self.assertIs(self.as_user(session, "GET", "/me")[1]["designer"], False)
 
     # ---- self service -----------------------------------------------------
 

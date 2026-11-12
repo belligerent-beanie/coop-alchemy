@@ -581,6 +581,7 @@ class Handler(BaseHTTPRequestHandler):
                 username = self._user()
                 accounts = self.server.accounts
                 self._json(200, {"username": username, "admin": accounts.is_admin(username),
+                                 "designer": accounts.is_designer(username),
                                  "must_change_password": accounts.must_change_password(username),
                                  "password_breached": accounts.password_breached(username)})
             elif path == "/create":

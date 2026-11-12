@@ -1,0 +1,48 @@
+/* The designer's UI picker (designer.js). Everything is prefixed dz- and set explicitly, so the site's own button/input rules
+   (and the two looks) cannot change how the tool looks. It only exists for accounts marked as designers. */
+.dz-root { position: fixed; inset: 0; z-index: 2147483000; pointer-events: none; font: 13px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; color: #f3f3f6; }
+.dz-root *, .dz-root *::before, .dz-root *::after { box-sizing: border-box; }
+.dz-root [hidden] { display: none !important; }
+.dz-box { position: fixed; pointer-events: none; border-radius: 0; }
+.dz-hover { outline: 1px dashed #4aa3ff; background: rgba(74, 163, 255, 0.10); }
+.dz-picked { outline: 2px solid #ff5ca8; background: rgba(255, 92, 168, 0.10); }
+.dz-offscreen { position: fixed; left: -9999px; top: 0; }
+
+.dz-toggle, .dz-dock { pointer-events: auto !important; }
+.dz-toggle { position: fixed !important; left: 12px !important; bottom: 12px !important; margin: 0 !important; padding: 6px 12px !important; border: 1px solid #55555f !important; border-radius: 999px !important; background: #1f1f24 !important; color: #f3f3f6 !important; font: inherit !important; cursor: pointer !important; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35) !important; }
+.dz-toggle.dz-on { background: #ff5ca8 !important; border-color: #ff5ca8 !important; color: #1f1f24 !important; font-weight: 600 !important; }
+
+.dz-dock { position: fixed; right: 12px; bottom: 12px; width: 280px; max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); overflow: auto;
+  padding: 10px; border: 1px solid #55555f; border-radius: 10px; background: #1f1f24; color: #f3f3f6; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); }
+.dz-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.dz-head strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.dz-hint { margin: 0 0 8px; color: #b9b9c4; }
+.dz-menu { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.dz-root button { font: inherit; }
+.dz-menu-button { margin: 0 !important; padding: 5px 10px !important; border: 1px solid #55555f !important; border-radius: 6px !important; background: #2b2b33 !important; color: #f3f3f6 !important; cursor: pointer !important; }
+.dz-menu-button:hover:not(:disabled) { background: #383843 !important; }
+.dz-menu-button.dz-active { background: #ff5ca8 !important; border-color: #ff5ca8 !important; color: #1f1f24 !important; }
+.dz-menu-button:disabled { opacity: 0.45 !important; cursor: not-allowed !important; }
+.dz-link { margin: 0 !important; padding: 0 !important; border: 0 !important; background: none !important; color: #8ec5ff !important; cursor: pointer !important; text-decoration: underline !important; }
+.dz-root button:focus-visible, .dz-root input:focus-visible, .dz-root select:focus-visible, .dz-root textarea:focus-visible { outline: 2px solid #8ec5ff; outline-offset: 1px; }
+
+.dz-panel { display: grid; gap: 8px; }
+.dz-row { display: flex; align-items: center; gap: 8px; margin: 0; }
+.dz-row > span:first-child { width: 38px; color: #b9b9c4; }
+.dz-num { width: 42px; text-align: right; color: #b9b9c4; font-variant-numeric: tabular-nums; }
+.dz-swatch { display: inline-block; width: 18px; height: 18px; margin: 0 0 0 4px; vertical-align: middle; border: 1px solid #f3f3f6; border-radius: 4px; }
+.dz-row .dz-swatch { margin: 0; flex: none; }
+.dz-picker { display: grid; gap: 8px; }
+.dz-sv { position: relative; width: 100%; height: 130px; border-radius: 6px; cursor: crosshair; touch-action: none;
+  background-image: linear-gradient(to top, #000, rgba(0, 0, 0, 0)), linear-gradient(to right, #fff, rgba(255, 255, 255, 0)); }
+.dz-sv-dot { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px #000; pointer-events: none; }
+.dz-range { flex: 1; min-width: 0; margin: 0; padding: 0; accent-color: #ff5ca8; }
+.dz-hue { accent-color: #fff; }
+.dz-hex, .dz-select, .dz-text { margin: 0 !important; padding: 5px 7px !important; border: 1px solid #55555f !important; border-radius: 6px !important; background: #2b2b33 !important; color: #f3f3f6 !important; font: inherit !important; }
+.dz-hex { width: 90px !important; font-family: ui-monospace, Consolas, monospace !important; }
+.dz-select { flex: 1 !important; }
+.dz-text { width: 100% !important; resize: vertical !important; min-height: 60px !important; }
+.dz-colour-holder { display: block; }
+.dz-change { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.dz-change code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #f3f3f6; font: 12px ui-monospace, Consolas, monospace; }
+.dz-preview { margin: 0; padding: 8px; max-height: 160px; overflow: auto; border-radius: 6px; background: #121216; color: #d8d8e0; font: 11px/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-all; }

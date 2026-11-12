@@ -358,9 +358,9 @@ class HttpTests(unittest.TestCase):
         self.assertIn("elements", self.req(self.ann, "GET", "/create/data")[1])
 
     def test_me_reports_admins(self) -> None:
-        self.assertEqual(self.req(self.admin, "GET", "/me")[1], {"username": "Rooty", "admin": True, "must_change_password": False,
+        self.assertEqual(self.req(self.admin, "GET", "/me")[1], {"username": "Rooty", "admin": True, "designer": False, "must_change_password": False,
                                                                                  "password_breached": False})
-        self.assertEqual(self.req(self.ann, "GET", "/me")[1], {"username": "Annie", "admin": False, "must_change_password": False,
+        self.assertEqual(self.req(self.ann, "GET", "/me")[1], {"username": "Annie", "admin": False, "designer": False, "must_change_password": False,
                                                                                   "password_breached": False})
 
     def test_create_and_promote_flow(self) -> None:

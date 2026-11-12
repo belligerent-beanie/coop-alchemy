@@ -10,6 +10,8 @@ Usage:
                                                        written to a file beside the accounts file (never printed); it must be changed at first login
     python3 accounts_admin.py make-admin <username>    lets the account review recipe promotion requests
     python3 accounts_admin.py remove-admin <username>
+    python3 accounts_admin.py make-designer <username> gives the account the on-page UI picker (Alt+Shift+P): tweak fill, border and text, export the changes
+    python3 accounts_admin.py remove-designer <username>
     python3 accounts_admin.py make-bot <username>      an automated proposer: no limit on drafts or waiting proposals
     python3 accounts_admin.py remove-bot <username>
     python3 accounts_admin.py invite create [--count N] [--note TEXT]   new single-use signup codes (shown once)
@@ -104,6 +106,8 @@ def main(argv: list[str]) -> int:
     sub.add_parser("create-admin").add_argument("username", nargs="?", default="admin")
     sub.add_parser("make-admin").add_argument("username")
     sub.add_parser("remove-admin").add_argument("username")
+    sub.add_parser("make-designer").add_argument("username")
+    sub.add_parser("remove-designer").add_argument("username")
     sub.add_parser("make-bot").add_argument("username")
     sub.add_parser("remove-bot").add_argument("username")
     sub.add_parser("verify").add_argument("username")
@@ -132,14 +136,19 @@ def main(argv: list[str]) -> int:
             names = store.usernames()
             admins = {n.casefold() for n in store.admins()}
             bots = {n.casefold() for n in store.bots()}
+            designers = {n.casefold() for n in store.designers()}
             pending = {n.casefold() for n in store.unverified()}
             print("\n".join(n + ("  (admin)" if n.casefold() in admins else "")
+                            + ("  (designer)" if n.casefold() in designers else "")
                             + ("  (bot)" if n.casefold() in bots else "")
                             + ("  (email not confirmed)" if n.casefold() in pending else "") for n in names)
                   if names else "(no accounts)")
         elif args.command in ("make-bot", "remove-bot"):
             store.set_bot(args.username, args.command == "make-bot")
             print(f"{args.username!r} is {'now' if args.command == 'make-bot' else 'no longer'} a bot account.")
+        elif args.command in ("make-designer", "remove-designer"):
+            store.set_designer(args.username, args.command == "make-designer")
+            print(f"{args.username!r} is {'now' if args.command == 'make-designer' else 'no longer'} a designer.")
         elif args.command in ("make-admin", "remove-admin"):
             store.set_admin(args.username, args.command == "make-admin")
             print(f"{args.username!r} is {'now' if args.command == 'make-admin' else 'no longer'} an admin.")

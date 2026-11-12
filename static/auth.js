@@ -72,3 +72,24 @@ async function upgradeOldToken() {
   } catch (_) { /* try again at the next page load */ }
 }
 upgradeOldToken();
+
+/** Accounts marked as designers get the on-page UI picker (designer.js). Only an answer from the server ("designer": true on
+ *  /me) loads it, and it is asked once per browser tab. The picker is a convenience, not a security boundary: it only changes
+ *  this browser's copy of the page. */
+(async function loadDesigner() {
+  const user = Auth.user();
+  if (!user) return;
+  let known = null;
+  try { known = JSON.parse(sessionStorage.getItem("alchemy-designer") || "null"); } catch (_) { /* unreadable: ask again */ }
+  if (!known || known.user !== user) {
+    try {
+      const res = await fetch("/me", { headers: Auth.headers() });
+      if (!res.ok) return;
+      known = { user, designer: (await res.json()).designer === true };
+      sessionStorage.setItem("alchemy-designer", JSON.stringify(known));
+    } catch (_) { return; }   // offline, or storage blocked: no picker this time
+  }
+  if (!known.designer) return;
+  document.head.append(Object.assign(document.createElement("link"), { rel: "stylesheet", href: "/static/designer.css" }));
+  document.head.append(Object.assign(document.createElement("script"), { src: "/static/designer.js" }));
+})();
