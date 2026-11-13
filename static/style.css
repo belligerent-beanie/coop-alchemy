@@ -541,6 +541,10 @@ body:not([class]) { overscroll-behavior: none; }  /* no pull-to-refresh or bounc
 .has-pic > .emoji, .has-pic .art .emoji { display: none; }
 .tile img.pic { width: 28px; height: 28px; flex: none; object-fit: contain; pointer-events: none; }
 .item img.pic { pointer-events: none; }
+/* The pictures are dark drawings: on a dark tile they would vanish, so give them the light backing the sidebar cards have. */
+@media (prefers-color-scheme: dark) {
+  .tile img.pic { background: #f4f1e8; border-radius: 6px; padding: 2px; }
+}
 .item .emoji { font-size: 2rem; line-height: 1; }
 /* No emoji for this element: show its first letter until it gets a picture. */
 .item .emoji:empty::before {
