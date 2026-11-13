@@ -118,7 +118,7 @@ docker compose run --rm -u root --entrypoint chown alchemy -R alchemy /data
 docker compose start alchemy
 ```
 
-Players log in again afterwards. When it is working, remove this PC's scheduled tasks: `powershell -File ops\install_tasks.ps1 -Remove`.
+Players log in again afterwards. When it is working, stop this PC's supervisor: `python ops\install_supervisor.py remove`.
 
 ## 9. Backups, and a restore you have actually tried
 

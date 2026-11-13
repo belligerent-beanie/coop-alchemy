@@ -33,7 +33,7 @@ the exact commands and a check are in [LAUNCH.md](LAUNCH.md). Tick as you go.
 ## 4. Data and safety net (LAUNCH.md steps 8 and 9)
 
 - [ ] Move the existing accounts and saves from this PC, **if you want them** (stop the Windows server first). Otherwise start fresh.
-- [ ] Turn off this PC's scheduled tasks once the new host is working: `powershell -File ops\install_tasks.ps1 -Remove`.
+- [ ] Turn off this PC's supervisor once the new host is working: `python ops\install_supervisor.py remove`.
 - [ ] Set up the **nightly backup** cron job on the server.
 - [ ] **Try a restore once**, and copy a backup **off the server** (your PC or a cloud drive).
 

@@ -54,7 +54,7 @@ this file in the same commit (and add a line to the [change log](#change-log)).
 
 | Endpoint | Auth | Description |
 |---|---|---|
-| `GET /healthz` | none | `{"ok": true}` when the server is working. Used by the watchdog and deploy checks. |
+| `GET /healthz` | none | `{"ok": true}` when the server is working. Used by the supervisor (ops/supervise.py) and deploy checks. |
 | `GET /auth-config` | none | `{"invite_required", "email_required", "turnstile_site_key"}`: what signing up needs (`turnstile_site_key` is null when there is no human check). |
 | `GET /version` | none | `{"version"}`: changes whenever a page, script or stylesheet changes (pages offer a reload). |
 | `GET /images` | admin | `{"pictures": {element id: address}}`: every element's picture address, for the administrators' pages. `403` for anyone else. |

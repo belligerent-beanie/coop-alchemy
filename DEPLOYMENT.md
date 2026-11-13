@@ -138,7 +138,7 @@ open a new one, or add `C:\Program Files\Docker\Docker\resources\bin` to its PAT
    backup folder to the server, then there:
    `docker compose cp ./migration/. alchemy:/data`, `docker compose exec -u root alchemy chown -R alchemy /data`,
    `docker compose restart alchemy`. Players log in again afterwards.
-6. Then run `powershell -File ops\install_tasks.ps1 -Remove` on this PC if you installed its scheduled tasks.
+6. Then run `python ops\install_supervisor.py remove` on this PC if you installed its supervisor.
 
 **What the compose file already does:** passes `--trusted-proxy` for Docker's private address ranges (only the tunnel container can
 reach the game, because no port is published) and `--client-ip-header CF-Connecting-IP`, so rate limits and logs see the real visitor,
@@ -157,8 +157,11 @@ add `"--turnstile-site-key", "<key>"` to the `alchemy` command in the compose fi
 Roll back: `git checkout <earlier commit> && docker compose up -d --build`. Backups, since `ops/backup.py` is not in the image: from
 a host cron job, `docker run --rm -v <project>_alchemy-data:/data -v "$PWD/backups":/backups alpine tar czf /backups/data-$(date +%F).tgz -C /data .`
 and delete old ones (`find backups -mtime +14 -delete`). Logs: `docker compose logs alchemy`, and the 14-day activity log is
-`/data/live.log` inside the volume. The Windows-only tools in `ops/` (`deploy.py`, `restart-live.ps1`, `install_tasks.ps1`,
-`watchdog.py`) are for this PC and are not used there: Docker's `restart: unless-stopped` and the health check replace the watchdog.
+`/data/live.log` inside the volume. The container's entry point is the supervisor
+(`ops/supervise.py`), the same one a desktop host uses: it restarts the server if it crashes or stops answering (Docker's health
+check only reports that), saves running games when the container stops, and makes the daily backup and summary in `/data`.
+`restart: unless-stopped` brings the container itself back after a reboot. The desktop tools (`deploy.py`, `install_supervisor.py`)
+are not used there.
 
 ### Phones and tablets
 Phones play through exactly the same server, pages, API and tools as laptops: one codebase, no separate mobile site.
@@ -345,11 +348,11 @@ The server collects only a username and a password hash, and keeps it that way, 
   midnight and keeps `--log-days` (14) days. That is what `/privacy` promises, so keep the two in step. Tracebacks are logged without
   the client's address. There is no access log (every request) on purpose; a reverse proxy has one if you want it, and you should
   keep it short-lived too and make sure it does not record query strings.
-- **Daily summary.** `ops/daily_summary.py` (a scheduled task, see OPS.md) writes yesterday's counts (sign-ups, failed logins, rate
+- **Daily summary.** `ops/daily_summary.py` (run daily by the supervisor, see OPS.md) writes yesterday's counts (sign-ups, failed logins, rate
   limiting, administrator actions, server errors, and how many different addresses) to `summaries/<date>.txt`. Counts only, no names or
   addresses, so those files can be kept long after the log is gone. A jump in failed logins or any server error is the thing to look for.
-- **Is it up?** `GET /healthz` answers `{"ok": true}`; the watchdog uses it and restarts the server after three misses. Point an
-  outside uptime service at it too if you want to be told when the whole PC is off, which the watchdog cannot notice.
+- **Is it up?** `GET /healthz` answers `{"ok": true}`; the supervisor uses it and restarts the server after three misses. Point an
+  outside uptime service at it too if you want to be told when the whole PC is off, which the supervisor cannot notice.
 - **Live view.** `/ops` shows the same counters since the last restart, plus who is running what right now.
 
 ### Capacity (measured)

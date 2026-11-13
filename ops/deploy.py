@@ -38,6 +38,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from ops import backup as backup_tools  # noqa: E402
+from ops import supervise  # noqa: E402
 from ops import smoke_test  # noqa: E402
 
 SLOW_TESTS = ("test_aigen.py",)
@@ -145,14 +146,17 @@ def run_and_wait(command: list[str], timeout: float) -> tuple[int, str]:
                 pass  # a long-running child that inherited the file may still hold it; it is tiny and goes with that process
 
 
-def restart_with_script(script: Path, port: int) -> None:
-    """Restart the live server by running restart-live.ps1 (stops whatever listens on `port`, then starts it)."""
-    if not script.is_file():
-        raise DeployError(f"the restart script {script} is missing")
-    code, text = run_and_wait(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-Port", str(port)],
-                              timeout=120)
-    if code != 0:
-        raise DeployError(f"restarting failed: {text.strip()[-300:]}")
+def restart_supervised(data_dir: Path) -> None:
+    """Restart the live server through its supervisor (ops/supervise.py), the same on every system: the server saves its running
+    games as it stops and the new code picks them up. The health check that follows (step 7) confirms it came back."""
+    if not supervise.supervisor_running(data_dir):
+        raise DeployError(f"no supervisor is running for {data_dir}: install it first (python ops/install_supervisor.py install)")
+    supervise.request(data_dir, "restart")
+    deadline = time.time() + 30
+    while (data_dir / supervise.REQUEST_FILE).exists():
+        if time.time() > deadline:
+            raise DeployError("the supervisor did not pick up the restart request within 30 s")
+        time.sleep(0.5)
 
 
 @dataclass
@@ -176,15 +180,10 @@ class Deployer:
         self.run_tests = self.run_tests or (lambda: run_all_tests(self.dev_dir, self.quick))
         self.smoke = self.smoke or (lambda: smoke_test.run(self.dev_dir))
         self.backup = self.backup or self._default_backup
-        self.restart = self.restart or (lambda: restart_with_script(self._restart_script(), self.port))
+        self.restart = self.restart or (lambda: restart_supervised(self.live_dir / "data"))
         self.healthy = self.healthy or (lambda: check_health(self.port))
 
     # ---- helpers ----------------------------------------------------------
-
-    def _restart_script(self) -> Path:
-        """The live folder's own restart script (the older one sat in the folder itself, before it became part of the code)."""
-        tracked = self.live_dir / "ops" / "restart-live.ps1"
-        return tracked if tracked.is_file() else self.live_dir / "restart-live.ps1"
 
     def _default_backup(self) -> object:
         made = backup_tools.make_backup(self.live_dir / "data", self.live_dir / "backups", "pre-deploy")

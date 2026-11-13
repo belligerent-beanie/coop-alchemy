@@ -23,8 +23,9 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DATA_FILES = ("accounts.json", "daily.json", "drafts.json", "invites.json", "solo.json", "profiles.json")
-DATA_DIRS = ("saves",)
+DATA_FILES = ("accounts.json", "daily.json", "drafts.json", "invites.json", "solo.json", "profiles.json", "icons.json",
+              "patches_state.json")
+DATA_DIRS = ("saves", "icon_files")   # icon_files: the icon studio's designs, proposals and replaced pictures
 KEEP_REGULAR = 14
 KEEP_LABELLED = 10
 

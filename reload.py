@@ -10,7 +10,9 @@ players and logins are kept; browsers reconnect within a second or two. Changes 
 static/ files need no reload at all, since they are read on every request (players are
 offered a "reload the page" banner).
 
-Not available on Windows (it relies on a Unix signal): stop and restart the server there.
+When the server runs under the supervisor (ops/supervise.py), the reload is a restart by the supervisor: the server saves its
+running games as it stops and the new one picks them up, so games are kept the same way, on every system, Windows included.
+Otherwise the server is asked to restart itself in place with a Unix signal (not available on Windows).
 """
 from __future__ import annotations
 
@@ -23,6 +25,8 @@ import sys
 import time
 from pathlib import Path
 
+from ops.supervise import pid_alive, request, supervisor_running
+
 BASE_DIR = Path(__file__).resolve().parent
 CHECK = ("import server, state, games, accounts, saves, hotreload, hints, recipes;"
          "from recipes import load_recipes; load_recipes(sys.argv[1])")
@@ -33,8 +37,11 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--pid-file", default=str(BASE_DIR / "alchemy.pid"))
     parser.add_argument("--no-check", action="store_true", help="skip the import and recipe check")
     args = parser.parse_args(argv[1:])
-    if not hasattr(signal, "SIGUSR1"):
-        print("reloading in place is not available on this system; stop and restart the server.", file=sys.stderr)
+    data_dir = Path(args.pid_file).resolve().parent
+    supervised = supervisor_running(data_dir)
+    if not supervised and not hasattr(signal, "SIGUSR1"):
+        print("No supervisor is running for this server, and reloading in place needs a Unix signal: run the server under\n"
+              "ops/supervise.py (see ops/install_supervisor.py), or stop and start it.", file=sys.stderr)
         return 1
     try:
         info = json.loads(Path(args.pid_file).read_text(encoding="utf-8"))
@@ -42,9 +49,7 @@ def main(argv: list[str]) -> int:
     except (OSError, ValueError, KeyError, TypeError):
         print(f"could not read {args.pid_file}: is the server running from this folder?", file=sys.stderr)
         return 1
-    try:
-        os.kill(pid, 0)
-    except OSError:
+    if not supervised and not pid_alive(pid):
         print(f"the server (process {pid}) is not running; just start it.", file=sys.stderr)
         return 1
     if not args.no_check:
@@ -57,14 +62,17 @@ def main(argv: list[str]) -> int:
             return 1
     done = snapshot.with_name(snapshot.name + ".last")
     before = done.stat().st_mtime_ns if done.exists() else 0
-    os.kill(pid, signal.SIGUSR1)
-    deadline = time.time() + 20
+    if supervised:
+        request(data_dir, "restart")   # the supervisor stops it politely (games saved) and starts the new code
+    else:
+        os.kill(pid, signal.SIGUSR1)
+    deadline = time.time() + (45 if supervised else 20)
     while time.time() < deadline:
         time.sleep(0.2)
         if done.exists() and done.stat().st_mtime_ns != before and not snapshot.exists():
             print("Reloaded. Players reconnect by themselves.")
             return 0
-    print("The server did not confirm the reload within 20 seconds. Check its console.", file=sys.stderr)
+    print("The server did not confirm the reload in time. Check its console (or data/supervisor.log).", file=sys.stderr)
     return 1
 
 

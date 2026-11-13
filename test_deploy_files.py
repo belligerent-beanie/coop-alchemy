@@ -25,14 +25,30 @@ DOCKERFILE = (ROOT / "Dockerfile").read_text(encoding="utf-8")
 COMPOSE = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 
 
+SUPERVISOR = (ROOT / "ops" / "supervise.py").read_text(encoding="utf-8")
+
+
 def server_options() -> set[str]:
     return set(re.findall(r'add_argument\(\s*"(--[a-z0-9-]+)"', SERVER))
 
 
-def entrypoint_flags() -> set[str]:
+def supervisor_options() -> set[str]:
+    return set(re.findall(r'add_argument\(\s*"(--[a-z0-9-]+)"', SUPERVISOR))
+
+
+def entrypoint_parts() -> tuple[set[str], set[str]]:
+    """The ENTRYPOINT runs the supervisor: (its own options, the server options it passes on after "--")."""
     block = re.search(r"^ENTRYPOINT \[(.*?)\]\s*$", DOCKERFILE, re.S | re.M)
     assert block, "no ENTRYPOINT in the Dockerfile"
-    return set(re.findall(r'"(--[a-z0-9-]+)"', block.group(1)))
+    words = re.findall(r'"([^"]*)"', block.group(1))
+    assert "--" in words and words[:2] == ["python", "ops/supervise.py"], "the ENTRYPOINT should run ops/supervise.py ... -- ..."
+    cut = words.index("--")
+    flags = lambda part: {w for w in part if re.fullmatch(r"--[a-z0-9-]+", w)}   # noqa: E731
+    return flags(words[:cut]), flags(words[cut + 1:])
+
+
+def entrypoint_flags() -> set[str]:
+    return entrypoint_parts()[1]
 
 
 def compose_flags() -> set[str]:
@@ -65,10 +81,14 @@ def image_contents(destination: Path) -> None:
 class ContainerFileTests(unittest.TestCase):
     def test_every_option_the_container_passes_exists_in_the_server(self) -> None:
         known = server_options()
-        for where, flags in (("Dockerfile ENTRYPOINT", entrypoint_flags()), ("docker-compose.yml command", compose_flags())):
-            self.assertGreaterEqual(len(flags), 8 if "Docker" in where else 3,
-                                    f"found too few options in the {where}: did its layout change?")
+        supervisor_flags, passed_on = entrypoint_parts()
+        self.assertGreaterEqual(len(supervisor_flags), 6, "found too few supervisor options in the ENTRYPOINT")
+        self.assertEqual(sorted(supervisor_flags - supervisor_options()), [], "ENTRYPOINT options ops/supervise.py does not accept")
+        for where, flags in (("Dockerfile ENTRYPOINT (after --)", passed_on), ("docker-compose.yml command", compose_flags())):
+            self.assertGreaterEqual(len(flags), 2, f"found too few options in the {where}: did its layout change?")
             self.assertEqual(sorted(flags - known), [], f"options in the {where} that server.py does not accept")
+        from ops.supervise import DATA_OPTIONS   # the data files the supervisor adds itself
+        self.assertEqual(sorted({option for option, _ in DATA_OPTIONS} - known), [], "supervisor data options server.py does not accept")
 
     def test_the_health_check_uses_a_documented_endpoint(self) -> None:
         self.assertIn("/healthz", DOCKERFILE)
@@ -90,8 +110,8 @@ class ContainerFileTests(unittest.TestCase):
         ignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
         for private in ("accounts.json", "reports.json", ".env", "data", "backups", "*.pem", "recipes.json", "static/elements"):
             self.assertIn(private, ignore)
-        for flag in ("--accounts-file", "--saves-dir", "--log-file", "--recipes", "--elements-dir"):
-            self.assertRegex(DOCKERFILE, rf'"{flag}", "/data')  # pointed at the volume
+        for flag in ("--data-dir", "--backups-dir", "--recipes", "--elements-dir"):
+            self.assertRegex(DOCKERFILE, rf'"{flag}", "/data')  # pointed at the volume (the supervisor puts every data file there)
 
     def test_the_recipe_book_and_pictures_are_not_in_git_and_not_in_the_image(self) -> None:
         ignored = [line.strip() for line in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()]
@@ -116,8 +136,8 @@ class ContainerFileTests(unittest.TestCase):
             self.assertTrue((image / "server.py").is_file() and (image / "static").is_dir())
             self.assertFalse((image / "recipes.json").exists())   # the book comes from the data volume
             shutil.copy2(ROOT / "test_recipes.json", data / "recipes.json")
-            self.assertFalse((image / "test_coop.py").exists() or (image / "ops").exists() or (image / "accounts.json").exists())
-            imports = subprocess.run([sys.executable, "-c", "import server, accounts_admin"], cwd=image, capture_output=True, text=True)
+            self.assertFalse((image / "test_coop.py").exists() or (image / "ops" / "deploy.py").exists() or (image / "accounts.json").exists())
+            imports = subprocess.run([sys.executable, "-c", "import server, accounts_admin, ops.supervise"], cwd=image, capture_output=True, text=True)
             self.assertEqual(imports.returncode, 0, imports.stderr)
             port = free_port()
             args = [sys.executable, "server.py", "--host", "127.0.0.1", "--port", str(port)]
