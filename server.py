@@ -144,6 +144,7 @@ SESSION_COOKIE = "alchemy_session"   # HttpOnly, so scripts on the page cannot r
 MAX_CONNECTIONS_PER_PEER = 60   # open connections from one directly connected address (not a trusted proxy, which carries everybody)
 MAX_STREAMS_PER_CLIENT = 12     # open event streams for one client address, found through the proxy headers (several players may share one)
 MAX_CONNECTIONS = 600  # open connections at once (each takes a thread; the event streams stay open); more are turned away
+REFUSAL_LOG_SECONDS = 30  # a refused address is logged at most this often (with what its open connections were doing)
 CURSOR_BATCH_SECONDS = 0.03  # after a cursor update, the stream waits this long to send the room's pointer moves together
 
 ACTIONS = ("/end", "/combine", "/cursor", "/emote", "/genie", "/hint", "/journal", "/tile/add", "/tile/grab", "/tile/move",
@@ -295,6 +296,8 @@ class AlchemyServer(ThreadingHTTPServer):
         self.open_connections = 0
         self.per_peer: dict[str, int] = {}           # open connections by directly connected address (never counts trusted proxies)
         self.client_streams: dict[str, int] = {}     # open event streams by client address bucket
+        self.activity: dict[int, list] = {}          # id(connection) -> [address, what it is doing, since]: for the refusal log line
+        self.refusal_log: dict[str, tuple[float, int]] = {}   # address -> (when its last refusal was logged, refusals not logged since)
         self.max_per_peer = MAX_CONNECTIONS_PER_PEER
         self.max_streams_per_client = MAX_STREAMS_PER_CLIENT
         self.trusted_proxies: list = []              # addresses whose X-Forwarded-* headers are believed (--trusted-proxy)
@@ -326,6 +329,7 @@ class AlchemyServer(ThreadingHTTPServer):
                     self.per_peer[peer] = self.per_peer.get(peer, 0) + 1
         if full:
             self.bump("connections_refused")
+            self._log_refusal(peer, client_address)
             if not isinstance(request, ssl.SSLSocket):   # a TLS socket would start a handshake here, in the accept loop
                 try:
                     request.settimeout(1.0)
@@ -340,9 +344,11 @@ class AlchemyServer(ThreadingHTTPServer):
                     pass
             self.shutdown_request(request)
             return
+        self.note_activity(request, "connected, no request yet", peer=peer if peer is not None else str(client_address[0]))
         try:
             super().process_request(request, client_address)
         except BaseException:
+            self.forget_activity(request)
             self._connection_closed(peer)
             raise
 
@@ -350,7 +356,51 @@ class AlchemyServer(ThreadingHTTPServer):
         try:
             super().process_request_thread(request, client_address)
         finally:
+            self.forget_activity(request)
             self._connection_closed(self._peer_key(client_address))
+
+    # ---- what each open connection is doing, so a refusal can say what filled the address's share ----
+
+    def note_activity(self, request: Any, what: str, peer: str | None = None) -> None:
+        """Record what this connection is doing now ("GET /static/app.js", "idle keep-alive", …); peer only on the first call."""
+        with self._stats_lock:
+            entry = self.activity.get(id(request))
+            if entry is None:
+                self.activity[id(request)] = [peer or "?", what, time.monotonic()]
+            else:
+                entry[1], entry[2] = what, time.monotonic()
+
+    def forget_activity(self, request: Any) -> None:
+        with self._stats_lock:
+            self.activity.pop(id(request), None)
+
+    def _log_refusal(self, peer: str | None, client_address: Any) -> None:
+        """One warning per address at most every REFUSAL_LOG_SECONDS, saying how full things were and what the address's open
+        connections were doing (grouped, oldest first within each group), plus how many refusals the quiet period hid.
+        Runs in the accept loop, so it only counts: no lookups, no I/O beyond the log line."""
+        who = peer if peer is not None else str(client_address[0])
+        now = time.monotonic()
+        with self._stats_lock:
+            last, hidden = self.refusal_log.get(who, (0.0, 0))
+            if now - last < REFUSAL_LOG_SECONDS:
+                self.refusal_log[who] = (last, hidden + 1)
+                return
+            self.refusal_log[who] = (now, 0)
+            if len(self.refusal_log) > 1000:   # many addresses refused over time: forget the quiet ones
+                self.refusal_log = {k: v for k, v in self.refusal_log.items() if now - v[0] < REFUSAL_LOG_SECONDS}
+            mine =[(what, now - since) for (owner, what, since) in self.activity.values() if owner == who]
+            from_peer = self.per_peer.get(peer, 0) if peer is not None else len(mine)
+            overall = self.open_connections
+        groups: dict[str, list[float]] = {}
+        for what, age in mine:
+            groups.setdefault(what, []).append(age)
+        summary = "; ".join(f"{len(ages)} × {what} (longest {max(ages):.0f}s)"
+                            for what, ages in sorted(groups.items(), key=lambda item: -len(item[1]))) or "none tracked"
+        logging.getLogger("alchemy.server").warning(
+            "refused a connection from %s with 503: %d open from that address (limit %d), %d overall (limit %d); "
+            "its open connections: %s%s",
+            who, from_peer, self.max_per_peer, overall, self.max_connections, summary,
+            f"; {hidden} more refused from it since the last such line" if hidden else "")
 
     def _connection_closed(self, peer: str | None = None) -> None:
         with self._stats_lock:
@@ -408,6 +458,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             super().handle_one_request()
             if self._began:   # a request was read (an idle keep-alive connection closing has nothing to report)
+                self.server.note_activity(self.request, "idle keep-alive (between requests)")
                 took = time.monotonic() - self._began
                 accounty = self.path in ("/register", "/login") and self.command == "POST"
                 stream = self.path.split("?")[0].endswith("/events")   # an event stream stays open on purpose
@@ -421,6 +472,7 @@ class Handler(BaseHTTPRequestHandler):
         ok = super().parse_request()
         if ok:
             self._began = time.monotonic()   # the request line and headers are in: from here on the time is ours, not the client's
+            self.server.note_activity(self.request, f"{self.command} {self.path.split('?')[0][:80]}")   # never the query: tickets
             try:
                 alchemylog.begin_request(self._client())   # every log line this request causes carries its id and address
             except Exception:   # a malformed forwarding header must not stop the request being served

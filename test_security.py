@@ -847,6 +847,34 @@ class ServerHardeningTests(unittest.TestCase):
         else:
             self.fail("the address was still refused after its idle connections closed")
 
+    def test_a_refusal_is_logged_with_what_the_address_was_doing_once_per_quiet_period(self) -> None:
+        server = self.server
+        saved = server.max_per_peer
+        self.addCleanup(lambda: setattr(server, "max_per_peer", saved))
+        server.refusal_log.clear()   # other tests refuse 127.0.0.1 too: start a fresh quiet period
+        silent = socket.create_connection(("127.0.0.1", self.port), timeout=5)   # connected, never asks for anything
+        kept = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)    # one request, then idle keep-alive
+        kept.request("GET", "/healthz")
+        kept.getresponse().read()
+        time.sleep(0.3)
+        limit = server.per_peer["127.0.0.1"]   # ours, plus any an earlier test left open: the next one is over the limit
+        server.max_per_peer = limit
+        with self.assertLogs("alchemy.server", "WARNING") as logs:
+            for _ in range(2):   # the second refusal falls inside the quiet period: counted, not logged
+                refused = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+                refused.request("GET", "/healthz")
+                self.assertEqual(refused.getresponse().status, 503)
+                refused.close()
+        self.assertEqual(len(logs.records), 1)
+        line = logs.records[0].getMessage()
+        self.assertIn(f"{limit} open from that address (limit {limit})", line)
+        self.assertIn("× connected, no request yet", line)
+        self.assertIn("× idle keep-alive (between requests)", line)
+        self.assertNotIn("?", line.split("its open connections:")[1])   # paths only: never a query string (tickets)
+        self.assertEqual(next(iter(server.refusal_log.values()))[1], 1)
+        silent.close()
+        kept.close()
+
     def test_a_trusted_proxy_is_not_limited_per_address(self) -> None:
         import ipaddress
         server = self.server
