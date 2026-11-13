@@ -1,7 +1,7 @@
 "use strict";
 // The designer's UI picker. Accounts marked as designers (accounts_admin.py make-designer) get this on every page (auth.js loads it).
 // Alt+Shift+P (or the Design button) turns picker mode on: clicks select an element instead of reaching the page; ↑ selects the
-// parent, ↓ a child, Enter opens Fill / Border / Shadow / Text, Esc closes things and clears the selection; Alt+Shift+E copies every change
+// parent, ↓ a child, Enter opens Fill / Border / Shadow / Text / Size / Spacing / Radius, Esc closes things and clears the selection; Alt+Shift+E copies every change
 // as Markdown (the guide, shown the first time and under "Guide", explains all of this). Edits are inline styles on THIS
 // browser's copy of the page only: nothing is sent to the server; they are kept in this browser (localStorage, per page) and put back after a reload. "Changes" exports them as
 // Markdown (selector, before → after) to hand to a developer or an AI. This is a convenience for designers, not a security
@@ -101,13 +101,48 @@
     return splitTopLevel(text).map((part) => { const s = parseShadow(part); return s ? shadowCss(s) : part; }).join(", ");
   }
 
+  // ---------- sizes, spacing and corners ----------
+  const SIDES = ["top", "right", "bottom", "left"];
+  const CORNERS = ["border-top-left-radius", "border-top-right-radius", "border-bottom-right-radius", "border-bottom-left-radius"];
+  /** CSS shorthand for four values (top right bottom left), as short as it can be: "8px", "8px 12px", "8px 12px 4px", or all four. */
+  function sidesText(values) {
+    const [t, r, b, l] = values;
+    if (t === r && r === b && b === l) return t;
+    if (t === b && r === l) return `${t} ${r}`;
+    if (r === l) return `${t} ${r} ${b}`;
+    return `${t} ${r} ${b} ${l}`;
+  }
+  /** A padding or margin shorthand ("8px 12px") back to four numbers, or null if it is not plain pixels. */
+  function parseSides(text) {
+    const parts = String(text).trim().split(/\s+/).map((p) => (/^-?\d+(\.\d+)?px$/.test(p) ? parseFloat(p) : NaN));
+    if (!parts.length || parts.length > 4 || parts.some(Number.isNaN)) return null;
+    const [t, r = t, b = t, l = r] = parts;
+    return [t, r, b, l];
+  }
+  const sideNumbers = (cs, kind) => SIDES.map((side) => Math.round((parseFloat(cs.getPropertyValue(`${kind}-${side}`)) || 0) * 10) / 10);
+  const sidesOf = (cs, kind) => sidesText(sideNumbers(cs, kind).map((n) => n + "px"));
+  const radiusOf = (cs) => sidesText(CORNERS.map((corner) => cs.getPropertyValue(corner).split(" ")[0]));
+  /** The size the designer sees and sets: the element's border box in pixels. */
+  function boxSize(element) {
+    const r = element.getBoundingClientRect();
+    return { width: Math.round(r.width), height: Math.round(r.height) };
+  }
+  /** The width/height value that makes the border box `target` pixels (the site's boxes are border-box; this covers the ones that are not). */
+  function cssSize(element, axis, target) {
+    const cs = getComputedStyle(element);
+    if (cs.boxSizing === "border-box") return target;
+    const extra = axis === "width"
+      ? ["paddingLeft", "paddingRight", "borderLeftWidth", "borderRightWidth"] : ["paddingTop", "paddingBottom", "borderTopWidth", "borderBottomWidth"];
+    return Math.max(0, target - extra.reduce((sum, key) => sum + (parseFloat(cs[key]) || 0), 0));
+  }
+
   // ---------- state ----------
   let on = false;
   let selected = null;
   let hovered = null;
   let climbed = [];            // the elements we came up from, so ↓ goes back the way we came
   let menuOpen = false;
-  let tool = null;             // "fill" | "border" | "shadow" | "text" | null
+  let tool = null;             // "fill" | "border" | "shadow" | "text" | "size" | "spacing" | "radius" | null
   let showChanges = false;
   let showPatches = false;    // the design patches panel (patches.py): switch them off, to preview, or on
   let tourStep = null;         // the guide page being shown (0-based), or null
@@ -127,6 +162,45 @@
 
   const ours = (node) => node instanceof Node && root.contains(node);
 
+  // Drag handles on the selected element while the Size tool is open: right edge, bottom edge, and the corner (Shift keeps the proportions).
+  let sizeSync = null;    // the Size panel's way of updating its fields while a handle is dragged
+  let drag = null;        // {dir, x, y, w, h} while a handle is held
+  const handles = [["e", "dz-h-e", "Drag to change the width"], ["s", "dz-h-s", "Drag to change the height"],
+                   ["se", "dz-h-se", "Drag to change both (Shift keeps the proportions)"]]
+    .map(([dir, cls, title]) => h("div", { class: "dz-handle " + cls, title, "data-dir": dir }));
+  selectBox.append(...handles);
+  for (const handle of handles) {
+    handle.addEventListener("pointerdown", (event) => {
+      if (!selected || tool !== "size" || event.button !== 0) return;
+      event.preventDefault();
+      const r = selected.getBoundingClientRect();
+      drag = { dir: handle.dataset.dir, x: event.clientX, y: event.clientY, w: r.width, h: r.height };
+      handle.setPointerCapture(event.pointerId);
+    });
+    handle.addEventListener("pointermove", (event) => {
+      if (!drag || !selected) return;
+      let w = drag.dir.includes("e") ? drag.w + event.clientX - drag.x : null;
+      let height = drag.dir.includes("s") ? drag.h + event.clientY - drag.y : null;
+      if (drag.dir === "se" && event.shiftKey) {   // keep the shape: follow whichever side was pulled further
+        const scale = Math.max(w / drag.w, height / drag.h);
+        w = drag.w * scale;
+        height = drag.h * scale;
+      }
+      const sizes = {};
+      if (w !== null) sizes.width = Math.max(1, Math.round(w));
+      if (height !== null) sizes.height = Math.max(1, Math.round(height));
+      applySize(selected, sizes);
+      if (sizeSync) sizeSync();
+    });
+    const release = () => { drag = null; };
+    handle.addEventListener("pointerup", release);
+    handle.addEventListener("pointercancel", release);
+  }
+  function updateHandles() {
+    selectBox.classList.toggle("dz-sizing", on && !!selected && tool === "size" && tourStep === null && !showChanges && !showPatches);
+  }
+
+
   function place(box, element) {
     if (!element || !document.contains(element)) { box.hidden = true; return; }
     const r = element.getBoundingClientRect();
@@ -140,6 +214,7 @@
     if (selected && !document.contains(selected)) { selected = null; climbed = []; closeTool(); }
     place(hoverBox, on && hovered !== selected ? hovered : null);
     place(selectBox, on ? selected : null);
+    updateHandles();
   }
 
   // ---------- selectors ----------
@@ -194,6 +269,11 @@
           "background-color": colourText(cs.backgroundColor),
           border: borderText(cs.borderTopStyle, cs.borderTopWidth, colourText(cs.borderTopColor)),
           "box-shadow": shadowText(cs.boxShadow),
+          "border-radius": radiusOf(cs),
+          padding: sidesOf(cs, "padding"),
+          margin: sidesOf(cs, "margin"),
+          width: boxSize(element).width + "px",
+          height: boxSize(element).height + "px",
         },
       };
       changes.set(element, rec);
@@ -237,16 +317,18 @@
   const STORE_KEY = "alchemy-designer-changes:" + location.pathname;
   let pending = [];   // saved edits whose element is not on the page: {selector, snippet, before, after, text}
   const saved = (rec) => ({ selector: rec.selector, snippet: rec.snippet, before: rec.before, after: rec.after || {}, text: rec.text || null });
+  /** An entry that changes nothing (everything put back as it was) is not worth keeping, counting or exporting. */
+  const hasChange = (item) => Object.keys(item.after || {}).length > 0 || !!(item.text && item.text.after !== item.text.before);
   function save() {
     try {
-      const all = [...[...changes.values()].map(saved), ...pending];
+      const all = [...[...changes.values()].map(saved), ...pending].filter(hasChange);
       if (all.length) localStorage.setItem(STORE_KEY, JSON.stringify(all)); else localStorage.removeItem(STORE_KEY);
     } catch (_) { /* storage full or blocked: the edits still work in this tab */ }
   }
   function restore() {
     try {
       const raw = JSON.parse(localStorage.getItem(STORE_KEY) || "[]");
-      pending = Array.isArray(raw) ? raw.filter((item) => item && typeof item.selector === "string" && item.before) : [];
+      pending = Array.isArray(raw) ? raw.filter((item) => item && typeof item.selector === "string" && item.before && hasChange(item)) : [];
     } catch (_) { pending = []; }
     if (!pending.length) return;
     putBack();
@@ -267,6 +349,17 @@
         else if (m) applyBorder(element, m[2], +m[1], m[3]);
       }
       if (after["box-shadow"]) applyShadowValue(element, after["box-shadow"]);
+      if (/^\d+(\.\d+)?(px|%)$/.test(after["border-radius"] || "")) applyRadius(element, after["border-radius"]);
+      for (const kind of ["padding", "margin"]) {
+        const sides = after[kind] ? parseSides(after[kind]) : null;
+        if (sides) applySpacing(element, kind, sides);
+      }
+      const sizes = {};
+      for (const axis of ["width", "height"]) {
+        const m = /^(\d+(?:\.\d+)?)px$/.exec(after[axis] || "");
+        if (m) sizes[axis] = +m[1];
+      }
+      if (Object.keys(sizes).length) applySize(element, sizes);
       if (item.text && typeof item.text.after === "string" && !element.children.length) applyText(element, item.text.after);
       const rec = changes.get(element);
       if (rec) {   // "before" is how it was when the designer first changed it, not how it looks after a reload
@@ -304,6 +397,49 @@
     rememberOriginal(rec, element, "box-shadow");
     setStyle(element, "box-shadow", value);
     rec.after = Object.assign(rec.after || {}, { "box-shadow": value });
+    edited();
+  }
+  /** padding or margin: four sides in pixels (top, right, bottom, left). */
+  function applySpacing(element, kind, sides) {
+    const rec = record(element);
+    SIDES.forEach((side, i) => {
+      rememberOriginal(rec, element, `${kind}-${side}`);
+      setStyle(element, `${kind}-${side}`, sides[i] + "px");
+    });
+    rec.after = Object.assign(rec.after || {}, { [kind]: sidesText(sides.map((n) => n + "px")) });
+    edited();
+  }
+  /** Every corner the same: "12px", or "9999px" for a pill. */
+  function applyRadius(element, value) {
+    const rec = record(element);
+    rememberOriginal(rec, element, "border-radius");
+    setStyle(element, "border-radius", value);
+    rec.after = Object.assign(rec.after || {}, { "border-radius": value });
+    edited();
+  }
+  /** sizes is {width?, height?} in pixels (the border box). */
+  function applySize(element, sizes) {
+    const rec = record(element);
+    for (const axis of ["width", "height"]) {
+      if (sizes[axis] === undefined) continue;
+      rememberOriginal(rec, element, axis);
+      setStyle(element, axis, cssSize(element, axis, sizes[axis]) + "px");
+      rec.after = Object.assign(rec.after || {}, { [axis]: sizes[axis] + "px" });
+    }
+    edited();
+  }
+  /** Back to the size the page gives it: put the original inline width and height back. */
+  function clearSize(element) {
+    const rec = changes.get(element);
+    if (!rec) return;
+    for (const axis of ["width", "height"]) {
+      const original = rec.props.get(axis);
+      if (!original) continue;
+      if (original.value) element.style.setProperty(axis, original.value, original.priority); else element.style.removeProperty(axis);
+      rec.props.delete(axis);
+      if (rec.after) delete rec.after[axis];
+    }
+    if (!rec.props.size && !rec.text) changes.delete(element);   // nothing left to hand over: no longer a change
     edited();
   }
   function applyText(element, text) {
@@ -345,7 +481,7 @@
     const blocks = [];
     for (const rec of [...changes.values(), ...pending]) {
       const lines = [];
-      for (const prop of ["background-color", "border", "box-shadow"]) {
+      for (const prop of ["background-color", "border", "border-radius", "box-shadow", "padding", "margin", "width", "height"]) {
         const after = rec.after && rec.after[prop];
         if (after !== undefined && after !== rec.before[prop]) lines.push(`  ${prop}: ${rec.before[prop]} → ${after}`);
       }
@@ -360,11 +496,13 @@
   function exportMarkdown() {
     const blocks = exportBlocks();
     if (!blocks.length) return "";
+    const sized = blocks.some((block) => /^  (width|height):/m.test(block));
     return [
       "# UI changes from the designer picker",
       `Page: ${location.origin + location.pathname}`,
       `Viewport: ${window.innerWidth}×${window.innerHeight} · ${new Date().toISOString().slice(0, 10)}`,
       "Each block is one element: its selector (with a snippet of its text to confirm it), then before → after. Apply these in the source code.",
+      ...(sized ? ["Width and height are fixed pixel sizes set in this window: when applying them keep the layout working on smaller screens (min-width, percentages or clamp())."] : []),
       "",
       blocks.join("\n\n"),
       "",
@@ -496,7 +634,7 @@
       "↑ selects the parent of what you have selected. ↓ goes back down the way you came, or to the first child.",
       "Esc clears the selection."] },
     { title: "Change it", lines: [
-      "Enter opens the tools: Fill (colour), Border (style, thickness, colour), Shadow (presets, or offset, blur, spread, opacity, colour) and Text.",
+      "Enter opens the tools: Fill (colour), Border (style, thickness, colour), Shadow (presets, or offset, blur, spread, opacity, colour), Text, Size (width and height, or drag the pink handles), Spacing (padding and margin) and Radius (rounded corners).",
       "Text works only on elements with nothing inside them. The page changes straight away, in this tab only; Done closes the tool."] },
     { title: "Export your changes", lines: [
       "Alt+Shift+E copies every change as Markdown. Paste it to Claude, who can then make the same changes in the code.",
@@ -524,10 +662,12 @@
 
   function renderDock() {
     dock.replaceChildren();
+    sizeSync = null;   // the Size panel, if it is open, sets this again when it is built
     dock.hidden = !on;
     toggle.textContent = on ? "Design: on" : "Design";
     toggle.classList.toggle("dz-on", on);
     if (!on) return;
+    updateHandles();
     if (tourStep !== null) { dock.append(tourPanel()); return; }
 
     changesLink = h("button", { type: "button", class: "dz-link", text: `Changes (${changeCount()})`, onclick: () => { showChanges = !showChanges; showPatches = false; renderDock(); } });
@@ -547,7 +687,8 @@
       return;
     }
     const tools = () => h("div", { class: "dz-menu" },
-      menuButton("fill", "Fill"), menuButton("border", "Border"), menuButton("shadow", "Shadow"), menuButton("text", "Text"));
+      menuButton("fill", "Fill"), menuButton("border", "Border"), menuButton("shadow", "Shadow"), menuButton("text", "Text"),
+      menuButton("size", "Size"), menuButton("spacing", "Spacing"), menuButton("radius", "Radius"));
     if (!menuOpen && !tool) {
       dock.append(h("p", { class: "dz-hint", text: "Press Enter, or choose a tool." }), tools());
       return;
@@ -557,6 +698,9 @@
     else if (tool === "border") dock.append(borderPanel());
     else if (tool === "shadow") dock.append(shadowPanel());
     else if (tool === "text") dock.append(textPanel());
+    else if (tool === "size") dock.append(sizePanel());
+    else if (tool === "spacing") dock.append(spacingPanel());
+    else if (tool === "radius") dock.append(radiusPanel());
     // Edits apply as they are made, so there is nothing to confirm; Done just closes the tool and lets go of the element
     // (Esc does the same in steps). Without it a phone, which has no Esc key, had no visible way out of a tool.
     dock.append(h("div", { class: "dz-done-row" },
@@ -714,6 +858,113 @@
     input.value = element.textContent;
     input.addEventListener("input", () => applyText(element, input.value));
     return h("div", { class: "dz-panel" }, input);
+  }
+  // ---------- size, spacing and radius tools ----------
+  const SIZE_HELP = "Type a size, or drag the pink handles on the page (Shift keeps the proportions).";
+  /** A pixel field: a number box that Shift+↑/↓ moves by 10, beside its slider. */
+  function numberField(label, min, max, onChange) {
+    const field = h("input", { type: "number", class: "dz-field", min: String(min), max: String(max), step: "1", "aria-label": label });
+    field.addEventListener("input", () => { const n = field.valueAsNumber; if (Number.isFinite(n)) onChange(Math.max(min, Math.min(max, n))); });
+    field.addEventListener("keydown", (event) => {
+      if (!event.shiftKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
+      event.preventDefault();
+      const n = (Number.isFinite(field.valueAsNumber) ? field.valueAsNumber : 0) + (event.key === "ArrowUp" ? 10 : -10);
+      field.value = String(Math.max(min, Math.min(max, n)));
+      field.dispatchEvent(new Event("input"));
+    });
+    return field;
+  }
+  function sizePanel() {
+    const element = selected;
+    const inline = getComputedStyle(element).display === "inline";
+    const note = h("p", { class: "dz-hint dz-note" });
+    const controls = {};
+    const askFor = {};   // the size last asked for, to tell the designer when the page's own rules keep the element from it
+    function sync() {
+      const now = boxSize(element);
+      for (const axis of ["width", "height"]) {
+        const { range, field } = controls[axis];
+        range.max = String(Math.max(600, now[axis] * 2));
+        range.value = String(now[axis]);
+        if (document.activeElement !== field) field.value = String(now[axis]);
+      }
+      const stuck = ["width", "height"].filter((axis) => askFor[axis] !== undefined && Math.abs(now[axis] - askFor[axis]) > 1);
+      note.textContent = inline ? "This is inline text: it flows with its line and cannot be sized. Select its parent, or a box around it."
+        : stuck.length ? `The page's own rules keep the ${stuck.join(" and ")} at ${stuck.map((a) => now[a] + "px").join(" × ")} (a min or max size, or its container).`
+        : SIZE_HELP;
+    }
+    function set(axis, value) {
+      askFor[axis] = value;
+      applySize(element, { [axis]: value });
+      sync();
+    }
+    const rows = ["width", "height"].map((axis) => {
+      const range = h("input", { type: "range", min: "1", max: "600", class: "dz-range", "aria-label": `${axis === "width" ? "Width" : "Height"} slider`, disabled: inline });
+      const field = numberField(axis === "width" ? "Width in pixels" : "Height in pixels", 1, 4000, (value) => set(axis, value));
+      field.disabled = inline;
+      range.addEventListener("input", () => set(axis, +range.value));
+      controls[axis] = { range, field };
+      return h("label", { class: "dz-row dz-sizing-row" }, h("span", { text: axis === "width" ? "Width" : "Height" }), range, field, h("span", { class: "dz-unit", text: "px" }));
+    });
+    const auto = h("button", { type: "button", class: "dz-menu-button", text: "Back to auto", disabled: inline,
+      title: "Remove the width and height you set, so the page sizes it again",
+      onclick: () => { askFor.width = askFor.height = undefined; clearSize(element); sync(); } });
+    sync();
+    sizeSync = sync;
+    return h("div", { class: "dz-panel" }, ...rows, note, h("div", { class: "dz-menu" }, auto));
+  }
+  /** One group (padding or margin): a slider for all four sides, or one each when "same on all sides" is off. */
+  function spacingGroup(element, kind, title, min, max) {
+    const sides = sideNumbers(getComputedStyle(element), kind);
+    const same = h("input", { type: "checkbox", "aria-label": `${title}: same on all sides` });
+    same.checked = sides.every((n) => n === sides[0]);
+    const body = h("div", { class: "dz-panel" });
+    const apply = () => applySpacing(element, kind, sides);
+    function build() {
+      body.replaceChildren();
+      const rows = same.checked ? [["All", null]] : SIDES.map((side, i) => [side[0].toUpperCase() + side.slice(1), i]);
+      for (const [name, index] of rows) {
+        const range = h("input", { type: "range", min: String(min), max: String(max), class: "dz-range", "aria-label": `${title} ${name.toLowerCase()}` });
+        const number = h("span", { class: "dz-num" });
+        const show = () => { const v = index === null ? sides[0] : sides[index]; range.value = String(v); number.textContent = v + "px"; };
+        range.addEventListener("input", () => {
+          const v = +range.value;
+          if (index === null) sides.fill(v); else sides[index] = v;
+          show();
+          apply();
+        });
+        show();
+        body.append(h("label", { class: "dz-row" }, h("span", { text: name }), range, number));
+      }
+    }
+    same.addEventListener("change", () => { if (same.checked) sides.fill(sides[0]); build(); });
+    build();
+    return h("div", { class: "dz-spacing" },
+      h("label", { class: "dz-row dz-group-head" }, h("strong", { text: title }), h("span", { class: "dz-wide", text: "same on all sides" }), same), body);
+  }
+  function spacingPanel() {
+    const element = selected;
+    return h("div", { class: "dz-panel dz-spacing-panel" }, spacingGroup(element, "padding", "Padding", 0, 80), spacingGroup(element, "margin", "Margin", -40, 80));
+  }
+  const RADIUS_PRESETS = [["Square", "0px"], ["Soft", "6px"], ["Round", "16px"], ["Pill", "9999px"]];
+  function radiusPanel() {
+    const element = selected;
+    const cs = getComputedStyle(element);
+    const first = cs.getPropertyValue(CORNERS[0]).split(" ")[0];
+    const box = boxSize(element);
+    let value = first.endsWith("%") ? Math.round((parseFloat(first) / 100) * Math.min(box.width, box.height)) : Math.round(parseFloat(first) || 0);
+    const range = h("input", { type: "range", min: "0", max: "64", class: "dz-range", "aria-label": "Corner radius" });
+    const number = h("span", { class: "dz-num" });
+    const buttons = RADIUS_PRESETS.map(([name, css]) => h("button", { type: "button", class: "dz-menu-button", text: name,
+      onclick: () => { value = parseFloat(css); show(); applyRadius(element, css); } }));
+    function show() {
+      range.value = String(Math.min(64, value));
+      number.textContent = value >= 999 ? "Pill" : value + "px";
+      buttons.forEach((button, i) => button.classList.toggle("dz-active", parseFloat(RADIUS_PRESETS[i][1]) === value));
+    }
+    range.addEventListener("input", () => { value = +range.value; show(); applyRadius(element, value + "px"); });
+    show();
+    return h("div", { class: "dz-panel" }, h("div", { class: "dz-menu" }, ...buttons), h("label", { class: "dz-row" }, h("span", { text: "Radius" }), range, number));
   }
   // ---------- design patches ----------
   const PATCH_STATES = [["off", "Off"], ["preview", "Preview"], ["on", "On"]];

@@ -63,3 +63,21 @@
 .dz-patch { display: grid; gap: 4px; padding: 6px 0; border-top: 1px solid #3a3a44; }
 .dz-patch .dz-hint, .dz-patch .dz-menu { margin: 0; }
 @media (prefers-color-scheme: dark) { .dz-toggle:not(.dz-on) { border-color: #a9a9b8 !important; } }   /* the dark tab must stand out from a dark page */
+
+/* Size, Spacing and Radius tools: the handles on the selected element, and the number fields */
+.dz-handle { display: none; position: absolute; width: 12px; height: 12px; border: 2px solid #fff; border-radius: 3px; background: #ff5ca8; box-shadow: 0 0 0 1px #1f1f24; touch-action: none; }
+.dz-sizing .dz-handle { display: block; pointer-events: auto; }
+.dz-h-e { right: -7px; top: calc(50% - 6px); cursor: ew-resize; }
+.dz-h-s { bottom: -7px; left: calc(50% - 6px); cursor: ns-resize; }
+.dz-h-se { right: -7px; bottom: -7px; cursor: nwse-resize; }
+.dz-field { width: 64px !important; margin: 0 !important; padding: 4px 6px !important; border: 1px solid #55555f !important; border-radius: 6px !important; background: #2b2b33 !important; color: #f3f3f6 !important; font: inherit !important; font-variant-numeric: tabular-nums; }
+.dz-unit { width: 14px; color: #b9b9c4; }
+.dz-spacing { display: grid; gap: 6px; }
+.dz-spacing-panel { gap: 12px; }
+.dz-spacing .dz-row > span:first-child { width: 52px; }
+.dz-group-head strong { flex: none; width: auto; }
+.dz-group-head .dz-wide { flex: 1; text-align: right; }
+.dz-spacing input[type="checkbox"] { margin: 0; accent-color: #ff5ca8; }
+.dz-sizing-row > span:first-child { width: 46px; }
+.dz-note { margin: 0; }
+.dz-panel, .dz-spacing { grid-template-columns: minmax(0, 1fr); }   /* a slider's own width must not push a panel wider than the dock */
