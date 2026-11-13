@@ -43,3 +43,6 @@ patches_state.json.tmp
 icons.json
 icons.json.tmp
 icon_files/
+
+# playwright-cli page snapshots and session files
+.playwright-cli/
