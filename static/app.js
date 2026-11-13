@@ -564,8 +564,7 @@ function addTile(data, pop = false) {
   el.addEventListener("pointerdown", onTilePointerDown);
   el.addEventListener("pointermove", onTilePointerMove);
   el.addEventListener("pointerup", onTilePointerUp);
-  el.addEventListener("pointercancel", onTilePointerUp);
-  el.addEventListener("dblclick", () => duplicateTile(data.id));
+  el.addEventListener("pointercancel", onTilePointerUp);   // a double press copies the tile: see onTilePointerDown
   if (pop) el.classList.add("pop");
   workspace.appendChild(el);
   tiles.set(data.id, { data: { ...data }, el });
@@ -606,13 +605,47 @@ async function addNewTile(elementId, x, y) {
   }
 }
 
-function duplicateTile(id) {
-  const t = tiles.get(id);
-  if (!t || t.data.held_by) return;
-  // Half a tile right and down: the copy overlaps the original by 50% along each axis.
-  const rect = workspace.getBoundingClientRect();
-  const dx = (t.el.offsetWidth / 2) / rect.width, dy = (t.el.offsetHeight / 2) / rect.height;
-  addNewTile(t.data.element, clamp01(t.data.x + dx), clamp01(t.data.y + dy));
+// ---- double press: copy a tile under the pointer, and keep holding to drag the copy away ---------------------------
+// The copy is made on the SECOND PRESS, not on the browser's dblclick (which only fires when that press is let go, too late
+// to start a drag). It is centred on the pointer, so it sits over the original; moving before letting go drags the copy.
+const DOUBLE_PRESS_MS = 450;   // the second press must come this soon after the first click ended…
+const DOUBLE_PRESS_PX = 10;    // …and this close to it
+let lastTileClick = null;      // {id, time, x, y}: the last plain click on a tile (a press let go without dragging)
+let lastItemClick = null;      // the same for the element list, where a double click must add one tile, not two
+
+function isDoublePress(last, id, e) {
+  return last !== null && last.id === id && e.timeStamp - last.time < DOUBLE_PRESS_MS
+    && Math.hypot(e.clientX - last.x, e.clientY - last.y) < DOUBLE_PRESS_PX;
+}
+
+/** Start dragging a copy of `element` that does not exist yet: the server makes it (and gives it an id) while the pointer is
+ *  already moving. Until then the pointer is only followed; once it arrives it jumps under the pointer and the drag goes on,
+ *  or, if the button was already let go, it is put down where it was let go. */
+function startCopyDrag(e, element) {
+  const r = wsRect();
+  const d = {
+    id: null, copying: true, pointerId: e.pointerId, offX: 0, offY: 0,   // the copy is centred on the pointer
+    origX: clamp01((e.clientX - r.left) / r.width), origY: clamp01((e.clientY - r.top) / r.height),
+    started: false, startX: e.clientX, startY: e.clientY, ready: false, failed: false, last: null,
+    lastX: e.clientX, lastY: e.clientY, released: false,
+    copied: true,   // letting go of a copy is not the first click of another double press (a triple click makes one copy)
+  };
+  drag = d;
+  api("/tile/add", { element, x: d.origX, y: d.origY })
+    .then((data) => {
+      addTile(data, true);
+      d.id = data.id;
+      d.copying = false;
+      const moved = Math.hypot(d.lastX - d.startX, d.lastY - d.startY) >= DRAG_THRESHOLD;
+      if (!moved) return;                                   // a double click: the copy stays under the pointer
+      startTileDrag(d);
+      followPointer(d, d.lastX, d.lastY);
+      if (d.released || drag !== d) finishTileDrag(d, d.lastX, d.lastY);   // let go before the copy arrived
+    })
+    .catch((err) => {
+      if (drag === d) drag = null;
+      toast(err.message, "error");
+    });
 }
 
 /** The tile (other than `excludeId`) under a screen position, if it is free to combine with. */
@@ -681,6 +714,12 @@ function onTilePointerDown(e) {
     return;
   }
   e.preventDefault();
+  if (isDoublePress(lastTileClick, id, e)) {
+    lastTileClick = null;
+    el.setPointerCapture(e.pointerId);   // the moves keep coming here; the handlers follow `drag`, whichever tile it is
+    startCopyDrag(e, t.data.element);
+    return;
+  }
   const box = el.getBoundingClientRect();
   const d = {
     id,
@@ -740,28 +779,36 @@ function cancelDrag(d, message) {
 function onTilePointerMove(e) {
   const d = drag;
   if (!d || e.pointerId !== d.pointerId) return;
-  const t = tiles.get(d.id);
-  if (!t) return;
+  if (d.copying) { d.lastX = e.clientX; d.lastY = e.clientY; return; }   // the copy is still on its way: remember where to put it
+  if (!tiles.has(d.id)) return;
   if (!d.started) {
     if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < DRAG_THRESHOLD) return;
     startTileDrag(d);
   }
-  d.lastX = e.clientX;
-  d.lastY = e.clientY;
-  const { x, y } = tileSpot(d, e.clientX, e.clientY);
+  followPointer(d, e.clientX, e.clientY);
+}
+
+/** Put the dragged tile under the pointer, show what it would combine with or whether it would be thrown away, and tell the
+ *  others where it is (once the server has said it is ours to move). */
+function followPointer(d, clientX, clientY) {
+  const t = tiles.get(d.id);
+  if (!t) return;
+  d.lastX = clientX;
+  d.lastY = clientY;
+  const { x, y } = tileSpot(d, clientX, clientY);
   t.data.x = x;
   t.data.y = y;
   positionTile(d.id);
-  const trash = overSidebar(e.clientX, e.clientY);
+  const trash = overSidebar(clientX, clientY);
   sidebar.classList.toggle("trash", trash);
-  setTarget(trash ? null : findTarget(e.clientX, e.clientY, d.id));
+  setTarget(trash ? null : findTarget(clientX, clientY, d.id));
   const r = wsRect();
   d.last = {
     tile: d.id,
     x,
     y,
-    cx: clamp01((e.clientX - r.left) / r.width),
-    cy: clamp01((e.clientY - r.top) / r.height),
+    cx: clamp01((clientX - r.left) / r.width),
+    cy: clamp01((clientY - r.top) / r.height),
   };
   if (d.ready) moveSender.send(d.last);
 }
@@ -770,7 +817,15 @@ function onTilePointerUp(e) {
   const d = drag;
   if (!d || e.pointerId !== d.pointerId) return;
   drag = null;
-  if (!d.started) return; // just a click: nothing was grabbed, so there is nothing to put down
+  if (d.copying) {   // let go before the copy arrived: startCopyDrag puts it down when it does
+    d.released = true;
+    if (e.type !== "pointercancel") { d.lastX = e.clientX; d.lastY = e.clientY; }
+    return;
+  }
+  if (!d.started) {   // just a click: nothing was grabbed, so there is nothing to put down; a second press soon copies the tile
+    if (e.type !== "pointercancel" && !d.copied) lastTileClick = { id: d.id, time: e.timeStamp, x: e.clientX, y: e.clientY };
+    return;
+  }
   finishTileDrag(d, e.type === "pointercancel" ? d.lastX : e.clientX, e.type === "pointercancel" ? d.lastY : e.clientY);
 }
 
@@ -858,6 +913,8 @@ function onItemPointerUp(e) {
   if (e.pointerType === "touch" && !d.lifted && Math.hypot(e.clientX - d.startX, e.clientY - d.startY) > 12) return; // a swipe, not a tap
 
   if (!d.ghost) { // a plain click or tap: drop a new tile somewhere near the middle
+    if (isDoublePress(lastItemClick, d.id, e)) { lastItemClick = null; return; }   // the second click of a double click adds nothing
+    lastItemClick = { id: d.id, time: e.timeStamp, x: e.clientX, y: e.clientY };
     addNewTile(d.id, 0.3 + Math.random() * 0.4, 0.3 + Math.random() * 0.4);
     return;
   }

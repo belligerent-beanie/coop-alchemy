@@ -52,7 +52,7 @@ cause: allow incoming connections for Python on the port you chose.
    (`--idle-minutes` changes this) and is *not* saved when that happens.
 4. **Playing.** Drag an element from the list onto the workspace, then drop one
    tile onto another to combine them. Everyone sees the same tiles and each
-   other's cursors. Double-click a tile to make a copy of it; the copy appears half a tile right and down, so it overlaps the original by half. Elements are listed alphabetically. Hover an element to see who discovered it. **Right-click** an element or a tile (on a phone: **hold it, then let go**) to open its page in the 📖 Journal. The cat 🐈 clears
+   other's cursors. Double-click a tile to make a copy of it under the pointer; keep the button down after the second click and drag to carry the copy away. (Double-clicking an element in the list adds one tile, like a single click.) Elements are listed alphabetically. Hover an element to see who discovered it. **Right-click** an element or a tile (on a phone: **hold it, then let go**) to open its page in the 📖 Journal. The cat 🐈 clears
    the whole workspace for everyone (after a confirmation); there is no undo, and the other
    players get a message saying who sent the cat. The search box above the element list
    filters it by name.
@@ -156,7 +156,7 @@ unlocked. Drag two elements together:
   of an existing element adds another way to make it. Either way it becomes a **draft**:
   it is saved with your account, shows in *My recipes* and (for new elements) in your
   element list (dashed border), and works only on this page. Real games never see drafts.
-- Click an element to drop a tile, double-click a tile to copy it (the copy overlaps the original by half), and drag a tile onto the
+- Click an element to drop a tile, double-click a tile to copy it under the pointer (hold the second click and drag to move the copy), and drag a tile onto the
   element list to remove it.
 
 In *My recipes*, **Promote** sends your recipe to the admins with your name as credit and an
