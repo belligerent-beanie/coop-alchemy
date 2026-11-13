@@ -1,7 +1,7 @@
 "use strict";
 // The designer's UI picker. Accounts marked as designers (accounts_admin.py make-designer) get this on every page (auth.js loads it).
 // Alt+Shift+P (or the Design button) turns picker mode on: clicks select an element instead of reaching the page; ↑ selects the
-// parent, ↓ a child, Enter opens Fill / Border / Shadow / Text / Size / Spacing / Radius, Esc closes things and clears the selection; Alt+Shift+E copies every change
+// parent, ↓ a child, Enter opens Fill / Border / Shadow / Text / Font / Size / Spacing / Radius, Ctrl+Z undoes, Esc closes things and clears the selection; Alt+Shift+E copies every change
 // as Markdown (the guide, shown the first time and under "Guide", explains all of this). Edits are inline styles on THIS
 // browser's copy of the page only: nothing is sent to the server; they are kept in this browser (localStorage, per page) and put back after a reload. "Changes" exports them as
 // Markdown (selector, before → after) to hand to a developer or an AI. This is a convenience for designers, not a security
@@ -101,6 +101,80 @@
     return splitTopLevel(text).map((part) => { const s = parseShadow(part); return s ? shadowCss(s) : part; }).join(", ");
   }
 
+  // ---------- type and contrast ----------
+  const TEXT_ALIGNS = ["left", "center", "right", "justify"];
+  const WEIGHTS = [[100, "Thin"], [200, "Extra light"], [300, "Light"], [400, "Regular"], [500, "Medium"], [600, "Semibold"], [700, "Bold"], [800, "Extra bold"], [900, "Black"]];
+  /** Line height the way designers say it: a multiple of the font size ("1.5"), or "normal". */
+  function lineHeightOf(cs) {
+    if (cs.lineHeight === "normal") return "normal";
+    const size = parseFloat(cs.fontSize);
+    return size ? String(Math.round((parseFloat(cs.lineHeight) / size) * 100) / 100) : cs.lineHeight;
+  }
+  const alignOf = (cs) => ({ start: "left", end: "right" }[cs.textAlign] || cs.textAlign);
+
+  const colourContext = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+  /** Any CSS colour as [r, g, b, alpha 0..1] (the browser does the parsing, so rgb(), hex, hsl() and oklch() all work); null if it cannot. */
+  function toRgba(css) {
+    if (!colourContext) return null;
+    try {
+      colourContext.canvas.width = colourContext.canvas.height = 1;
+      colourContext.fillStyle = "#000";
+      colourContext.fillStyle = css;
+      colourContext.fillRect(0, 0, 1, 1);
+      const [r, g, b, a] = colourContext.getImageData(0, 0, 1, 1).data;
+      return [r, g, b, a / 255];
+    } catch (_) { return null; }
+  }
+  const over = ([r, g, b, a], [br, bg, bb]) => [r * a + br * (1 - a), g * a + bg * (1 - a), b * a + bb * (1 - a)];
+  function luminance([r, g, b]) {
+    const lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  }
+  const contrastOf = (a, b) => { const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x); return (hi + 0.05) / (lo + 0.05); };
+  /** What is behind the element's text: its own background, then its ancestors' until one is solid (white if none is). A picture or
+   *  gradient cannot be measured: unknown is true then. */
+  function backdrop(element) {
+    const layers = [];
+    let unknown = false;
+    for (let node = element; node && node.nodeType === 1; node = node.parentElement) {
+      const cs = getComputedStyle(node);
+      if (cs.backgroundImage !== "none") unknown = true;
+      const c = toRgba(cs.backgroundColor);
+      if (c && c[3] > 0) { layers.push(c); if (c[3] >= 1) break; }
+      if (unknown) break;
+    }
+    let base = [255, 255, 255];
+    for (const layer of layers.reverse()) base = over(layer, base);
+    return { rgb: base, unknown };
+  }
+  /** The element's text colour against what is behind it, with the WCAG 2 thresholds for its size (large text needs less). */
+  function contrastInfo(element) {
+    const cs = getComputedStyle(element);
+    const back = backdrop(element);
+    const fore = toRgba(cs.color);
+    if (!fore) return { unknown: true };
+    const size = parseFloat(cs.fontSize);
+    const large = size >= 24 || (parseInt(cs.fontWeight, 10) >= 700 && size >= 18.66);
+    const need = large ? 3 : 4.5, needAaa = large ? 4.5 : 7;
+    const ratio = contrastOf(over(fore, back.rgb), back.rgb);
+    return { unknown: back.unknown, ratio, need, aa: ratio >= need, aaa: ratio >= needAaa };
+  }
+  const contrastLabel = (info) => (info.unknown ? "unknown" : info.ratio.toFixed(2) + ":1");
+  /** A live line under a colour picker: the contrast ratio and whether it passes WCAG AA and AAA. update() after each change. */
+  function contrastNode(element) {
+    const node = h("p", { class: "dz-contrast" });
+    function update() {
+      if (!element.textContent.trim()) { node.hidden = true; return; }   // no words in it: nothing to read
+      node.hidden = false;
+      const info = contrastInfo(element);
+      node.className = "dz-contrast " + (info.unknown ? "dz-unknown" : info.aa ? "dz-pass" : "dz-fail");
+      node.textContent = info.unknown ? "Contrast: the background is a picture or gradient, so it cannot be measured."
+        : `Contrast ${info.ratio.toFixed(2)}:1 · AA ${info.aa ? "✓" : `✗ (needs ${info.need}:1)`} · AAA ${info.aaa ? "✓" : "✗"}`;
+    }
+    update();
+    return { node, update };
+  }
+
   // ---------- sizes, spacing and corners ----------
   const SIDES = ["top", "right", "bottom", "left"];
   const CORNERS = ["border-top-left-radius", "border-top-right-radius", "border-bottom-right-radius", "border-bottom-left-radius"];
@@ -142,7 +216,7 @@
   let hovered = null;
   let climbed = [];            // the elements we came up from, so ↓ goes back the way we came
   let menuOpen = false;
-  let tool = null;             // "fill" | "border" | "shadow" | "text" | "size" | "spacing" | "radius" | null
+  let tool = null;             // "fill" | "border" | "shadow" | "text" | "font" | "size" | "spacing" | "radius" | null
   let showChanges = false;
   let showPatches = false;    // the design patches panel (patches.py): switch them off, to preview, or on
   let tourStep = null;         // the guide page being shown (0-based), or null
@@ -175,6 +249,8 @@
       event.preventDefault();
       const r = selected.getBoundingClientRect();
       drag = { dir: handle.dataset.dir, x: event.clientX, y: event.clientY, w: r.width, h: r.height };
+      lastEdit = { kind: "", element: null, at: 0 };   // the drag starts a new step ...
+      holdStep = true;                                    // ... and stays one however slowly it goes
       handle.setPointerCapture(event.pointerId);
     });
     handle.addEventListener("pointermove", (event) => {
@@ -192,7 +268,7 @@
       applySize(selected, sizes);
       if (sizeSync) sizeSync();
     });
-    const release = () => { drag = null; };
+    const release = () => { drag = null; holdStep = false; };
     handle.addEventListener("pointerup", release);
     handle.addEventListener("pointercancel", release);
   }
@@ -274,6 +350,13 @@
           margin: sidesOf(cs, "margin"),
           width: boxSize(element).width + "px",
           height: boxSize(element).height + "px",
+          color: colourText(cs.color),
+          "font-size": cs.fontSize,
+          "font-weight": cs.fontWeight,
+          "line-height": lineHeightOf(cs),
+          "letter-spacing": cs.letterSpacing === "normal" ? "normal" : cs.letterSpacing,
+          "text-align": alignOf(cs),
+          contrast: contrastLabel(contrastInfo(element)),
         },
       };
       changes.set(element, rec);
@@ -295,7 +378,8 @@
     const skip = prop === "border-width" && NO_BORDER(style, "1px");
     const now = computed.getPropertyValue(prop);
     const same = prop.endsWith("color") ? colourText(now) === value.toLowerCase()
-      : prop === "box-shadow" ? shadowText(now) === shadowText(value) : now === value;
+      : prop === "box-shadow" ? shadowText(now) === shadowText(value)
+      : prop === "line-height" ? Math.abs(parseFloat(now) - parseFloat(value) * parseFloat(computed.fontSize)) < 0.5 : now === value;
     if (!skip && !same) element.style.setProperty(prop, value, "important");
     if (saved[0]) element.style.setProperty("transition", saved[0], saved[1]); else element.style.removeProperty("transition");
   }
@@ -308,6 +392,78 @@
   }
   const changeCount = () => changes.size + pending.length;
   function showCount() { if (changesLink) changesLink.textContent = `Changes (${changeCount()})`; }
+
+  // ---------- undo and redo ----------
+  // A step is a snapshot, taken just before an edit, of the properties the picker manages on the element (never the whole style
+  // attribute: the game board moves its tiles with inline styles, and undoing must not touch those), its record, and its text.
+  // Edits of one kind to one element close together in time (a slider being dragged, digits being typed) are one step.
+  const MANAGED = ["background-color", "color", "font-size", "font-weight", "line-height", "letter-spacing", "text-align",
+    "border-style", "border-width", "border-color", "border-radius", "box-shadow", "width", "height",
+    ...["padding", "margin"].flatMap((kind) => ["top", "right", "bottom", "left"].map((side) => `${kind}-${side}`))];
+  const MERGE_MS = 1200;
+  const MAX_STEPS = 100;
+  const undoStack = [];
+  const redoStack = [];
+  let restoring = false;       // edits being put back after a reload are not new history
+  let bulk = false;            // Reset all records one step for everything, not one per element
+  let holdStep = false;        // a handle is being dragged: the whole drag is one step
+  let lastEdit = { kind: "", element: null, at: 0 };
+  let undoLink = null;
+  let redoLink = null;
+
+  function cloneRec(rec) {
+    if (!rec) return null;
+    return { ...rec, props: new Map([...rec.props].map(([k, v]) => [k, { ...v }])), text: rec.text ? { ...rec.text } : null,
+             before: { ...rec.before }, after: rec.after ? { ...rec.after } : undefined };
+  }
+  function snapshotOf(element) {
+    const style = {};
+    for (const prop of MANAGED) style[prop] = [element.style.getPropertyValue(prop), element.style.getPropertyPriority(prop)];
+    return { element, style, text: element.children.length ? null : element.textContent, rec: cloneRec(changes.get(element)) };
+  }
+  function putSnapshotBack(snap) {
+    const element = snap.element;
+    if (!document.contains(element)) return;
+    for (const [prop, [value, priority]] of Object.entries(snap.style)) {
+      if (value) element.style.setProperty(prop, value, priority); else element.style.removeProperty(prop);
+    }
+    if (snap.text !== null && !element.children.length && element.textContent !== snap.text) element.textContent = snap.text;
+    if (snap.rec) changes.set(element, snap.rec); else changes.delete(element);
+  }
+  function showHistory() {
+    if (undoLink) undoLink.disabled = !undoStack.length;
+    if (redoLink) redoLink.disabled = !redoStack.length;
+  }
+  function pushStep(snaps, keepPending) {
+    undoStack.push({ snaps, pending: keepPending ? [...pending] : null });
+    if (undoStack.length > MAX_STEPS) undoStack.shift();
+    redoStack.length = 0;
+    showHistory();
+  }
+  /** Call just before an edit to `element`; `kind` names what is being edited ("fill", "size", …) so unlike edits are separate steps. */
+  function checkpoint(kind, element) {
+    if (restoring || bulk) return;
+    const now = Date.now();
+    const same = lastEdit.element === element && lastEdit.kind === kind && (holdStep || now - lastEdit.at < MERGE_MS);
+    lastEdit = { kind, element, at: now };
+    if (!same) pushStep([snapshotOf(element)], false);
+  }
+  /** Walk one step back (from = undoStack, to = redoStack) or forward (the other way round). */
+  function moveStep(from, to) {
+    const entry = from.pop();
+    if (!entry) return;
+    to.push({ snaps: entry.snaps.map((snap) => snapshotOf(snap.element)), pending: entry.pending ? [...pending] : null });
+    entry.snaps.forEach(putSnapshotBack);
+    if (entry.pending) pending = entry.pending;
+    lastEdit = { kind: "", element: null, at: 0 };
+    exported = false;
+    showCount();
+    save();
+    renderDock();
+    refreshBoxes();
+  }
+  function undo() { moveStep(undoStack, redoStack); }
+  function redo() { moveStep(redoStack, undoStack); }
 
   // ---------- keeping edits across reloads ----------
   // Every edit is saved in this browser (localStorage, one list per page) and put back when the page loads again, so a
@@ -336,6 +492,10 @@
     const timer = setInterval(() => { if (!pending.length || ++tries > 30) clearInterval(timer); else putBack(); }, 1000);
   }
   function putBack() {
+    restoring = true;
+    try { putBackEdits(); } finally { restoring = false; }
+  }
+  function putBackEdits() {
     const left = [];
     for (const item of pending) {
       let element = null;
@@ -360,6 +520,14 @@
         if (m) sizes[axis] = +m[1];
       }
       if (Object.keys(sizes).length) applySize(element, sizes);
+      const type = {};
+      if (/^#[0-9a-f]{6}$/i.test(after.color || "")) type.color = after.color;
+      if (/^\d+(\.\d+)?px$/.test(after["font-size"] || "")) type["font-size"] = after["font-size"];
+      if (/^[1-9]00$/.test(after["font-weight"] || "")) type["font-weight"] = after["font-weight"];
+      if (/^\d+(\.\d+)?$/.test(after["line-height"] || "")) type["line-height"] = after["line-height"];
+      if (/^-?\d+(\.\d+)?px$/.test(after["letter-spacing"] || "")) type["letter-spacing"] = after["letter-spacing"];
+      if (TEXT_ALIGNS.includes(after["text-align"])) type["text-align"] = after["text-align"];
+      if (Object.keys(type).length) applyType(element, type);
       if (item.text && typeof item.text.after === "string" && !element.children.length) applyText(element, item.text.after);
       const rec = changes.get(element);
       if (rec) {   // "before" is how it was when the designer first changed it, not how it looks after a reload
@@ -373,6 +541,7 @@
   }
 
   function applyFill(element, colour) {
+    checkpoint("fill", element);
     const rec = record(element);
     rememberOriginal(rec, element, "background-color");
     setStyle(element, "background-color", colour);
@@ -380,6 +549,7 @@
     edited();
   }
   function applyBorder(element, style, widthPx, colour) {
+    checkpoint("border", element);
     const rec = record(element);
     for (const prop of ["border-style", "border-width", "border-color"]) rememberOriginal(rec, element, prop);
     setStyle(element, "border-style", style);
@@ -393,6 +563,7 @@
     applyShadowValue(element, shadow ? shadowCss(shadow) : "none");
   }
   function applyShadowValue(element, value) {
+    checkpoint("shadow", element);
     const rec = record(element);
     rememberOriginal(rec, element, "box-shadow");
     setStyle(element, "box-shadow", value);
@@ -401,6 +572,7 @@
   }
   /** padding or margin: four sides in pixels (top, right, bottom, left). */
   function applySpacing(element, kind, sides) {
+    checkpoint("spacing:" + kind, element);
     const rec = record(element);
     SIDES.forEach((side, i) => {
       rememberOriginal(rec, element, `${kind}-${side}`);
@@ -411,6 +583,7 @@
   }
   /** Every corner the same: "12px", or "9999px" for a pill. */
   function applyRadius(element, value) {
+    checkpoint("radius", element);
     const rec = record(element);
     rememberOriginal(rec, element, "border-radius");
     setStyle(element, "border-radius", value);
@@ -419,6 +592,7 @@
   }
   /** sizes is {width?, height?} in pixels (the border box). */
   function applySize(element, sizes) {
+    checkpoint("size", element);
     const rec = record(element);
     for (const axis of ["width", "height"]) {
       if (sizes[axis] === undefined) continue;
@@ -432,6 +606,7 @@
   function clearSize(element) {
     const rec = changes.get(element);
     if (!rec) return;
+    checkpoint("size-clear", element);
     for (const axis of ["width", "height"]) {
       const original = rec.props.get(axis);
       if (!original) continue;
@@ -443,6 +618,7 @@
     edited();
   }
   function applyText(element, text) {
+    checkpoint("text", element);
     const rec = record(element);
     if (!rec.text) rec.text = { before: element.textContent, after: element.textContent };
     element.textContent = text;          // text, never markup
@@ -452,6 +628,7 @@
   function resetElement(element) {
     const rec = changes.get(element);
     if (!rec) return;
+    if (!bulk) pushStep([snapshotOf(element)], false);
     for (const [prop, original] of rec.props) {
       if (original.value) element.style.setProperty(prop, original.value, original.priority);
       else element.style.removeProperty(prop);
@@ -463,12 +640,15 @@
     refreshBoxes();
   }
   function forgetPending(item) {
+    pushStep([], true);
     pending = pending.filter((other) => other !== item);
     save();
     renderDock();
   }
   function resetAll() {
-    for (const element of [...changes.keys()]) resetElement(element);
+    if (changes.size || pending.length) pushStep([...changes.keys()].map(snapshotOf), true);
+    bulk = true;
+    try { for (const element of [...changes.keys()]) resetElement(element); } finally { bulk = false; }
     pending = [];
     save();
     exported = true;
@@ -479,11 +659,15 @@
   /** One text block per changed element: its selector (and a snippet of its text to confirm it), then each before → after. */
   function exportBlocks() {
     const blocks = [];
-    for (const rec of [...changes.values(), ...pending]) {
+    for (const [element, rec] of [...changes.entries(), ...pending.map((item) => [null, item])]) {
       const lines = [];
-      for (const prop of ["background-color", "border", "border-radius", "box-shadow", "padding", "margin", "width", "height"]) {
+      for (const prop of ["background-color", "color", "font-size", "font-weight", "line-height", "letter-spacing", "text-align", "border", "border-radius", "box-shadow", "padding", "margin", "width", "height"]) {
         const after = rec.after && rec.after[prop];
         if (after !== undefined && after !== rec.before[prop]) lines.push(`  ${prop}: ${rec.before[prop]} → ${after}`);
+      }
+      if (element && document.contains(element) && rec.before.contrast && rec.after && (rec.after["background-color"] !== undefined || rec.after.color !== undefined)) {
+        const info = contrastInfo(element);
+        if (contrastLabel(info) !== rec.before.contrast) lines.push(`  contrast: ${rec.before.contrast} → ${contrastLabel(info)}${info.unknown ? "" : ` (WCAG AA ${info.aa ? "pass" : "fail"})`}`);
       }
       if (rec.text && rec.text.after !== rec.text.before) lines.push(`  text: ${JSON.stringify(rec.text.before)} → ${JSON.stringify(rec.text.after)}`);
       if (!lines.length) continue;   // changed and changed back: nothing to hand over
@@ -634,8 +818,8 @@
       "↑ selects the parent of what you have selected. ↓ goes back down the way you came, or to the first child.",
       "Esc clears the selection."] },
     { title: "Change it", lines: [
-      "Enter opens the tools: Fill (colour), Border (style, thickness, colour), Shadow (presets, or offset, blur, spread, opacity, colour), Text, Size (width and height, or drag the pink handles), Spacing (padding and margin) and Radius (rounded corners).",
-      "Text works only on elements with nothing inside them. The page changes straight away, in this tab only; Done closes the tool."] },
+      "Enter opens the tools: Fill (colour), Border (style, thickness, colour), Shadow (presets, or offset, blur, spread, opacity, colour), Text (the words), Font (text colour, size, weight, line height, letter spacing, alignment), Size (width and height, or drag the pink handles), Spacing (padding and margin) and Radius (rounded corners). Fill and Font show the contrast against what is behind the text.",
+      "Text works only on elements with nothing inside them. The page changes straight away, in this tab only; Done closes the tool. Ctrl+Z undoes a step and Ctrl+Shift+Z (or Ctrl+Y) redoes it."] },
     { title: "Export your changes", lines: [
       "Alt+Shift+E copies every change as Markdown. Paste it to Claude, who can then make the same changes in the code.",
       "\"Changes\" lists them with Copy, Download and Reset. They are kept in this browser, through reloads, until you reset them."] },
@@ -671,8 +855,12 @@
     if (tourStep !== null) { dock.append(tourPanel()); return; }
 
     changesLink = h("button", { type: "button", class: "dz-link", text: `Changes (${changeCount()})`, onclick: () => { showChanges = !showChanges; showPatches = false; renderDock(); } });
+    undoLink = h("button", { type: "button", class: "dz-link", text: "Undo", title: "Undo (Ctrl+Z)", onclick: undo });
+    redoLink = h("button", { type: "button", class: "dz-link", text: "Redo", title: "Redo (Ctrl+Shift+Z or Ctrl+Y)", onclick: redo });
+    showHistory();
     const head = h("div", { class: "dz-head" },
       h("strong", { text: selected ? label(selected) : "UI picker" }),
+      undoLink, redoLink,
       changesLink,
       h("button", { type: "button", class: "dz-link", text: "Patches", title: "Design patches: switch them off, to preview, or on",
                     onclick: () => { showPatches = !showPatches; showChanges = false; renderDock(); } }),
@@ -687,7 +875,7 @@
       return;
     }
     const tools = () => h("div", { class: "dz-menu" },
-      menuButton("fill", "Fill"), menuButton("border", "Border"), menuButton("shadow", "Shadow"), menuButton("text", "Text"),
+      menuButton("fill", "Fill"), menuButton("border", "Border"), menuButton("shadow", "Shadow"), menuButton("text", "Text"), menuButton("font", "Font"),
       menuButton("size", "Size"), menuButton("spacing", "Spacing"), menuButton("radius", "Radius"));
     if (!menuOpen && !tool) {
       dock.append(h("p", { class: "dz-hint", text: "Press Enter, or choose a tool." }), tools());
@@ -698,6 +886,7 @@
     else if (tool === "border") dock.append(borderPanel());
     else if (tool === "shadow") dock.append(shadowPanel());
     else if (tool === "text") dock.append(textPanel());
+    else if (tool === "font") dock.append(fontPanel());
     else if (tool === "size") dock.append(sizePanel());
     else if (tool === "spacing") dock.append(spacingPanel());
     else if (tool === "radius") dock.append(radiusPanel());
@@ -729,7 +918,8 @@
   }
   function fillPanel() {
     const element = selected;
-    return h("div", { class: "dz-panel" }, colourPicker(currentFill(element), (colour) => applyFill(element, colour)));
+    const contrast = contrastNode(element);
+    return h("div", { class: "dz-panel" }, colourPicker(currentFill(element), (colour) => { applyFill(element, colour); contrast.update(); }), contrast.node);
   }
   function borderPanel() {
     const element = selected;
@@ -859,6 +1049,84 @@
     input.addEventListener("input", () => applyText(element, input.value));
     return h("div", { class: "dz-panel" }, input);
   }
+  // ---------- the Font tool ----------
+  /** values: CSS property -> value ("color" "#336699", "font-size" "18px", "font-weight" "600", "line-height" "1.5", "letter-spacing" "1px", "text-align" "center"). */
+  function applyType(element, values) {
+    checkpoint("font:" + Object.keys(values).join(), element);
+    const rec = record(element);
+    for (const [prop, value] of Object.entries(values)) {
+      rememberOriginal(rec, element, prop);
+      setStyle(element, prop, value);
+      rec.after = Object.assign(rec.after || {}, { [prop]: value });
+    }
+    edited();
+  }
+  function fontPanel() {
+    const element = selected;
+    const cs = getComputedStyle(element);
+    const rgba = toRgba(cs.color) || [0, 0, 0, 1];
+    const lineNow = lineHeightOf(cs);
+    const state = {
+      colour: toHex(rgba[0], rgba[1], rgba[2]),
+      size: Math.round(parseFloat(cs.fontSize)) || 16,
+      weight: parseInt(cs.fontWeight, 10) || 400,
+      line: lineNow === "normal" ? 1.2 : parseFloat(lineNow),
+      spacing: cs.letterSpacing === "normal" ? 0 : Math.round(parseFloat(cs.letterSpacing) * 2) / 2,
+      align: alignOf(cs),
+    };
+    const contrast = contrastNode(element);
+    const set = (values) => { applyType(element, values); contrast.update(); };
+
+    const swatch = h("span", { class: "dz-swatch" });
+    swatch.style.backgroundColor = state.colour;
+    const holder = h("div", { class: "dz-colour-holder", hidden: true });
+    const colourButton = h("button", { type: "button", class: "dz-menu-button", "aria-expanded": "false",
+      onclick: () => {
+        holder.hidden = !holder.hidden;
+        colourButton.setAttribute("aria-expanded", holder.hidden ? "false" : "true");
+        if (!holder.hidden && !holder.firstChild) {
+          holder.append(colourPicker(state.colour, (value) => { state.colour = value; swatch.style.backgroundColor = value; set({ color: value }); }));
+        }
+      } }, "Text colour ", swatch);
+
+    const sizeRange = h("input", { type: "range", min: "8", max: "72", class: "dz-range", "aria-label": "Font size slider" });
+    const sizeField = numberField("Font size in pixels", 6, 200, (value) => { state.size = value; showSize(); set({ "font-size": value + "px" }); });
+    const showSize = () => { sizeRange.value = String(Math.min(72, Math.max(8, state.size))); if (document.activeElement !== sizeField) sizeField.value = String(state.size); };
+    sizeRange.addEventListener("input", () => { state.size = +sizeRange.value; showSize(); set({ "font-size": state.size + "px" }); });
+
+    const known = WEIGHTS.some(([value]) => value === state.weight);
+    const weightSelect = h("select", { class: "dz-select", "aria-label": "Font weight" },
+      ...(known ? [] : [h("option", { value: String(state.weight), text: String(state.weight), selected: true })]),
+      ...WEIGHTS.map(([value, name]) => h("option", { value: String(value), text: `${value} ${name}`, selected: value === state.weight })));
+    weightSelect.addEventListener("change", () => { state.weight = +weightSelect.value; set({ "font-weight": String(state.weight) }); });
+
+    const lineRange = h("input", { type: "range", min: "0.8", max: "2.4", step: "0.05", class: "dz-range", "aria-label": "Line height" });
+    const lineNumber = h("span", { class: "dz-num" });
+    const showLine = () => { lineRange.value = String(state.line); lineNumber.textContent = String(Math.round(state.line * 100) / 100); };
+    lineRange.addEventListener("input", () => { state.line = +lineRange.value; showLine(); set({ "line-height": String(state.line) }); });
+
+    const spaceRange = h("input", { type: "range", min: "-2", max: "10", step: "0.5", class: "dz-range", "aria-label": "Letter spacing" });
+    const spaceNumber = h("span", { class: "dz-num" });
+    const showSpace = () => { spaceRange.value = String(state.spacing); spaceNumber.textContent = state.spacing + "px"; };
+    spaceRange.addEventListener("input", () => { state.spacing = +spaceRange.value; showSpace(); set({ "letter-spacing": state.spacing + "px" }); });
+
+    const alignButtons = TEXT_ALIGNS.map((align) => h("button", { type: "button", class: "dz-menu-button", text: align[0].toUpperCase() + align.slice(1),
+      "aria-pressed": "false", onclick: () => { state.align = align; showAlign(); set({ "text-align": align }); } }));
+    const showAlign = () => alignButtons.forEach((button, i) => {
+      const on = TEXT_ALIGNS[i] === state.align;
+      button.classList.toggle("dz-active", on);
+      button.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+    showSize(); showLine(); showSpace(); showAlign();
+    return h("div", { class: "dz-panel dz-font" },
+      colourButton, holder, contrast.node,
+      h("label", { class: "dz-row" }, h("span", { text: "Size" }), sizeRange, sizeField, h("span", { class: "dz-unit", text: "px" })),
+      h("label", { class: "dz-row" }, h("span", { text: "Weight" }), weightSelect),
+      h("label", { class: "dz-row" }, h("span", { text: "Line" }), lineRange, lineNumber),
+      h("label", { class: "dz-row" }, h("span", { text: "Letters" }), spaceRange, spaceNumber),
+      h("div", { class: "dz-menu" }, ...alignButtons));
+  }
+
   // ---------- size, spacing and radius tools ----------
   const SIZE_HELP = "Type a size, or drag the pink handles on the page (Shift keeps the proportions).";
   /** A pixel field: a number box that Shift+↑/↓ moves by 10, beside its slider. */
@@ -1053,6 +1321,13 @@
       if (event.key === "Escape") { event.preventDefault(); endTour(); return; }
       if (event.key === "ArrowRight" && tourStep < TOUR.length - 1) { event.preventDefault(); tourStep += 1; renderDock(); return; }
       if (event.key === "ArrowLeft" && tourStep > 0) { event.preventDefault(); tourStep -= 1; renderDock(); return; }
+    }
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && /^[zy]$/i.test(event.key)) {
+      const t = event.target;
+      const editing = t instanceof HTMLElement && (t.isContentEditable || t.tagName === "TEXTAREA" || (t.tagName === "INPUT" && !/^(range|checkbox|radio|button)$/.test(t.type)));
+      const forward = event.key.toLowerCase() === "y" || event.shiftKey;
+      if (!editing && (forward ? redoStack.length : undoStack.length)) { event.preventDefault(); if (forward) redo(); else undo(); }
+      return;
     }
     const typing = ours(event.target) && /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName);
     if (event.key === "Escape") {

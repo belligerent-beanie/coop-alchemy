@@ -81,3 +81,12 @@
 .dz-sizing-row > span:first-child { width: 46px; }
 .dz-note { margin: 0; }
 .dz-panel, .dz-spacing { grid-template-columns: minmax(0, 1fr); }   /* a slider's own width must not push a panel wider than the dock */
+
+/* Font tool, contrast readout, undo and redo */
+.dz-contrast { margin: 0; font-size: 12px; font-variant-numeric: tabular-nums; }
+.dz-pass { color: #7fe0a1; }
+.dz-fail { color: #ff8a80; }
+.dz-unknown { color: #b9b9c4; }
+.dz-font .dz-row > span:first-child { width: 52px; }
+.dz-font .dz-select { min-width: 0; }
+.dz-link:disabled { opacity: 0.4 !important; cursor: default !important; text-decoration: none !important; }
