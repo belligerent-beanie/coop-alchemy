@@ -37,3 +37,6 @@ reload_snapshot.json*
 *.pem
 *.md
 *-first-password.txt
+
+# the UI/UX tooling workspace (Storybook, shadcn/ui, Chromatic, axe, Lighthouse) is for designers, not part of the game image
+design

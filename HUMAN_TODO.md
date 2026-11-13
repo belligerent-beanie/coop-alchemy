@@ -5,6 +5,8 @@ the exact commands and a check are in [LAUNCH.md](LAUNCH.md). Tick as you go.
 
 ## 1. Before anything else (5 minutes)
 
+- [ ] **Chromatic token (only if you want visual-regression review of components).** Add the repository at chromatic.com, then run
+      `CHROMATIC_PROJECT_TOKEN=... bun run chromatic` in `design/`. Steps in [design/README.md](design/README.md).
 - [ ] **Push the commits.** Nothing from this work is on GitHub yet, and the server clones from there: `git push` from the project folder.
       If the repository is private, decide how the server will clone it (a deploy key is the tidy way: GitHub > Settings > Deploy keys).
 - [ ] **Read the terms of use** (`static/terms.html`, or `/terms` when running) and change anything that is not how you want to run this.
