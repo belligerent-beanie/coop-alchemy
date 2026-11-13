@@ -74,22 +74,28 @@ async function upgradeOldToken() {
 upgradeOldToken();
 
 /** Accounts marked as designers get the on-page UI picker (designer.js). Only an answer from the server ("designer": true on
- *  /me) loads it, and it is asked once per browser tab. The picker is a convenience, not a security boundary: it only changes
- *  this browser's copy of the page. */
-(async function loadDesigner() {
-  const user = Auth.user();
-  if (!user) return;
-  let known = null;
-  try { known = JSON.parse(sessionStorage.getItem("alchemy-designer") || "null"); } catch (_) { /* unreadable: ask again */ }
-  if (!known || known.user !== user) {
+ *  /me) loads it. It is asked on every page load, and again while the picker is not loaded yet: when the tab comes back into
+ *  view and once a minute while it is visible, so an account made a designer gets the picker without reloading. Taking the
+ *  role away shows from the next page load. The picker is a convenience, not a security boundary: it only changes this
+ *  browser's copy of the page. */
+(function loadDesigner() {
+  if (!Auth.user()) return;
+  const RECHECK_MS = 60000;
+  let loaded = false;
+  let asking = false;
+  async function check() {
+    if (loaded || asking || !Auth.user()) return;
+    asking = true;
     try {
       const res = await fetch("/me", { headers: Auth.headers() });
-      if (!res.ok) return;
-      known = { user, designer: (await res.json()).designer === true };
-      sessionStorage.setItem("alchemy-designer", JSON.stringify(known));
-    } catch (_) { return; }   // offline, or storage blocked: no picker this time
+      if (!res.ok || (await res.json()).designer !== true) return;
+      loaded = true;
+      document.head.append(Object.assign(document.createElement("link"), { rel: "stylesheet", href: "/static/designer.css" }));
+      document.head.append(Object.assign(document.createElement("script"), { src: "/static/designer.js" }));
+    } catch (_) { /* offline: try again at the next check */ } finally { asking = false; }
   }
-  if (!known.designer) return;
-  document.head.append(Object.assign(document.createElement("link"), { rel: "stylesheet", href: "/static/designer.css" }));
-  document.head.append(Object.assign(document.createElement("script"), { src: "/static/designer.js" }));
+  check();
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) check(); });
+  window.addEventListener("focus", check);
+  setInterval(() => { if (!document.hidden) check(); }, RECHECK_MS);
 })();
