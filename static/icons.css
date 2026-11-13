@@ -119,3 +119,15 @@ body.icons-page { height: auto; min-height: 100%; }
 .ir-recent img { width: 32px; height: 32px; background: #f4f1e8; border-radius: 6px; }
 .ir-preview { display: flex; align-items: center; gap: 6px; font-size: 0.9rem; }
 #ic-preview[aria-pressed="true"] { background: #ff5ca8; border-color: #ff5ca8; color: #1f1f24; }
+
+/* ---- the guide (icons.js, TOUR): a card that leaves the studio visible, with the part it talks about outlined ---- */
+.ic-tour { position: fixed; right: 16px; bottom: 16px; z-index: 50; width: min(380px, calc(100vw - 32px)); max-height: calc(100vh - 32px);
+  overflow: auto; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--fg);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35); display: grid; gap: 8px; }
+.ic-tour h2 { margin: 0; font-size: 1.1rem; }
+.ic-tour p, .ic-tour ul { margin: 0; }
+.ic-tour ul { padding-left: 1.2em; display: grid; gap: 4px; }
+.ic-tour kbd { font: 0.8rem ui-monospace, monospace; padding: 0 4px; border: 1px solid var(--line); border-radius: 4px; }
+.ic-tour-step { font-size: 0.8rem; }
+.ic-tour-focus { outline: 3px solid #ff5ca8 !important; outline-offset: 3px; border-radius: 6px; }
+.ic-tour.left { right: auto; left: 16px; }

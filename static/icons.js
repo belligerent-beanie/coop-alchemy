@@ -951,7 +951,94 @@ function download() {
   }, "image/png");
 }
 
+// ---------- the guide ----------
+// Shown the first time the studio opens in a browser, and again from "Guide". Each page outlines the part it talks about (when
+// that part is on screen: the editor appears once an element is chosen). [[X]] in a line is shown as a key.
+const TOUR_KEY = "alchemy-icon-tour";
+const TOUR = [
+  { title: "Welcome to the Icon studio", target: null, lines: [
+    "Draw the icons players see for each element: in the element list, and small on the tiles they combine.",
+    "This guide takes a minute. Use the arrow keys or the buttons; Guide (top right) opens it again any time."] },
+  { title: "1. Pick an element", target: ".ic-elements", lines: [
+    "Elements without an icon come first. Search by name, or tick “Only those without an icon”.",
+    "Badges show where each of yours is: draft, waiting, approved or not accepted."] },
+  { title: "2. The canvas", target: ".ic-stage", lines: [
+    "It is the real 128 × 128 canvas, four times larger. Every square you see is a pixel of the finished icon.",
+    "The grid lines are every 8 pixels, with the centre marked. [[#]] turns the grid off."] },
+  { title: "3. Shapes", target: ".ic-toolbar", lines: [
+    "Pick a shape and drag on the canvas. Shift keeps it square (or a line straight).",
+    "Select ([[V]]) to move a shape or drag a corner to resize it. On the right you can turn it, round its corners, change its points, flip, centre, reorder, duplicate or delete it.",
+    "Cut-out ([[X]]): the next shapes cut holes in their layer instead of painting, like the white details on today's icons."] },
+  { title: "4. Pixels", target: ".ic-toolbar", lines: [
+    "Brush ([[B]]), Eraser ([[E]]) and Fill ([[F]]) work pixel by pixel, on a pixel layer (one is added for you).",
+    "Pick ([[I]]) takes a colour from the icon."] },
+  { title: "5. Colours and layers", target: ".ic-side", lines: [
+    "Any colour and opacity. The first swatch is the navy most icons use; your recent colours follow.",
+    "With a shape selected, a new colour changes that shape. Press [[Esc]] first to choose a colour for the next one.",
+    "Layers stack shapes and pixels: hide, fade, reorder or rename them (double-click the name)."] },
+  { title: "6. Check it at game size", target: ".ic-previews", lines: [
+    "This is how players will see it: full size, in the list, and on a tile in the light and the dark theme.",
+    "What looks fine large can turn to mush at 28 pixels: keep shapes bold and few."] },
+  { title: "7. Redrawing an existing icon", target: null, lines: [
+    "Choosing an element that has an icon asks how to start: Edit it (the old picture becomes a pixel layer), Trace over it (shown faintly underneath, not part of your icon), or Start blank."] },
+  { title: "8. Saving and proposing", target: ".ic-top", lines: [
+    "Every change is saved by itself, on the server under your account, so nothing is lost and you can carry on from another computer. [[⌘Z]] / [[Ctrl+Z]] undoes.",
+    "Propose… sends the icon to the administrators with an optional note. If they approve it, it is in the game straight away.",
+    "While it waits, Preview in the game shows it in place of the current icon, to administrators and designers only."] },
+  { title: "Keys", target: null, lines: [
+    "[[V]] select · [[R]] rectangle · [[U]] rounded · [[O]] ellipse · [[L]] line · [[Y]] polygon · [[S]] star · [[P]] pen",
+    "[[B]] brush · [[E]] eraser · [[F]] fill · [[I]] pick · [[X]] cut-out · [[#]] grid",
+    "[[⌘D]] duplicate · [[⌫]] delete · [[[]] / [[]]] backward / forward · arrows nudge (Shift: 8 px) · [[Esc]] deselect"] },
+];
+let tourStep = null;
+function tourLine(text) {
+  const p = document.createElement("p");
+  for (const part of text.split(/(\[\[.+?\]\])/)) {
+    if (part.startsWith("[[") && part.endsWith("]]")) {
+      const k = document.createElement("kbd");
+      k.textContent = part.slice(2, -2);
+      p.append(k);
+    } else if (part) p.append(part);
+  }
+  return p;
+}
+function clearTourFocus() { for (const n of document.querySelectorAll(".ic-tour-focus")) n.classList.remove("ic-tour-focus"); }
+function showTour(step) {
+  tourStep = step;
+  const page = TOUR[step];
+  clearTourFocus();
+  $("ic-tour").hidden = false;
+  $("ic-tour-step").textContent = `${step + 1} of ${TOUR.length}`;
+  $("ic-tour-title").textContent = page.title;
+  $("ic-tour-text").replaceChildren(...page.lines.map(tourLine));
+  $("ic-tour-back").disabled = step === 0;
+  $("ic-tour-next").textContent = step === TOUR.length - 1 ? "Done" : "Next";
+  const target = page.target && document.querySelector(page.target);
+  let left = false;
+  if (target && target.offsetParent !== null) {   // on screen (the editor appears once an element is chosen)
+    target.classList.add("ic-tour-focus");
+    target.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    const box = target.getBoundingClientRect();
+    left = box.left + box.width / 2 > window.innerWidth * 0.6;   // the card goes on the other side, never over what it points at
+  }
+  $("ic-tour").classList.toggle("left", left);
+  $("ic-tour-next").focus();
+}
+function endTour() {
+  tourStep = null;
+  clearTourFocus();
+  $("ic-tour").hidden = true;
+  try { localStorage.setItem(TOUR_KEY, "done"); } catch (_) { /* shown again next time */ }
+}
+function tourSeen() {
+  try { return localStorage.getItem(TOUR_KEY) === "done"; } catch (_) { return false; }
+}
+
 // ---------- wiring ----------
+$("ic-guide").addEventListener("click", () => showTour(0));
+$("ic-tour-back").addEventListener("click", () => { if (tourStep > 0) showTour(tourStep - 1); });
+$("ic-tour-next").addEventListener("click", () => { if (tourStep < TOUR.length - 1) showTour(tourStep + 1); else endTour(); });
+$("ic-tour-skip").addEventListener("click", endTour);
 view.addEventListener("pointerdown", onDown);
 view.addEventListener("pointermove", onMove);
 view.addEventListener("pointerup", onUp);
@@ -1023,6 +1110,12 @@ $("ic-missing-only").addEventListener("change", renderElementList);
 
 const KEYS = { v: "select", r: "rect", u: "rounded", o: "ellipse", l: "line", y: "polygon", s: "star", p: "pen", b: "brush", e: "eraser", f: "bucket", i: "picker" };
 document.addEventListener("keydown", (event) => {
+  if (tourStep !== null) {
+    if (event.key === "Escape") { event.preventDefault(); endTour(); }
+    else if (event.key === "ArrowRight") { event.preventDefault(); $("ic-tour-next").click(); }
+    else if (event.key === "ArrowLeft") { event.preventDefault(); $("ic-tour-back").click(); }
+    return;   // no tool shortcuts while the guide is open
+  }
   if (!doc || $("ic-start").open || $("ic-propose-dialog").open) return;
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName) && event.target.type !== "range" && event.target.type !== "checkbox") return;
   const mod = event.metaKey || event.ctrlKey;
@@ -1064,6 +1157,7 @@ async function start() {
   let last = null;
   try { last = localStorage.getItem(STORE_PREFIX + "last"); } catch (_) { last = null; }
   const el = last && elements.find((e) => e.id === last);
-  if (el) openElement(el);
+  if (el) await openElement(el);
+  if (!tourSeen()) showTour(0);   // the first visit in this browser
 }
 start();

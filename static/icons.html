@@ -19,6 +19,7 @@
     <button type="button" id="ic-preview" aria-pressed="false" hidden title="Show this proposed icon in the real game to administrators and designers (players never see it)">Preview in the game</button>
     <span id="ic-saved" class="muted" role="status" aria-live="polite"></span>
     <span class="ic-spacer"></span>
+    <button type="button" id="ic-guide" title="How the Icon studio works">Guide</button>
     <button type="button" id="ic-download" disabled>Download PNG</button>
     <button type="button" id="ic-propose" class="primary" disabled title="Send this icon to the administrators">Propose…</button>
   </header>
@@ -159,6 +160,18 @@
       </div>
     </form>
   </dialog>
+
+  <section id="ic-tour" class="ic-tour" role="dialog" aria-labelledby="ic-tour-title" hidden>
+    <p class="ic-tour-step muted" id="ic-tour-step"></p>
+    <h2 id="ic-tour-title"></h2>
+    <div id="ic-tour-text"></div>
+    <div class="ic-buttons">
+      <button type="button" id="ic-tour-back">Back</button>
+      <button type="button" id="ic-tour-next" class="primary">Next</button>
+      <span class="ic-spacer"></span>
+      <button type="button" id="ic-tour-skip" class="link">Close</button>
+    </div>
+  </section>
 
   <script src="/static/auth.js"></script>
   <script src="/static/icons.js"></script>
