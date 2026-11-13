@@ -343,7 +343,7 @@
     }
     if (ok) {
       exported = true;
-      showToast(`Copied ${count} changed element${count === 1 ? "" : "s"}. Paste them to Claude.`);
+      showToast("Copied to Clipboard");
     } else {
       showToast(`The browser blocked copying, so ${downloadExport()} was downloaded instead.`);
     }
