@@ -824,7 +824,7 @@
       let next = climbed.pop();
       if (!next || !selected.contains(next) || next === selected) next = [...selected.children].find((c) => !ours(c)) || null;
       if (next) select(next);
-    } else if (event.key === "Enter" && selected && !ours(event.target)) {
+    } else if (event.key === "Enter" && selected && (!ours(event.target) || event.target === toggle)) {   // the Design button keeps focus after a mouse click: Enter must not press it
       event.preventDefault();
       menuOpen = true;
       renderDock();

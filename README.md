@@ -623,7 +623,9 @@ UI changes from designers can be put on the live site **as patches that come off
 A patch is a stylesheet in `patches/` (`patches/<name>.css`; its first `/* comment */` is its title), with an optional
 `patches/<name>.text.json` for text changes (`[{"page": "home", "selector": "h1", "text": "New words"}]`). Rules can aim at one page with the
 attribute `look.js` puts on `<html>`: `[data-page="home"] .card { … }` (pages: `home`, `game`, `race`, `create`, `admin`, `ops`, `login`, `verify`,
-`privacy`, `terms`).
+`privacy`, `terms`). The default look styles pages through `html[data-look="euler"] #home h1`-style selectors, which outrank a
+plain `[data-page="home"] h1`: aim a rule with the same ids (`html[data-page="home"] #home h1 { … }`), or it will not show. A stylesheet
+whose braces do not balance cannot be switched on (it would swallow the patches after it); the Patches panel shows why.
 
 Each patch is **Off** (the default), **Preview** (only administrators and designers see it) or **On** (everyone). Switch them on the
 Operations page (*Design patches*), in the designer picker (*Patches*, which also reloads the patch styles in place), or with

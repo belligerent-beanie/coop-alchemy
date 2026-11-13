@@ -195,8 +195,8 @@ UI changes that can be switched off again (see `patches.py` and the README's *De
 | `POST /icons/undo` | session + admin | `{"id"}` → `{"restored"}`: takes back the latest approval of an element (the old picture returns, or the picture goes if there was none). `409` if a newer icon for the element was approved since, or the picture was changed by hand. |
 | `GET /patches.css` | none | The patches that apply to the caller, as one stylesheet: those switched on, plus those in preview when the session is an administrator's or a designer's. Linked from every page's `<head>`; `Cache-Control: no-store`. |
 | `GET /patches/text` | none | `{"changes": [{"page", "selector", "text", "patch"}]}`: the same patches' text changes (`page` is `*` for every page). `look.js` applies them. |
-| `GET /patches/list` | session + admin or designer | `{"patches": [{"name", "title", "state", "text_changes", "problem"}]}`; `problem` is non-empty when a patch's text file cannot be read. `403` for anyone else. |
-| `POST /patches/set` | session + admin or designer | `{"name", "state"}` → `{"patches": [...]}`; `state` is `off`, `preview` or `on`. `400` for an unknown patch or state, `403` for anyone else. |
+| `GET /patches/list` | session + admin or designer | `{"patches": [{"name", "title", "state", "text_changes", "problem"}]}`; `problem` is non-empty when a patch's text file cannot be read or its stylesheet has unbalanced braces. `403` for anyone else. |
+| `POST /patches/set` | session + admin or designer | `{"name", "state"}` → `{"patches": [...]}`; `state` is `off`, `preview` or `on`. `400` for an unknown patch or state, or for switching a patch whose stylesheet has unbalanced braces to `preview` or `on` (`off` always works); `403` for anyone else. |
 
 ## Operations (administrators only)
 

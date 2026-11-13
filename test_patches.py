@@ -74,6 +74,26 @@ class PatchStoreTests(unittest.TestCase):
         self.assertEqual(self.store.text(True), [])
         self.assertIn("patch broken", self.store.css(False))
 
+    def test_css_with_unbalanced_braces_is_reported_refused_and_never_served(self) -> None:
+        from patches import css_problem
+        self.assertEqual(css_problem('a { b: c } /* { */ d::after { content: "}" }'), "")
+        self.assertIn("unclosed", css_problem("a { color: red;"))
+        self.assertIn("closes nothing", css_problem("a { color: red } }"))
+        (self.store.dir / "oops.css").write_text("/* Oops */ h1 { color: red;", encoding="utf-8")
+        row = next(r for r in self.store.listing() if r["name"] == "oops")
+        self.assertIn("unclosed", row["problem"])
+        for state in ("on", "preview"):
+            with self.assertRaises(PatchError):
+                self.store.set_state("oops", state)
+        self.store.set_state("oops", "off")   # off is always allowed
+        # a patch switched on and then edited into a broken state must not swallow the ones after it ("title" sorts later)
+        self.store.set_state("title", "on")
+        (self.store.dir / "cards.css").write_text("/* Cards */ .card { color: red;", encoding="utf-8")
+        self.store.state_file.write_text('{"cards": "on", "title": "on"}', encoding="utf-8")
+        served = self.store.css(False)
+        self.assertNotIn("patch cards", served)
+        self.assertIn("letter-spacing", served)
+
     def test_an_unreadable_state_file_means_everything_off(self) -> None:
         self.state.write_text("{garbage")
         self.assertEqual(self.store.css(True), "")

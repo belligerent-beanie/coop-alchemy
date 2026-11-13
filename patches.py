@@ -5,6 +5,9 @@ A patch is a file in patches/:
     patches/<name>.css         the style changes (required). Its first /* comment */ is the patch's title. Rules can be
                                scoped to one page with the attribute look.js puts on <html>: [data-page="home"] .card { … }
                                (pages: home, game, race, create, admin, ops, login, verify, privacy, terms).
+                               The default look styles pages with id selectors (html[data-look="euler"] #home h1), which beat a plain
+                               [data-page="home"] h1: repeat the ids (html[data-page="home"] #home h1) or the rule will not show.
+                               Unbalanced braces are refused when the patch is switched on, and the patch is left out of what is served.
     patches/<name>.text.json   text changes (optional): [{"page": "home", "selector": "h1", "text": "New words"}, …]
                                ("page" may be left out to mean every page). Only elements with no children are changed.
 
@@ -40,6 +43,25 @@ BASE_DIR = Path(__file__).resolve().parent
 PATCH_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")   # also what makes a name safe to use as a file name
 STATES = ("off", "preview", "on")
 MAX_TEXT_LEN = 500
+
+
+COMMENT = re.compile(r"/\*.*?\*/", re.S)
+STRING = re.compile(r'"(?:\\.|[^"\\\n])*"' + r"|'(?:\\.|[^'\\\n])*'")
+
+
+def css_problem(css: str) -> str:
+    """"" when the braces balance, else what is wrong. One unclosed { swallows the rules of every patch served after it, so a
+    patch like that is refused when it is switched on and left out when it is served."""
+    text = STRING.sub("", COMMENT.sub("", css))   # a comment or a string may hold any brace
+    depth = 0
+    for char in text:
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth < 0:
+                return "a } closes nothing"
+    return f"{depth} unclosed {{" if depth else ""
 
 
 class PatchError(ValueError):
@@ -79,6 +101,9 @@ class PatchStore:
             raise PatchError(f"there is no patch called {name!r}")
         if state not in STATES:
             raise PatchError(f"the state must be one of {', '.join(STATES)}")
+        problem = css_problem(self._css_of(name))
+        if problem and state != "off":
+            raise PatchError(f"{name}.css cannot be switched on: {problem}")
         with self._lock:
             states = self._states()
             if state == "off":
@@ -100,11 +125,12 @@ class PatchStore:
         states = self._states()
         rows = []
         for name in self.names():
+            problem = css_problem(self._css_of(name))
+            problem = f"{name}.css: {problem}" if problem else ""
             try:
                 texts = len(self._text_of(name))
-                problem = ""
             except PatchError as exc:
-                texts, problem = 0, str(exc)
+                texts, problem = 0, problem or str(exc)
             rows.append({"name": name, "title": self.title(name), "state": states.get(name, "off"),
                          "text_changes": texts, "problem": problem})
         return rows
@@ -143,6 +169,8 @@ class PatchStore:
     def css(self, include_preview: bool) -> str:
         parts = []
         for name in self._active(include_preview):
+            if css_problem(self._css_of(name)):
+                continue   # edited into a broken state after it was switched on: it must not swallow the patches after it
             parts.append(f"/* ---- patch {name} ({self.state(name)}) ---- */\n{self._css_of(name).strip()}\n")
         return "\n".join(parts)
 
