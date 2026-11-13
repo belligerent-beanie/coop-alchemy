@@ -52,3 +52,9 @@
 .dz-tour p { margin: 0 0 8px; }
 .dz-tour .dz-tour-title { font-weight: 600; font-size: 14px; color: #ff9fcb; }
 .dz-menu-button.dz-active:hover:not(:disabled) { background: #ff7dbb !important; }
+.dz-shadow .dz-row > span:first-child { width: 52px; }
+.dz-shadow .dz-menu { margin: 0; }
+.dz-shadow input[type="checkbox"] { margin: 0; accent-color: #ff5ca8; }
+.dz-wide { color: #b9b9c4; }
+.dz-done-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 0 0; }
+.dz-done-row .dz-hint { margin: 0; }

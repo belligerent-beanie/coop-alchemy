@@ -1,7 +1,7 @@
 "use strict";
 // The designer's UI picker. Accounts marked as designers (accounts_admin.py make-designer) get this on every page (auth.js loads it).
 // Alt+Shift+P (or the Design button) turns picker mode on: clicks select an element instead of reaching the page; ↑ selects the
-// parent, ↓ a child, Enter opens Fill / Border / Text, Esc closes things and clears the selection; Alt+Shift+E copies every change
+// parent, ↓ a child, Enter opens Fill / Border / Shadow / Text, Esc closes things and clears the selection; Alt+Shift+E copies every change
 // as Markdown (the guide, shown the first time and under "Guide", explains all of this). Edits are inline styles on THIS
 // browser's copy of the page only: nothing is sent to the server or saved, and a reload wipes them. "Changes" exports them as
 // Markdown (selector, before → after) to hand to a developer or an AI. This is a convenience for designers, not a security
@@ -65,6 +65,41 @@
   function borderText(style, width, colour) {
     return NO_BORDER(style, width) ? "none" : `${width} ${style} ${colour}`;
   }
+  /** Split a list on the commas that are not inside brackets ("rgba(0, 0, 0, 0.2) 0px 1px, …" has two shadows, not five). */
+  function splitTopLevel(text) {
+    const parts = [];
+    let depth = 0, start = 0;
+    for (let i = 0; i < text.length; i++) {
+      if (text[i] === "(") depth++;
+      else if (text[i] === ")") depth--;
+      else if (text[i] === "," && depth === 0) { parts.push(text.slice(start, i).trim()); start = i + 1; }
+    }
+    parts.push(text.slice(start).trim());
+    return parts.filter(Boolean);
+  }
+  /** One shadow ("rgba(0, 0, 0, 0.2) 0px 4px 12px 0px", the colour first or last, maybe "inset") as
+   *  {x, y, blur, spread, rgb: [r, g, b], alpha, inset}; null when it cannot be read. */
+  function parseShadow(text) {
+    const colour = /rgba?\(([^)]*)\)/.exec(text);
+    const numbers = colour ? colour[1].split(/[\s,/]+/).filter(Boolean) : ["0", "0", "0"];
+    const lengths = text.replace(/rgba?\([^)]*\)/, "").match(/-?[\d.]+(px)?/g) || [];
+    if (lengths.length < 2) return null;
+    const [x, y, blur = 0, spread = 0] = lengths.map((n) => Math.round(parseFloat(n)));
+    const alphaText = numbers[3];
+    const alpha = alphaText === undefined ? 1 : alphaText.endsWith("%") ? parseFloat(alphaText) / 100 : parseFloat(alphaText);
+    return { x, y, blur, spread, rgb: numbers.slice(0, 3).map(Number), alpha: Math.round(alpha * 100) / 100, inset: /\binset\b/.test(text) };
+  }
+  /** A shadow as CSS: offsets, blur, spread, then the colour (#rrggbb when solid, rgba() when see-through), then "inset". */
+  function shadowCss(s) {
+    const colour = s.alpha >= 1 ? toHex(...s.rgb) : `rgba(${s.rgb.map(Math.round).join(", ")}, ${s.alpha})`;
+    return `${s.x}px ${s.y}px ${s.blur}px ${s.spread}px ${colour}${s.inset ? " inset" : ""}`;
+  }
+  /** A computed box-shadow in the same form as shadowCss, so before and after read alike in the export ("none" for none). */
+  function shadowText(computed) {
+    const text = String(computed).trim();
+    if (!text || text === "none") return "none";
+    return splitTopLevel(text).map((part) => { const s = parseShadow(part); return s ? shadowCss(s) : part; }).join(", ");
+  }
 
   // ---------- state ----------
   let on = false;
@@ -72,7 +107,7 @@
   let hovered = null;
   let climbed = [];            // the elements we came up from, so ↓ goes back the way we came
   let menuOpen = false;
-  let tool = null;             // "fill" | "border" | "text" | null
+  let tool = null;             // "fill" | "border" | "shadow" | "text" | null
   let showChanges = false;
   let tourStep = null;         // the guide page being shown (0-based), or null
   let toastTimer = 0;
@@ -157,6 +192,7 @@
         before: {
           "background-color": colourText(cs.backgroundColor),
           border: borderText(cs.borderTopStyle, cs.borderTopWidth, colourText(cs.borderTopColor)),
+          "box-shadow": shadowText(cs.boxShadow),
         },
       };
       changes.set(element, rec);
@@ -177,7 +213,8 @@
     const style = computed.borderTopStyle;
     const skip = prop === "border-width" && NO_BORDER(style, "1px");
     const now = computed.getPropertyValue(prop);
-    const same = prop.endsWith("color") ? colourText(now) === value.toLowerCase() : now === value;
+    const same = prop.endsWith("color") ? colourText(now) === value.toLowerCase()
+      : prop === "box-shadow" ? shadowText(now) === shadowText(value) : now === value;
     if (!skip && !same) element.style.setProperty(prop, value, "important");
     if (saved[0]) element.style.setProperty("transition", saved[0], saved[1]); else element.style.removeProperty("transition");
   }
@@ -202,6 +239,15 @@
     setStyle(element, "border-width", widthPx + "px");
     setStyle(element, "border-color", colour);
     rec.after = Object.assign(rec.after || {}, { border: style === "none" ? "none" : `${widthPx}px ${style} ${colour}` });
+    edited();
+  }
+  /** shadow is {x, y, blur, spread, rgb, alpha, inset}, or null for no shadow. */
+  function applyShadow(element, shadow) {
+    const rec = record(element);
+    rememberOriginal(rec, element, "box-shadow");
+    const value = shadow ? shadowCss(shadow) : "none";
+    setStyle(element, "box-shadow", value);
+    rec.after = Object.assign(rec.after || {}, { "box-shadow": value });
     edited();
   }
   function applyText(element, text) {
@@ -235,7 +281,7 @@
     const blocks = [];
     for (const rec of changes.values()) {
       const lines = [];
-      for (const prop of ["background-color", "border"]) {
+      for (const prop of ["background-color", "border", "box-shadow"]) {
         const after = rec.after && rec.after[prop];
         if (after !== undefined && after !== rec.before[prop]) lines.push(`  ${prop}: ${rec.before[prop]} → ${after}`);
       }
@@ -389,8 +435,8 @@
       "↑ selects the parent of what you have selected. ↓ goes back down the way you came, or to the first child.",
       "Esc clears the selection."] },
     { title: "Change it", lines: [
-      "Enter opens the tools: Fill (colour), Border (style, thickness, colour) and Text.",
-      "Text works only on elements with nothing inside them. The page changes straight away, in this tab only."] },
+      "Enter opens the tools: Fill (colour), Border (style, thickness, colour), Shadow (presets, or offset, blur, spread, opacity, colour) and Text.",
+      "Text works only on elements with nothing inside them. The page changes straight away, in this tab only; Done closes the tool."] },
     { title: "Export your changes", lines: [
       "Alt+Shift+E copies every change as Markdown. Paste it to Claude, who can then make the same changes in the code.",
       "\"Changes\" lists them with Copy, Download and Reset. A reload wipes the edits, so export first."] },
@@ -436,15 +482,30 @@
       dock.append(h("p", { class: "dz-hint", text: "Click any element to select it. ↑ parent, ↓ child, Enter for the tools, Esc to clear. Alt+Shift+E copies your changes." }));
       return;
     }
+    const tools = () => h("div", { class: "dz-menu" },
+      menuButton("fill", "Fill"), menuButton("border", "Border"), menuButton("shadow", "Shadow"), menuButton("text", "Text"));
     if (!menuOpen && !tool) {
-      dock.append(h("p", { class: "dz-hint", text: "Press Enter, or choose a tool." }),
-                  h("div", { class: "dz-menu" }, menuButton("fill", "Fill"), menuButton("border", "Border"), menuButton("text", "Text")));
+      dock.append(h("p", { class: "dz-hint", text: "Press Enter, or choose a tool." }), tools());
       return;
     }
-    dock.append(h("div", { class: "dz-menu" }, menuButton("fill", "Fill"), menuButton("border", "Border"), menuButton("text", "Text")));
+    dock.append(tools());
     if (tool === "fill") dock.append(fillPanel());
     else if (tool === "border") dock.append(borderPanel());
+    else if (tool === "shadow") dock.append(shadowPanel());
     else if (tool === "text") dock.append(textPanel());
+    // Edits apply as they are made, so there is nothing to confirm; Done just closes the tool and lets go of the element
+    // (Esc does the same in steps). Without it a phone, which has no Esc key, had no visible way out of a tool.
+    dock.append(h("div", { class: "dz-done-row" },
+      h("span", { class: "dz-hint", text: "Changes apply as you go." }),
+      h("button", { type: "button", class: "dz-menu-button dz-active", text: "Done", title: "Close the tool and deselect (Esc)", onclick: done })));
+  }
+  function done() {
+    closeTool();
+    menuOpen = false;
+    selected = null;
+    climbed = [];
+    renderDock();
+    refreshBoxes();
   }
   function menuButton(name, text) {
     const blocked = name === "text" && selected ? textBlocked(selected) : "";
@@ -508,6 +569,79 @@
     return h("div", { class: "dz-panel" },
       h("label", { class: "dz-row" }, h("span", { text: "Style" }), styleSelect),
       h("label", { class: "dz-row" }, h("span", { text: "Width" }), widthInput, widthNumber),
+      colourButton, holder);
+  }
+  const SHADOW_PRESETS = [
+    ["None", null],
+    ["Subtle", { x: 0, y: 1, blur: 3, spread: 0, alpha: 0.15 }],
+    ["Soft", { x: 0, y: 4, blur: 12, spread: 0, alpha: 0.15 }],
+    ["Medium", { x: 0, y: 8, blur: 24, spread: 0, alpha: 0.2 }],
+    ["Strong", { x: 0, y: 16, blur: 40, spread: 0, alpha: 0.3 }],
+  ];
+  function shadowPanel() {
+    const element = selected;
+    // Start from the element's own (first) shadow, or from a soft black one that is switched off.
+    const first = splitTopLevel(String(getComputedStyle(element).boxShadow)).map(parseShadow).find(Boolean);
+    let enabled = !!first;
+    const s = first || { x: 0, y: 4, blur: 12, spread: 0, rgb: [0, 0, 0], alpha: 0.15, inset: false };
+    const apply = () => applyShadow(element, enabled ? s : null);
+
+    const sliders = {};
+    const rows = [];
+    for (const [key, name, min, max, unit] of [["x", "X", -40, 40, "px"], ["y", "Y", -40, 40, "px"], ["blur", "Blur", 0, 80, "px"],
+                                                ["spread", "Spread", -20, 40, "px"], ["alpha", "Opacity", 0, 100, "%"]]) {
+      const input = h("input", { type: "range", min: String(min), max: String(max), class: "dz-range", "aria-label": `Shadow ${name}` });
+      const number = h("span", { class: "dz-num" });
+      sliders[key] = { input, number, unit };
+      input.addEventListener("input", () => {
+        s[key] = key === "alpha" ? +input.value / 100 : +input.value;
+        enabled = true;
+        show();
+        apply();
+      });
+      rows.push(h("label", { class: "dz-row" }, h("span", { text: name }), input, number));
+    }
+    const inset = h("input", { type: "checkbox", "aria-label": "Inner shadow" });
+    inset.addEventListener("change", () => { s.inset = inset.checked; enabled = true; show(); apply(); });
+    const swatch = h("span", { class: "dz-swatch" });
+    const presetButtons = SHADOW_PRESETS.map(([name, preset]) => h("button", {
+      type: "button", class: "dz-menu-button", text: name,
+      onclick: () => {
+        if (preset) { Object.assign(s, preset, { inset: false }); enabled = true; } else enabled = false;
+        show();
+        apply();
+      },
+    }));
+    function show() {
+      for (const [key, { input, number, unit }] of Object.entries(sliders)) {
+        const value = key === "alpha" ? Math.round(s.alpha * 100) : s[key];
+        input.value = String(value);
+        number.textContent = value + unit;
+      }
+      inset.checked = s.inset;
+      swatch.style.backgroundColor = toHex(...s.rgb);
+      presetButtons.forEach((button, i) => {
+        const preset = SHADOW_PRESETS[i][1];
+        const active = preset ? enabled && !s.inset && Object.entries(preset).every(([k, v]) => s[k] === v) : !enabled;
+        button.classList.toggle("dz-active", active);
+      });
+    }
+    const holder = h("div", { class: "dz-colour-holder", hidden: true });
+    const colourButton = h("button", {
+      type: "button", class: "dz-menu-button", "aria-expanded": "false",
+      onclick: () => {
+        holder.hidden = !holder.hidden;
+        colourButton.setAttribute("aria-expanded", holder.hidden ? "false" : "true");
+        if (!holder.hidden && !holder.firstChild) {
+          holder.append(colourPicker(toHex(...s.rgb), (value) => { s.rgb = parseHex(value); enabled = true; show(); apply(); }));
+        }
+      },
+    }, "Colour ", swatch);
+    show();
+    return h("div", { class: "dz-panel dz-shadow" },
+      h("div", { class: "dz-menu" }, ...presetButtons),
+      ...rows,
+      h("label", { class: "dz-row" }, inset, h("span", { text: "Inner shadow (inset)", class: "dz-wide" })),
       colourButton, holder);
   }
   function textPanel() {
