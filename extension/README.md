@@ -41,11 +41,17 @@ edits through the CSSOM; typing and focus inside the shadow root; storage out of
 the export; a preview window of the right size; and that the shipping manifest asks for nothing broad. `test_extension.py` in the main
 suite guards the build (the picker copied byte for byte, the manifest, the files it names).
 
-## Why not fork VisBug?
+## VisBug
 
-Google's VisBug does much of this on any page and is Apache-2.0. Its repository was **archived by its owner on 15 September 2026**
-(read-only, 213 open issues) and a Web Store reviewer says it has no undo; it has no contrast check or Markdown hand-off that I could find.
-Forking would mean owning an unmaintained Rollup/Firebase codebase and then adding what ours already has. Sources:
+Google's VisBug does much of this on any page and is Apache-2.0. Its repository was **archived by its owner on 15 September 2026** (last
+commit 2 August 2026; read-only, 213 open issues). I read its source (about 9,200 lines in 100 files, Manifest V3, closed Shadow DOM
+components, hotkey-driven tools, `ava` 1.4 and `puppeteer` 10 for tests, `postcss` 7). What it has that this picker does not: multi-select
+(Shift-click), moving elements in the DOM, an image swap, a position tool, search by selector, guides, hue shift, a hover inspector with
+WCAG AA/AAA **and APCA** contrast, a screenshot, and builds for Firefox, Safari and Edge. What it lacks: any **undo**, any **saved edits**
+(nothing survives a reload) and any **export of what changed**. Its tools write inline styles directly (44 places) and record nothing, so
+building those on top would mean rewriting every tool to go through a change-recording layer. Apache-2.0 lets us copy code if the licence and
+copyright notices stay on what we take and changes are marked; the name "VisBug" is not ours to use. The approach taken is to keep this picker
+(which has that layer) and port VisBug's missing features into it one at a time, with attribution. Source:
 <https://github.com/GoogleChromeLabs/ProjectVisBug>.
 
 ## Known limits, and what is next
