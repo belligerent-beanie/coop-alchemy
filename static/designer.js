@@ -184,6 +184,18 @@
     for (const layer of layers.reverse()) base = over(layer, base);
     return { rgb: base, unknown };
   }
+  /** APCA lightness contrast Lc (the measure proposed for WCAG 3): how readable the text is. Negative means light text on a darker
+   *  background. Checked against the published reference values (black on white 106.04, white on black -107.88). */
+  function apcaOf(textRgb, backRgb) {
+    const y = ([r, g, b]) => 0.2126729 * (r / 255) ** 2.4 + 0.7151522 * (g / 255) ** 2.4 + 0.072175 * (b / 255) ** 2.4;
+    const clampBlack = (v) => (v > 0.022 ? v : v + (0.022 - v) ** 1.414);
+    const t = clampBlack(y(textRgb)), b = clampBlack(y(backRgb));
+    if (Math.abs(b - t) < 0.0005) return 0;
+    if (b > t) { const sapc = (b ** 0.56 - t ** 0.57) * 1.14; return sapc < 0.1 ? 0 : (sapc - 0.027) * 100; }
+    const sapc = (b ** 0.65 - t ** 0.62) * 1.14;
+    return sapc > -0.1 ? 0 : (sapc + 0.027) * 100;
+  }
+  const apcaUse = (lc) => { const a = Math.abs(lc); return a >= 90 ? "any text" : a >= 75 ? "body text" : a >= 60 ? "large or bold text" : a >= 45 ? "headlines" : a >= 30 ? "spot text only" : "not readable"; };
   /** The element's text colour against what is behind it, with the WCAG 2 thresholds for its size (large text needs less). */
   function contrastInfo(element) {
     const cs = getComputedStyle(element);
@@ -194,7 +206,7 @@
     const large = size >= 24 || (parseInt(cs.fontWeight, 10) >= 700 && size >= 18.66);
     const need = large ? 3 : 4.5, needAaa = large ? 4.5 : 7;
     const ratio = contrastOf(over(fore, back.rgb), back.rgb);
-    return { unknown: back.unknown, ratio, need, aa: ratio >= need, aaa: ratio >= needAaa };
+    return { unknown: back.unknown, ratio, need, aa: ratio >= need, aaa: ratio >= needAaa, apca: apcaOf(over(fore, back.rgb), back.rgb) };
   }
   const contrastLabel = (info) => (info.unknown ? "unknown" : info.ratio.toFixed(2) + ":1");
   /** A live line under a colour picker: the contrast ratio and whether it passes WCAG AA and AAA. update() after each change. */
@@ -206,7 +218,7 @@
       const info = contrastInfo(element);
       node.className = "dz-contrast " + (info.unknown ? "dz-unknown" : info.aa ? "dz-pass" : "dz-fail");
       node.textContent = info.unknown ? "Contrast: the background is a picture or gradient, so it cannot be measured."
-        : `Contrast ${info.ratio.toFixed(2)}:1 · AA ${info.aa ? "✓" : `✗ (needs ${info.need}:1)`} · AAA ${info.aaa ? "✓" : "✗"}`;
+        : `Contrast ${info.ratio.toFixed(2)}:1 · AA ${info.aa ? "✓" : `✗ (needs ${info.need}:1)`} · AAA ${info.aaa ? "✓" : "✗"} · APCA Lc ${Math.round(info.apca)} (${apcaUse(info.apca)})`;
     }
     update();
     return { node, update };
@@ -289,7 +301,8 @@
 
   // ---------- state ----------
   let on = false;
-  let selected = null;
+  let selected = null;         // the element the tools show the values of: the last one picked
+  let selection = [];          // everything selected (Shift-click adds); the tools change all of it
   let hovered = null;
   let climbed = [];            // the elements we came up from, so ↓ goes back the way we came
   let menuOpen = false;
@@ -331,7 +344,7 @@
       event.preventDefault();
       const r = selected.getBoundingClientRect();
       drag = { dir: handle.dataset.dir, x: event.clientX, y: event.clientY, w: r.width, h: r.height };
-      lastEdit = { kind: "", element: null, at: 0 };   // the drag starts a new step ...
+      lastEdit = { kind: "", elements: [], at: 0 };   // the drag starts a new step ...
       holdStep = true;                                    // ... and stays one however slowly it goes
       handle.setPointerCapture(event.pointerId);
     });
@@ -355,7 +368,7 @@
     handle.addEventListener("pointercancel", release);
   }
   function updateHandles() {
-    selectBox.classList.toggle("dz-sizing", on && !!selected && tool === "size" && tourStep === null && !showChanges && !showPatches);
+    selectBox.classList.toggle("dz-sizing", on && selection.length === 1 && tool === "size" && tourStep === null && !showChanges && !showPatches);
   }
 
 
@@ -368,10 +381,24 @@
     box.style.width = r.width + "px";
     box.style.height = r.height + "px";
   }
+  /** Make `list` the selection (the last of it is the one the tools show). Elements that left the page are dropped. */
+  function setSelection(list) {
+    selection = list.filter((el) => el && document.contains(el));
+    selected = selection.length ? selection[selection.length - 1] : null;
+  }
+  const targets = () => selection.slice();   // what an edit applies to
+  const extraBoxes = [];                     // outlines for the selected elements other than the primary one
+  function placeSelection() {
+    const others = on ? selection.filter((el) => el !== selected) : [];
+    while (extraBoxes.length < others.length) { const box = h("div", { class: "dz-box dz-picked dz-more", hidden: true }); root.append(box); extraBoxes.push(box); }
+    extraBoxes.forEach((box, i) => place(box, others[i] || null));
+  }
   function refreshBoxes() {
-    if (selected && !document.contains(selected)) { selected = null; climbed = []; closeTool(); }
+    if (selection.some((el) => !document.contains(el))) { setSelection(selection); climbed = []; if (!selected) closeTool(); }
     place(hoverBox, on && hovered !== selected ? hovered : null);
+    renderInspect(hovered);
     place(selectBox, on ? selected : null);
+    placeSelection();
     updateHandles();
     renderMeasure();
   }
@@ -500,9 +527,9 @@
   const undoStack = [];
   const redoStack = [];
   let restoring = false;       // edits being put back after a reload are not new history
-  let bulk = false;            // Reset all records one step for everything, not one per element
+  let bulk = 0;                // above 0 while one step covers several edits (Reset all, a paste, an edit of several elements)
   let holdStep = false;        // a handle is being dragged: the whole drag is one step
-  let lastEdit = { kind: "", element: null, at: 0 };
+  let lastEdit = { kind: "", elements: [], at: 0 };
   let undoLink = null;
   let redoLink = null;
 
@@ -536,13 +563,15 @@
     showHistory();
   }
   /** Call just before an edit to `element`; `kind` names what is being edited ("fill", "size", …) so unlike edits are separate steps. */
-  function checkpoint(kind, element) {
+  function checkpoint(kind, target) {
+    const elements = Array.isArray(target) ? target : [target];
     if (comparing) setCompare(false);   // an edit while the original is showing: bring the edits back first
     if (restoring || bulk) return;
     const now = Date.now();
-    const same = lastEdit.element === element && lastEdit.kind === kind && (holdStep || now - lastEdit.at < MERGE_MS);
-    lastEdit = { kind, element, at: now };
-    if (!same) pushStep([snapshotOf(element)], false);
+    const sameElements = lastEdit.elements.length === elements.length && elements.every((el, i) => el === lastEdit.elements[i]);
+    const same = sameElements && lastEdit.kind === kind && (holdStep || now - lastEdit.at < MERGE_MS);
+    lastEdit = { kind, elements, at: now };
+    if (!same) pushStep(elements.map(snapshotOf), false);
   }
   /** Walk one step back (from = undoStack, to = redoStack) or forward (the other way round). */
   function moveStep(from, to) {
@@ -551,7 +580,7 @@
     to.push({ snaps: entry.snaps.map((snap) => snapshotOf(snap.element)), pending: entry.pending ? [...pending] : null });
     entry.snaps.forEach(putSnapshotBack);
     if (entry.pending) pending = entry.pending;
-    lastEdit = { kind: "", element: null, at: 0 };
+    lastEdit = { kind: "", elements: [], at: 0 };
     exported = false;
     showCount();
     save();
@@ -641,7 +670,7 @@
     save();
   }
 
-  function applyFill(element, colour) {
+  function applyFillOne(element, colour) {
     checkpoint("fill", element);
     const rec = record(element);
     rememberOriginal(rec, element, "background-color");
@@ -649,7 +678,7 @@
     rec.after = Object.assign(rec.after || {}, { "background-color": colour });
     edited();
   }
-  function applyBorder(element, style, widthPx, colour) {
+  function applyBorderOne(element, style, widthPx, colour) {
     checkpoint("border", element);
     const rec = record(element);
     for (const prop of ["border-style", "border-width", "border-color"]) rememberOriginal(rec, element, prop);
@@ -663,7 +692,7 @@
   function applyShadow(element, shadow) {
     applyShadowValue(element, shadow ? shadowCss(shadow) : "none");
   }
-  function applyShadowValue(element, value) {
+  function applyShadowValueOne(element, value) {
     checkpoint("shadow", element);
     const rec = record(element);
     rememberOriginal(rec, element, "box-shadow");
@@ -672,7 +701,7 @@
     edited();
   }
   /** padding or margin: four sides in pixels (top, right, bottom, left). */
-  function applySpacing(element, kind, sides) {
+  function applySpacingOne(element, kind, sides) {
     checkpoint("spacing:" + kind, element);
     const rec = record(element);
     SIDES.forEach((side, i) => {
@@ -683,7 +712,7 @@
     edited();
   }
   /** Every corner the same: "12px", or "9999px" for a pill. */
-  function applyRadius(element, value) {
+  function applyRadiusOne(element, value) {
     checkpoint("radius", element);
     const rec = record(element);
     rememberOriginal(rec, element, "border-radius");
@@ -692,7 +721,7 @@
     edited();
   }
   /** sizes is {width?, height?} in pixels (the border box). */
-  function applySize(element, sizes) {
+  function applySizeOne(element, sizes) {
     checkpoint("size", element);
     const rec = record(element);
     for (const axis of ["width", "height"]) {
@@ -704,7 +733,7 @@
     edited();
   }
   /** Back to the size the page gives it: put the original inline width and height back. */
-  function clearSize(element) {
+  function clearSizeOne(element) {
     const rec = changes.get(element);
     if (!rec) return;
     checkpoint("size-clear", element);
@@ -748,8 +777,8 @@
   }
   function resetAll() {
     if (changes.size || pending.length) pushStep([...changes.keys()].map(snapshotOf), true);
-    bulk = true;
-    try { for (const element of [...changes.keys()]) resetElement(element); } finally { bulk = false; }
+    bulk++;
+    try { for (const element of [...changes.keys()]) resetElement(element); } finally { bulk--; }
     pending = [];
     save();
     exported = true;
@@ -768,7 +797,7 @@
       }
       if (element && document.contains(element) && rec.before.contrast && rec.after && (rec.after["background-color"] !== undefined || rec.after.color !== undefined)) {
         const info = contrastInfo(element);
-        if (contrastLabel(info) !== rec.before.contrast) lines.push(`  contrast: ${rec.before.contrast} → ${contrastLabel(info)}${info.unknown ? "" : ` (WCAG AA ${info.aa ? "pass" : "fail"})`}`);
+        if (contrastLabel(info) !== rec.before.contrast) lines.push(`  contrast: ${rec.before.contrast} → ${contrastLabel(info)}${info.unknown ? "" : ` (WCAG AA ${info.aa ? "pass" : "fail"}, APCA Lc ${Math.round(info.apca)})`}`);
       }
       if (rec.text && rec.text.after !== rec.text.before) lines.push(`  text: ${JSON.stringify(rec.text.before)} → ${JSON.stringify(rec.text.after)}`);
       if (!lines.length) continue;   // changed and changed back: nothing to hand over
@@ -998,7 +1027,7 @@
   const isFlex = (display) => display === "flex" || display === "inline-flex";
   const isGrid = (display) => display === "grid" || display === "inline-grid";
   /** values: CSS property -> value (display, flex-direction, flex-wrap, justify-content, align-items, justify-items, gap "12px", opacity "0.8"). */
-  function applyLayout(element, values) {
+  function applyLayoutOne(element, values) {
     checkpoint("layout:" + Object.keys(values).join(), element);
     const rec = record(element);
     for (const [prop, value] of Object.entries(values)) {
@@ -1012,7 +1041,7 @@
     const element = selected;
     const cs = getComputedStyle(element);
     const display = cs.display;
-    const set = (values, rebuild) => { applyLayout(element, values); if (rebuild) renderDock(); };
+    const set = (values, rebuild) => { applyLayout(targets(), values); if (rebuild) renderDock(); };
 
     const choice = (prop, rebuild) => {
       const current = cs.getPropertyValue(prop);
@@ -1067,22 +1096,24 @@
     renderDock();
   }
   /** Fill, text colour and type, border, corners, shadow and padding: not size, margin or layout, which belong to where it sits. */
-  function pasteLook(element) {
+  function pasteLook(target) {
+    const elements = Array.isArray(target) ? target : [target];
     if (!copiedLook) { showToast("Copy an element's look first (Alt+Shift+C)."); return; }
+    if (!elements.length) return;
     const look = copiedLook;
-    checkpoint("paste:" + Date.now(), element);   // the whole paste is one step to undo
-    bulk = true;
+    checkpoint("paste:" + Date.now(), elements);   // the whole paste is one step to undo
+    bulk++;
     try {
-      applyFill(element, look.fill);
+      applyFill(elements, look.fill);
       const type = { color: look.color, "font-size": look["font-size"], "font-weight": look["font-weight"], "letter-spacing": look.letterSpacing, "text-align": look["text-align"] };
       if (look.lineHeight !== "normal") type["line-height"] = look.lineHeight;
-      applyType(element, type);
-      applyBorder(element, look.border.style, look.border.width, look.border.colour);
-      applyRadius(element, look.radius);
-      applyShadowValue(element, look.shadow);
-      applySpacing(element, "padding", look.padding);
-    } finally { bulk = false; }
-    showToast(`Pasted the look of ${look.from} onto ${label(element)}.`);
+      applyType(elements, type);
+      applyBorder(elements, look.border.style, look.border.width, look.border.colour);
+      applyRadius(elements, look.radius);
+      applyShadowValue(elements, look.shadow);
+      applySpacing(elements, "padding", look.padding);
+    } finally { bulk--; }
+    showToast(`Pasted the look of ${look.from} onto ${elements.length > 1 ? elements.length + " elements" : label(elements[0])}.`);
     renderDock();
   }
 
@@ -1131,6 +1162,80 @@
     else if (b.bottom <= a.top) mark(midX, b.bottom, midX, a.top, px(a.top - b.bottom));
   }
 
+  /** An edit works on one element or on a list (the selection): the same change to each, one step to undo. */
+  function forAll(kindOf, apply) {
+    return function (target, ...args) {
+      const elements = Array.isArray(target) ? target : [target];
+      if (!elements.length) return;
+      checkpoint(kindOf(...args), elements);
+      bulk++;
+      try { for (const element of elements) apply(element, ...args); } finally { bulk--; }
+    };
+  }
+  const applyFill = forAll(() => "fill", applyFillOne);
+  const applyBorder = forAll(() => "border", applyBorderOne);
+  const applyShadowValue = forAll(() => "shadow", applyShadowValueOne);
+  const applySpacing = forAll((kind) => "spacing:" + kind, applySpacingOne);
+  const applyRadius = forAll(() => "radius", applyRadiusOne);
+  const applySize = forAll(() => "size", applySizeOne);
+  const clearSize = forAll(() => "size-clear", clearSizeOne);
+  const applyType = forAll((values) => "font:" + Object.keys(values).join(), applyTypeOne);
+  const applyLayout = forAll((values) => "layout:" + Object.keys(values).join(), applyLayoutOne);
+
+  // ---------- the hover inspector ----------
+  // Press I (or use Inspect in the dock) and hover anything: what it is, its size, type, colours, contrast (WCAG and APCA) and what
+  // assistive technology would make of it. An idea from VisBug (Apache-2.0, github.com/GoogleChromeLabs/ProjectVisBug), written afresh here.
+  let inspecting = false;
+  const inspectTip = h("div", { class: "dz-tip", hidden: true });
+  root.append(inspectTip);
+  /** What a screen reader would call the element: aria-label, then a label it points at, then alt, title or its own text. */
+  function accessibleName(element) {
+    const byId = (ids) => ids.split(/\s+/).map((id) => document.getElementById(id)).filter(Boolean).map((el) => el.textContent.trim()).join(" ");
+    const name = element.getAttribute("aria-label") || (element.getAttribute("aria-labelledby") && byId(element.getAttribute("aria-labelledby")))
+      || (element.labels && element.labels[0] && element.labels[0].textContent.trim()) || element.getAttribute("alt")
+      || element.getAttribute("title") || (element.children.length < 4 ? element.textContent.trim() : "");
+    return name.replace(/\s+/g, " ").slice(0, 60);
+  }
+  const IMPLICIT_ROLES = { a: "link", button: "button", img: "img", input: "textbox", select: "combobox", textarea: "textbox", nav: "navigation", main: "main",
+    header: "banner", footer: "contentinfo", ul: "list", ol: "list", li: "listitem", table: "table", h1: "heading", h2: "heading", h3: "heading", h4: "heading", h5: "heading", h6: "heading" };
+  function renderInspect(element) {
+    inspectTip.replaceChildren();
+    if (!inspecting || !on || !element || ours(element) || element === document.documentElement || !document.contains(element)) { inspectTip.hidden = true; return; }
+    const cs = getComputedStyle(element);
+    const box = boxSize(element);
+    const info = element.textContent.trim() ? contrastInfo(element) : null;
+    const tag = element.tagName.toLowerCase();
+    const role = element.getAttribute("role") || IMPLICIT_ROLES[tag] || "";
+    const name = accessibleName(element);
+    const focusable = element.tabIndex >= 0 || element.matches("a[href], button, input, select, textarea, [tabindex]");
+    const lines = [
+      [label(element), "dz-tip-title"],
+      [`${box.width} × ${box.height}px`, ""],
+      [`${cs.fontFamily.split(",")[0].replace(/"/g, "")} ${cs.fontSize} / ${lineHeightOf(cs)}, weight ${cs.fontWeight}`, ""],
+    ];
+    if (info) {
+      const back = backdrop(element);
+      lines.push([`text ${colourText(cs.color)} on ${back.unknown ? "an image or gradient" : toHex(...back.rgb.map(Math.round))}`, ""]);
+      lines.push([info.unknown ? "contrast: cannot be measured here" : `${info.ratio.toFixed(2)}:1 · WCAG AA ${info.aa ? "✓" : "✗"} · AAA ${info.aaa ? "✓" : "✗"} · APCA Lc ${Math.round(info.apca)}`, info.unknown ? "" : info.aa ? "dz-pass" : "dz-fail"]);
+    }
+    lines.push([`padding ${sidesOf(cs, "padding")} · margin ${sidesOf(cs, "margin")}`, ""]);
+    lines.push([`${role ? "role " + role + " · " : ""}${name ? "name “" + name + "”" : "no accessible name"}${focusable ? " · focusable" : ""}`,
+      !name && (role === "button" || role === "link" || role === "img" || tag === "input") ? "dz-fail" : ""]);
+    if (tag === "img" && !element.hasAttribute("alt")) lines.push(["missing alt text", "dz-fail"]);
+    for (const [text, cls] of lines) inspectTip.append(h("div", { class: cls, text }));
+    inspectTip.hidden = false;
+    const r = element.getBoundingClientRect();
+    const tip = inspectTip.getBoundingClientRect();
+    inspectTip.style.left = Math.max(8, Math.min(window.innerWidth - tip.width - 8, r.left)) + "px";
+    inspectTip.style.top = (r.bottom + tip.height + 12 < window.innerHeight ? r.bottom + 8 : Math.max(8, r.top - tip.height - 8)) + "px";
+  }
+  function setInspect(value) {
+    inspecting = value;
+    renderInspect(hovered);
+    if (inspectLink) inspectLink.classList.toggle("dz-on-link", inspecting);
+  }
+  let inspectLink = null;
+
   // ---------- the dock ----------
   const NO_TEXT_TAGS = new Set(["IMG", "INPUT", "TEXTAREA", "SELECT", "BR", "HR", "SVG", "CANVAS", "VIDEO", "AUDIO", "IFRAME"]);
   function textBlocked(element) {
@@ -1147,9 +1252,9 @@
       "While it is on, clicking an element selects it; the click does not reach the page, so buttons and links do nothing."] },
     { title: "Move around", lines: [
       "↑ selects the parent of what you have selected. ↓ goes back down the way you came, or to the first child.",
-      "Esc clears the selection."] },
+      "Shift-click adds elements to the selection (or takes them out): the tools then change all of them at once. Esc clears the selection."] },
     { title: "Change it", lines: [
-      "Enter opens the tools: Fill (colour), Border (style, thickness, colour), Shadow (presets, or offset, blur, spread, opacity, colour), Text (the words), Font (text colour, size, weight, line height, letter spacing, alignment), Size (width and height, or drag the pink handles), Spacing (padding and margin), Radius (rounded corners) and Layout (display, flex and grid alignment and gap, opacity). Alt+Shift+C copies an element's look and Alt+Shift+V pastes it onto another; hold M to measure distances. Fill and Font show the contrast against what is behind the text, and every colour picker lists the colours already on the page. Hold Compare (or the \\ key) to see the original, and Preview opens the page at phone, tablet and laptop sizes.",
+      "Enter opens the tools: Fill (colour), Border (style, thickness, colour), Shadow (presets, or offset, blur, spread, opacity, colour), Text (the words), Font (text colour, size, weight, line height, letter spacing, alignment), Size (width and height, or drag the pink handles), Spacing (padding and margin), Radius (rounded corners) and Layout (display, flex and grid alignment and gap, opacity). Alt+Shift+C copies an element's look and Alt+Shift+V pastes it onto another; hold M to measure distances, and press I to inspect what is under the pointer (size, type, colours, WCAG and APCA contrast, accessible name). Fill and Font show the contrast against what is behind the text, and every colour picker lists the colours already on the page. Hold Compare (or the \\ key) to see the original, and Preview opens the page at phone, tablet and laptop sizes.",
       "Text works only on elements with nothing inside them. The page changes straight away, in this tab only; Done closes the tool. Ctrl+Z undoes a step and Ctrl+Shift+Z (or Ctrl+Y) redoes it."] },
     { title: "Export your changes", lines: [
       "Alt+Shift+E copies every change as Markdown. Paste it to Claude, who can then make the same changes in the code.",
@@ -1189,14 +1294,16 @@
     undoLink = h("button", { type: "button", class: "dz-link", text: "Undo", title: "Undo (Ctrl+Z)", onclick: undo });
     redoLink = h("button", { type: "button", class: "dz-link", text: "Redo", title: "Redo (Ctrl+Shift+Z or Ctrl+Y)", onclick: redo });
     showHistory();
+    inspectLink = h("button", { type: "button", class: "dz-link" + (inspecting ? " dz-on-link" : ""), text: "Inspect", title: "Hover anything to see its size, type, colours, contrast and accessible name (I)", "aria-pressed": String(inspecting),
+      onclick: () => { setInspect(!inspecting); inspectLink.setAttribute("aria-pressed", String(inspecting)); } });
     const compareLink = h("button", { type: "button", class: "dz-link", text: "Compare", title: "Hold to see the original page (or hold the \\ key)" });
     compareLink.addEventListener("pointerdown", (event) => { event.preventDefault(); setCompare(true); });
     for (const type of ["pointerup", "pointerleave", "pointercancel"]) compareLink.addEventListener(type, () => setCompare(false));
     const previewLink = h("button", { type: "button", class: "dz-link", text: "Preview", title: "See this page at phone, tablet and laptop sizes",
       onclick: () => { showPreview = !showPreview; showChanges = false; showPatches = false; renderDock(); } });
     const head = h("div", { class: "dz-head" },
-      h("strong", { text: selected ? label(selected) : "UI picker" }),
-      undoLink, redoLink, compareLink, previewLink,
+      h("strong", { text: selection.length > 1 ? `${selection.length} elements` : selected ? label(selected) : "UI picker" }),
+      undoLink, redoLink, inspectLink, compareLink, previewLink,
       changesLink,
       host.patches && h("button", { type: "button", class: "dz-link", text: "Patches", title: "Design patches: switch them off, to preview, or on",
                     onclick: () => { showPatches = !showPatches; showChanges = false; showPreview = false; renderDock(); } }),
@@ -1208,13 +1315,13 @@
     if (showPreview) { dock.append(previewPanel()); return; }
     if (showChanges) { dock.append(changesPanel()); return; }
     if (!selected) {
-      dock.append(h("p", { class: "dz-hint", text: "Click any element to select it. ↑ parent, ↓ child, Enter for the tools, Esc to clear. Hold M to measure. Alt+Shift+E copies your changes." }));
+      dock.append(h("p", { class: "dz-hint", text: "Click any element to select it; Shift-click adds more. ↑ parent, ↓ child, Enter for the tools, Esc to clear. Hold M to measure, I to inspect. Alt+Shift+E copies your changes." }));
       return;
     }
     const lookRow = () => h("div", { class: "dz-menu dz-look" },
       h("button", { type: "button", class: "dz-menu-button", text: "Copy look", title: "Copy this element's fill, type, border, corners, shadow and padding (Alt+Shift+C)", onclick: () => copyLook(selected) }),
       h("button", { type: "button", class: "dz-menu-button", text: "Paste look", disabled: !copiedLook, title: copiedLook ? `Paste the look of ${copiedLook.from} (Alt+Shift+V)` : "Copy an element's look first",
-                    onclick: () => pasteLook(selected) }));
+                    onclick: () => pasteLook(targets()) }));
     const tools = () => h("div", { class: "dz-tools" }, h("div", { class: "dz-menu" },
       menuButton("fill", "Fill"), menuButton("border", "Border"), menuButton("shadow", "Shadow"), menuButton("text", "Text"), menuButton("font", "Font"),
       menuButton("size", "Size"), menuButton("spacing", "Spacing"), menuButton("radius", "Radius"), menuButton("layout", "Layout")), lookRow());
@@ -1241,13 +1348,13 @@
   function done() {
     closeTool();
     menuOpen = false;
-    selected = null;
+    setSelection([]);
     climbed = [];
     renderDock();
     refreshBoxes();
   }
   function menuButton(name, text) {
-    const blocked = name === "text" && selected ? textBlocked(selected) : "";
+    const blocked = name === "text" && selected ? (selection.length > 1 ? "Text edits one element at a time" : textBlocked(selected)) : "";
     return h("button", {
       type: "button", class: "dz-menu-button" + (tool === name ? " dz-active" : ""), text, disabled: !!blocked,
       title: blocked || undefined, "aria-pressed": tool === name ? "true" : "false",
@@ -1261,7 +1368,7 @@
   function fillPanel() {
     const element = selected;
     const contrast = contrastNode(element);
-    return h("div", { class: "dz-panel" }, colourPicker(currentFill(element), (colour) => { applyFill(element, colour); contrast.update(); }), contrast.node);
+    return h("div", { class: "dz-panel" }, colourPicker(currentFill(element), (colour) => { applyFill(targets(), colour); contrast.update(); }), contrast.node);
   }
   function borderPanel() {
     const element = selected;
@@ -1270,7 +1377,7 @@
     let width = Math.round(parseFloat(cs.borderTopWidth)) || 0;
     const colourParsed = parseHex(colourText(cs.borderTopColor));
     let colour = colourParsed ? toHex(...colourParsed) : "#000000";
-    const apply = () => applyBorder(element, style, width, colour);
+    const apply = () => applyBorder(targets(), style, width, colour);
 
     const styleSelect = h("select", { class: "dz-select", "aria-label": "Border style" },
       ...["none", "solid", "dashed", "dotted", "double"].map((s) => h("option", { value: s, text: s, selected: s === style })));
@@ -1324,7 +1431,7 @@
     const first = splitTopLevel(String(getComputedStyle(element).boxShadow)).map(parseShadow).find(Boolean);
     let enabled = !!first;
     const s = first || { x: 0, y: 4, blur: 12, spread: 0, rgb: [0, 0, 0], alpha: 0.15, inset: false };
-    const apply = () => applyShadow(element, enabled ? s : null);
+    const apply = () => applyShadow(targets(), enabled ? s : null);
 
     const sliders = {};
     const rows = [];
@@ -1393,7 +1500,7 @@
   }
   // ---------- the Font tool ----------
   /** values: CSS property -> value ("color" "#336699", "font-size" "18px", "font-weight" "600", "line-height" "1.5", "letter-spacing" "1px", "text-align" "center"). */
-  function applyType(element, values) {
+  function applyTypeOne(element, values) {
     checkpoint("font:" + Object.keys(values).join(), element);
     const rec = record(element);
     for (const [prop, value] of Object.entries(values)) {
@@ -1417,7 +1524,7 @@
       align: alignOf(cs),
     };
     const contrast = contrastNode(element);
-    const set = (values) => { applyType(element, values); contrast.update(); };
+    const set = (values) => { applyType(targets(), values); contrast.update(); };
 
     const swatch = h("span", { class: "dz-swatch" });
     swatch.style.backgroundColor = state.colour;
@@ -1505,7 +1612,7 @@
     }
     function set(axis, value) {
       askFor[axis] = value;
-      applySize(element, { [axis]: value });
+      applySize(targets(), { [axis]: value });
       sync();
     }
     const rows = ["width", "height"].map((axis) => {
@@ -1518,7 +1625,7 @@
     });
     const auto = h("button", { type: "button", class: "dz-menu-button", text: "Back to auto", disabled: inline,
       title: "Remove the width and height you set, so the page sizes it again",
-      onclick: () => { askFor.width = askFor.height = undefined; clearSize(element); sync(); } });
+      onclick: () => { askFor.width = askFor.height = undefined; clearSize(targets()); sync(); } });
     sync();
     sizeSync = sync;
     return h("div", { class: "dz-panel" }, ...rows, note, h("div", { class: "dz-menu" }, auto));
@@ -1529,7 +1636,7 @@
     const same = h("input", { type: "checkbox", "aria-label": `${title}: same on all sides` });
     same.checked = sides.every((n) => n === sides[0]);
     const body = h("div", { class: "dz-panel" });
-    const apply = () => applySpacing(element, kind, sides);
+    const apply = () => applySpacing(targets(), kind, sides);
     function build() {
       body.replaceChildren();
       const rows = same.checked ? [["All", null]] : SIDES.map((side, i) => [side[0].toUpperCase() + side.slice(1), i]);
@@ -1566,13 +1673,13 @@
     const range = h("input", { type: "range", min: "0", max: "64", class: "dz-range", "aria-label": "Corner radius" });
     const number = h("span", { class: "dz-num" });
     const buttons = RADIUS_PRESETS.map(([name, css]) => h("button", { type: "button", class: "dz-menu-button", text: name,
-      onclick: () => { value = parseFloat(css); show(); applyRadius(element, css); } }));
+      onclick: () => { value = parseFloat(css); show(); applyRadius(targets(), css); } }));
     function show() {
       range.value = String(Math.min(64, value));
       number.textContent = value >= 999 ? "Pill" : value + "px";
       buttons.forEach((button, i) => button.classList.toggle("dz-active", parseFloat(RADIUS_PRESETS[i][1]) === value));
     }
-    range.addEventListener("input", () => { value = +range.value; show(); applyRadius(element, value + "px"); });
+    range.addEventListener("input", () => { value = +range.value; show(); applyRadius(targets(), value + "px"); });
     show();
     return h("div", { class: "dz-panel" }, h("div", { class: "dz-menu" }, ...buttons), h("label", { class: "dz-row" }, h("span", { text: "Radius" }), range, number));
   }
@@ -1629,11 +1736,11 @@
   }
 
   // ---------- picker mode ----------
-  function select(element) {
+  function select(element, add) {
     if (!element || ours(element) || element === document.documentElement) return;
-    selected = element;
-    closeTool();
-    menuOpen = false;
+    if (add && selection.includes(element)) setSelection(selection.filter((el) => el !== element));
+    else setSelection(add ? [...selection, element] : [element]);
+    if (!add) { closeTool(); menuOpen = false; }   // adding more keeps the tool that is open
     showChanges = false;
     showPatches = false;
     showPreview = false;
@@ -1645,7 +1752,7 @@
     if (ours(eventTarget(event))) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    if (event.type === "click") { climbed = []; select(eventTarget(event)); }
+    if (event.type === "click") { climbed = []; select(eventTarget(event), event.shiftKey); }
   }
   function onMove(event) {
     if (ours(eventTarget(event))) { hovered = null; } else { hovered = eventTarget(event) === document.documentElement ? null : eventTarget(event); }
@@ -1657,7 +1764,7 @@
     if (!on) return;
     if (event.altKey && event.shiftKey && (event.code === "KeyC" || event.code === "KeyV") && selected) {
       event.preventDefault();
-      if (event.code === "KeyC") copyLook(selected); else pasteLook(selected);
+      if (event.code === "KeyC") copyLook(selected); else pasteLook(targets());
       return;
     }
     if (tourStep !== null) {   // the guide is open: Esc closes it, the arrows turn its pages
@@ -1669,6 +1776,11 @@
       const editing = isEditingField(eventTarget(event));
       const forward = event.key.toLowerCase() === "y" || event.shiftKey;
       if (!editing && (forward ? redoStack.length : undoStack.length)) { event.preventDefault(); if (forward) redo(); else undo(); }
+      return;
+    }
+    if (event.key.toLowerCase() === "i" && !event.ctrlKey && !event.metaKey && !event.altKey && !isEditingField(eventTarget(event))) {   // toggle the inspector
+      event.preventDefault();
+      if (!event.repeat) { setInspect(!inspecting); renderDock(); }
       return;
     }
     if (event.key.toLowerCase() === "m" && !event.ctrlKey && !event.metaKey && !event.altKey && selected && !isEditingField(eventTarget(event))) {   // hold to measure
@@ -1689,7 +1801,7 @@
       else if (showChanges) showChanges = false;
       else if (tool) closeTool();
       else if (menuOpen) menuOpen = false;
-      else if (selected) { selected = null; climbed = []; }
+      else if (selected) { setSelection([]); climbed = []; }
       renderDock(); refreshBoxes();
       return;
     }
@@ -1714,7 +1826,7 @@
     const method = on ? "addEventListener" : "removeEventListener";
     for (const type of STOPPED) window[method](type, swallow, true);
     window[method]("mousemove", onMove, true);
-    if (!on) { hovered = null; selected = null; climbed = []; menuOpen = false; tool = null; showChanges = false; tourStep = null; showPatches = false; }
+    if (!on) { inspecting = false; renderInspect(null); hovered = null; setSelection([]); climbed = []; menuOpen = false; tool = null; showChanges = false; tourStep = null; showPatches = false; }
     else {
       if (!host.tourSeen()) tourStep = 0;   // the first time on this browser
     }
