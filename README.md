@@ -577,6 +577,23 @@ scrolls switches it. The game board has no link; it uses whichever look was chos
 In the Euler look, hovering something with a mouse (`sparkle.js`) turns it black and white inside a pulsing dark aura that throws off black sparkles; touch screens get none of
 it, and with reduced motion only the grey-out stays.
 
+## Icon studio
+
+**Icon studio** (a link on the home page for designers and administrators, at `/icons`) is where element icons are drawn. It lists every
+element, those without an icon first, and draws on the same 128 × 128 canvas as `static/elements/`, shown four times larger with an
+8-pixel grid. A design is made of layers:
+
+- **Shape layers**: rectangles, rounded rectangles, ellipses, lines, polygons, stars and freehand curves. Each shape stays editable: select it
+  to move it, resize it from a corner, turn it, flip it, change its colours, or reorder, duplicate or delete it. A **cut-out** shape cuts a hole
+  in its own layer instead of painting.
+- **Pixel layers**: a brush, an eraser and a fill bucket, one icon pixel at a time.
+
+Any colour and opacity can be used; the house navy (`#2f3a4a`) and recent colours are offered as swatches. Previews show the icon as players
+see it: full size, in the element list's 60-pixel slot, and on a 28-pixel tile in the light and the dark theme. An element that already has a
+picture can be **edited** (the picture becomes a pixel layer) or **traced over** (a faint picture under the canvas that is not part of the icon).
+Every change is saved in the browser, per element, with undo and redo. **Download PNG** gives the 128 × 128 file, named for
+`static/elements/`. (Saving designs on the server and proposing them to the administrators comes next.)
+
 ## Design patches
 
 UI changes from designers can be put on the live site **as patches that come off again**, before anyone decides to make them permanent.

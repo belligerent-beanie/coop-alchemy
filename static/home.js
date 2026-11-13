@@ -507,6 +507,7 @@ async function loadAdmin() {
       $("breach-note").hidden = false;
       openAccount(false);
     }
+    $("icons-link").hidden = !(me.admin || me.designer);   // the icon studio: designers and admins
     if (!me.admin) return;
     $("ops-link").hidden = false;
     $("admin-link").hidden = false;

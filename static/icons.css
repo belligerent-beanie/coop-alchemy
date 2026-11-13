@@ -1,0 +1,83 @@
+/* The icon studio (icons.html): an element list, the drawing stage, and a side panel with colours, layers and previews. */
+
+body.icons-page { height: auto; min-height: 100%; }
+.ic-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.ic-top h1 { margin: 0; font-size: 1.3rem; }
+.ic-top .back { text-decoration: none; font-size: 1.2rem; }
+.ic-current { font-weight: 600; }
+.ic-spacer { flex: 1; }
+.icons-page .error:empty { display: none; }
+.icons-page .error { margin: 8px 16px; }
+
+.ic-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr) minmax(0, 340px); gap: 16px; padding: 16px; align-items: start; }
+@media (max-width: 1100px) { .ic-layout { grid-template-columns: 200px minmax(0, 1fr); } .ic-side { grid-column: 1 / -1; } }
+@media (max-width: 700px) { .ic-layout { grid-template-columns: 1fr; } }
+
+/* ---- the element list ---- */
+.ic-elements { position: sticky; top: 12px; display: grid; gap: 8px; max-height: calc(100vh - 100px); grid-template-rows: auto auto auto minmax(0, 1fr); }
+.ic-elements input[type="search"] { width: 100%; }
+.ic-check { display: flex; align-items: center; gap: 6px; font-size: 0.9rem; }
+.ic-counts { margin: 0; }
+.ic-element-list { list-style: none; margin: 0; padding: 0; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.ic-element-list button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 8px; border: 0; border-bottom: 1px solid var(--line);
+  border-radius: 0; background: none; color: inherit; text-align: left; cursor: pointer; font: inherit; }
+.ic-element-list button:hover, .ic-element-list button[aria-current="true"] { background: var(--panel); }
+.ic-element-list button[aria-current="true"] { box-shadow: inset 3px 0 0 var(--accent); }
+.ic-thumb { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border-radius: 6px; background: #f4f1e8; color: #22252a; overflow: hidden; font-size: 1.1rem; }
+.ic-thumb img { width: 100%; height: 100%; object-fit: contain; }
+.ic-element-list .ic-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ic-badge { font-size: 0.72rem; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.ic-badge.ic-draft { border-color: var(--accent); color: var(--accent); }
+
+/* ---- the stage ---- */
+.ic-work { min-width: 0; }
+.ic-empty { padding: 40px 0; text-align: center; }
+.ic-editor { display: grid; gap: 10px; justify-items: center; }
+.ic-toolbar { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+.ic-group { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; }
+.ic-toolbar button { min-width: 36px; padding: 5px 8px; }
+.ic-toolbar button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ic-stage { width: min(100%, 512px); aspect-ratio: 1; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; touch-action: none; }
+.ic-stage canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; cursor: crosshair; }
+.ic-stage canvas.ic-moving { cursor: move; }
+.ic-hint { margin: 0; text-align: center; min-height: 1.4em; }
+
+/* ---- the side panel ---- */
+.ic-side { display: grid; gap: 14px; min-width: 0; }
+.ic-side section, .ic-side .ic-row, .ic-layers li { min-width: 0; }
+.ic-side section { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 8px; }
+.ic-side h2 { margin: 0; font-size: 1rem; }
+.ic-row { display: flex; align-items: center; gap: 8px; }
+.ic-row > label:first-child { width: 56px; flex: none; color: var(--muted); font-size: 0.9rem; }
+.ic-row input[type="range"] { flex: 1; min-width: 0; }
+.ic-row input[type="color"] { width: 36px; height: 28px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: none; flex: none; }
+.ic-num { width: 44px; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 0.85rem; }
+.ic-swatches { display: flex; flex-wrap: wrap; gap: 4px; }
+.ic-swatches button { width: 22px; height: 22px; min-width: 0; padding: 0; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
+.ic-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.ic-buttons button { padding: 4px 8px; }
+
+.ic-layers { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ic-layers li { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; }
+.ic-layers li[aria-current="true"] { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.ic-layers .ic-layer-name { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 2px; color: inherit; font: inherit; cursor: pointer; }
+.ic-layers .ic-layer-kind { font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
+.ic-layers input[type="range"] { width: 48px; flex: none; }
+.ic-layers button.ic-mini { min-width: 0; padding: 1px 6px; font-size: 0.8rem; }
+
+/* ---- previews: the real backgrounds the game puts behind a picture ---- */
+.ic-previews { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.ic-previews figure { margin: 0; display: grid; justify-items: center; gap: 4px; }
+.ic-previews figcaption { font-size: 0.75rem; color: var(--muted); }
+.pv canvas { display: block; }
+.pv-full { padding: 4px; border: 1px solid var(--line); border-radius: 4px;
+  background: repeating-conic-gradient(#d8d8d8 0% 25%, #ffffff 0% 50%) 0 0 / 16px 16px; }
+.pv-list { width: 60px; height: 60px; border-radius: 10px; background: #f4f1e8; overflow: hidden; }   /* .item .art in style.css */
+.pv-tile-light, .pv-tile-dark { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; font-size: 0.9rem; max-width: 140px; }
+.pv-tile-light span, .pv-tile-dark span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-tile-light { background: #ffffff; color: #22252a; border: 1px solid #d9d6cd; }
+.pv-tile-dark { background: #2b2f38; color: #e8e9ec; border: 1px solid #333843; }
+.pv-tile-dark canvas { background: #f4f1e8; border-radius: 6px; padding: 2px; box-sizing: content-box; }   /* the dark-mode backing */
+
+.ic-dialog { max-width: 420px; }
+.ic-dialog img { display: block; margin: 0 auto; background: #f4f1e8; border-radius: 10px; }

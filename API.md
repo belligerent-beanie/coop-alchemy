@@ -41,6 +41,7 @@ this file in the same commit (and add a line to the [change log](#change-log)).
 | `GET /create` | none | Create Recipes page (its data call needs a session). |
 | `GET /admin` | none | Recipe review page (its data calls need an admin session). |
 | `GET /ops` | none | The administrator's operations page (its data calls need an admin session). |
+| `GET /icons` | none | The icon studio, where designers and administrators draw element icons (its data call needs one of those roles). |
 | `GET /terms` | none | The terms of use page. The administrator's contact line (`--contact`) is filled in where it says so; `/privacy` has it too. |
 | `GET /privacy` | none | What the server stores about players and for how long, in plain language. |
 | `GET /race/<id>` | none | A race's lobby and results page. |
@@ -178,6 +179,7 @@ UI changes that can be switched off again (see `patches.py` and the README's *De
 
 | Endpoint | Auth | Description |
 |---|---|---|
+| `GET /icons/elements` | session + admin or designer | `{"elements": [{"id", "label", "emoji", "file", "pic"?}]}`: every element, found or not, with the file name its picture has in `static/elements/` and its current picture's address. For the icon studio. `403` for anyone else. |
 | `GET /patches.css` | none | The patches that apply to the caller, as one stylesheet: those switched on, plus those in preview when the session is an administrator's or a designer's. Linked from every page's `<head>`; `Cache-Control: no-store`. |
 | `GET /patches/text` | none | `{"changes": [{"page", "selector", "text", "patch"}]}`: the same patches' text changes (`page` is `*` for every page). `look.js` applies them. |
 | `GET /patches/list` | session + admin or designer | `{"patches": [{"name", "title", "state", "text_changes", "problem"}]}`; `problem` is non-empty when a patch's text file cannot be read. `403` for anyone else. |
@@ -219,6 +221,7 @@ checks that every option the server accepts appears in the README.
 
 Newest first. Add a line whenever an endpoint, event, status code or option is added, changed or removed.
 
+- **2026-11 (icon studio)**: `GET /icons`, `GET /icons/elements`.
 - **2026-11 (design patches)**: `GET /patches.css`, `GET /patches/text`, `GET /patches/list`, `POST /patches/set`; options `--patches-dir` and `--patches-state-file`.
 - **2026-11 (notes)**: journal entries have `note`.
 - **2026-11 (categories)**: `POST /g/<id>/journal` entries have `category` and `progress` has `categories`; `categories.json` sorts every element into a category.

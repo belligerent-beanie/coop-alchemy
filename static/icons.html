@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Icon studio · Co-op Alchemy</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/euler.css">
+  <link rel="stylesheet" href="/patches.css">
+  <link rel="stylesheet" href="/static/icons.css">
+  <script src="/static/look.js"></script>
+</head>
+<body class="icons-page">
+  <header class="ic-top">
+    <a class="back" href="/" title="Back to the home page">←</a>
+    <h1>Icon studio</h1>
+    <span id="ic-current" class="ic-current"></span>
+    <span id="ic-saved" class="muted" role="status" aria-live="polite"></span>
+    <span class="ic-spacer"></span>
+    <button type="button" id="ic-download" disabled>Download PNG</button>
+  </header>
+  <p id="ic-error" class="error" role="alert"></p>
+
+  <div class="ic-layout">
+    <!-- Which element: those without an icon first. -->
+    <aside class="ic-elements" aria-label="Elements">
+      <input id="ic-search" type="search" placeholder="Find an element" aria-label="Find an element" maxlength="40">
+      <label class="ic-check"><input type="checkbox" id="ic-missing-only"> Only those without an icon</label>
+      <p id="ic-counts" class="muted"></p>
+      <ul id="ic-element-list" class="ic-element-list"></ul>
+    </aside>
+
+    <main class="ic-work">
+      <p id="ic-empty" class="ic-empty muted">Choose an element on the left to draw its icon.</p>
+      <div id="ic-editor" class="ic-editor" hidden>
+        <div class="ic-toolbar" role="toolbar" aria-label="Tools">
+          <div class="ic-group" aria-label="Shapes">
+            <button type="button" data-tool="select" title="Select and move (V)">Select</button>
+            <button type="button" data-tool="rect" title="Rectangle (R)">▭</button>
+            <button type="button" data-tool="rounded" title="Rounded rectangle (U)">▢</button>
+            <button type="button" data-tool="ellipse" title="Ellipse (O)">◯</button>
+            <button type="button" data-tool="line" title="Line (L)">╱</button>
+            <button type="button" data-tool="polygon" title="Polygon (Y)">⬠</button>
+            <button type="button" data-tool="star" title="Star (S)">☆</button>
+            <button type="button" data-tool="pen" title="Pen: freehand curve (P)">✎</button>
+          </div>
+          <div class="ic-group" aria-label="Pixels">
+            <button type="button" data-tool="brush" title="Pixel brush (B)">Brush</button>
+            <button type="button" data-tool="eraser" title="Pixel eraser (E)">Eraser</button>
+            <button type="button" data-tool="bucket" title="Fill an area (F)">Fill</button>
+            <button type="button" data-tool="picker" title="Pick a colour from the icon (I)">Pick</button>
+          </div>
+          <div class="ic-group">
+            <button type="button" id="ic-cut" aria-pressed="false" title="Cut-out: new shapes cut holes in their layer instead of painting (X)">Cut-out</button>
+            <button type="button" id="ic-grid" aria-pressed="true" title="Show the 8-pixel grid (#)">Grid</button>
+            <button type="button" id="ic-undo" title="Undo (⌘Z / Ctrl+Z)">Undo</button>
+            <button type="button" id="ic-redo" title="Redo (⇧⌘Z / Ctrl+Y)">Redo</button>
+          </div>
+        </div>
+        <div class="ic-stage">
+          <canvas id="ic-view" width="512" height="512" aria-label="The icon, 128 by 128 pixels, shown four times larger"></canvas>
+        </div>
+        <p id="ic-hint" class="muted ic-hint"></p>
+      </div>
+    </main>
+
+    <aside id="ic-side" class="ic-side" hidden>
+      <section>
+        <h2>Colour</h2>
+        <div class="ic-row"><label for="ic-fill">Fill</label><input type="color" id="ic-fill" value="#2f3a4a">
+          <input type="range" id="ic-fill-alpha" min="0" max="100" value="100" aria-label="Fill opacity"><span id="ic-fill-alpha-n" class="ic-num">100%</span>
+          <button type="button" id="ic-no-fill" class="link" title="No fill">none</button></div>
+        <div class="ic-row"><label for="ic-stroke">Line</label><input type="color" id="ic-stroke" value="#ffffff">
+          <input type="range" id="ic-stroke-alpha" min="0" max="100" value="100" aria-label="Line opacity"><span id="ic-stroke-alpha-n" class="ic-num">100%</span></div>
+        <div class="ic-row"><label for="ic-stroke-width">Width</label>
+          <input type="range" id="ic-stroke-width" min="0" max="24" value="0" aria-label="Line width"><span id="ic-stroke-width-n" class="ic-num">0px</span></div>
+        <div id="ic-swatches" class="ic-swatches" aria-label="Suggested and recent colours"></div>
+        <div class="ic-row"><label for="ic-brush">Brush</label>
+          <input type="range" id="ic-brush" min="1" max="16" value="2" aria-label="Brush size"><span id="ic-brush-n" class="ic-num">2px</span></div>
+      </section>
+
+      <section id="ic-props" hidden>
+        <h2>Selected shape</h2>
+        <div class="ic-row"><label for="ic-rotation">Turn</label>
+          <input type="range" id="ic-rotation" min="-180" max="180" value="0" aria-label="Rotation"><span id="ic-rotation-n" class="ic-num">0°</span></div>
+        <div class="ic-row" data-for="rect rounded"><label for="ic-radius">Corners</label>
+          <input type="range" id="ic-radius" min="0" max="64" value="0" aria-label="Corner radius"><span id="ic-radius-n" class="ic-num">0</span></div>
+        <div class="ic-row" data-for="polygon star"><label for="ic-sides">Points</label>
+          <input type="range" id="ic-sides" min="3" max="12" value="5" aria-label="Sides or points"><span id="ic-sides-n" class="ic-num">5</span></div>
+        <div class="ic-row" data-for="star"><label for="ic-inner">Inner</label>
+          <input type="range" id="ic-inner" min="10" max="90" value="45" aria-label="Inner radius"><span id="ic-inner-n" class="ic-num">45%</span></div>
+        <label class="ic-check" data-for="pen"><input type="checkbox" id="ic-closed"> Closed and filled</label>
+        <label class="ic-check"><input type="checkbox" id="ic-shape-cut"> Cut-out (cuts a hole in its layer)</label>
+        <div class="ic-buttons">
+          <button type="button" id="ic-front" title="Bring forward (])">Forward</button>
+          <button type="button" id="ic-back" title="Send backward ([)">Backward</button>
+          <button type="button" id="ic-dup" title="Duplicate (⌘D / Ctrl+D)">Duplicate</button>
+          <button type="button" id="ic-flip-h" title="Flip left to right">Flip ↔</button>
+          <button type="button" id="ic-flip-v" title="Flip top to bottom">Flip ↕</button>
+          <button type="button" id="ic-center-h" title="Centre left to right">Centre ↔</button>
+          <button type="button" id="ic-center-v" title="Centre top to bottom">Centre ↕</button>
+          <button type="button" id="ic-delete" class="danger" title="Delete (⌫)">Delete</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Layers</h2>
+        <ul id="ic-layers" class="ic-layers"></ul>
+        <div class="ic-buttons">
+          <button type="button" id="ic-add-shapes">+ Shapes layer</button>
+          <button type="button" id="ic-add-pixels">+ Pixels layer</button>
+        </div>
+        <div id="ic-reference" class="ic-row" hidden>
+          <label for="ic-ref-opacity">Tracing</label>
+          <input type="range" id="ic-ref-opacity" min="0" max="80" value="35" aria-label="Tracing picture opacity">
+          <button type="button" id="ic-ref-remove" class="link">remove</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>How players see it</h2>
+        <div class="ic-previews">
+          <figure><div class="pv pv-full"><canvas id="pv-full" width="128" height="128"></canvas></div><figcaption>Full size</figcaption></figure>
+          <figure><div class="pv pv-list"><canvas id="pv-list" width="60" height="60"></canvas></div><figcaption>Element list</figcaption></figure>
+          <figure><div class="pv pv-tile-light"><canvas id="pv-tile-light" width="28" height="28"></canvas><span>Moth</span></div><figcaption>Tile, light</figcaption></figure>
+          <figure><div class="pv pv-tile-dark"><canvas id="pv-tile-dark" width="28" height="28"></canvas><span>Moth</span></div><figcaption>Tile, dark</figcaption></figure>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <dialog id="ic-start" class="ic-dialog">
+    <form method="dialog">
+      <h2 id="ic-start-title">This element already has an icon</h2>
+      <p><img id="ic-start-pic" alt="" width="96" height="96"></p>
+      <p>How do you want to start?</p>
+      <div class="ic-buttons">
+        <button value="edit">Edit it (as pixels)</button>
+        <button value="trace">Trace over it</button>
+        <button value="blank">Start blank</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/static/auth.js"></script>
+  <script src="/static/icons.js"></script>
+</body>
+</html>

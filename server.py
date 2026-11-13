@@ -33,6 +33,9 @@ HTTP API
     GET  /achievements                  -> {"solo": [...], "multiplayer": [...], "challenges": [...]}   every achievement for the caller, with when
                                            it was earned (see achievements.py and profiles.py)
     GET  /emotes                        -> {"emotes": [{"id", "label", "glyph"}]}   what players can send (see emotes.py)
+    GET  /icons/elements                -> {"elements": [{"id", "label", "emoji", "file", "pic"?}]}   every element with its
+                                           picture's file name and current address, for the icon studio (/icons): administrators
+                                           and designers only
     GET  /patches.css                   -> the design patches that apply to the caller: those switched on, plus those in
                                            preview for administrators and designers (patches.py; linked from every page)
     GET  /patches/text                  -> {"changes": [{"page", "selector", "text", "patch"}]}   the same patches' text changes
@@ -123,7 +126,7 @@ from emotes import emote_list
 from bots import BotPolicy, BotRunner, bot_loop
 from cast import CAST
 from metrics import Metrics, metrics_loop
-from pictures import PictureIndex
+from pictures import PictureIndex, slugify
 from patches import PatchError, PatchStore
 from profiles import ProfileStore, profile_loop
 from visitor import VisitorPolicy, is_reserved
@@ -633,8 +636,12 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/patches/text":
                 self._json(200, {"changes": self.server.patches.text(self._sees_previews())})
             elif path == "/patches/list":
-                self._patch_manager()
+                self._admin_or_designer()
                 self._json(200, {"patches": self.server.patches.listing()})
+            elif path == "/icons":
+                self._static("icons.html")
+            elif path == "/icons/elements":
+                self._json(200, self._icon_elements())
             elif path == "/healthz":  # for the watchdog and deploy checks: answers only if the server is really working
                 self._json(200, {"ok": True})
             elif path == "/auth-config":
@@ -809,7 +816,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, self._ops_action(path, self._read_json()))
                 return
             if path == "/patches/set":
-                who, body = self._patch_manager(), self._read_json()
+                who, body = self._admin_or_designer(), self._read_json()
                 name, state = body.get("name"), body.get("state")
                 try:
                     self.server.patches.set_state(name, state)
@@ -1298,13 +1305,22 @@ class Handler(BaseHTTPRequestHandler):
         name = self.server.accounts.username(token) if token else None
         return bool(name) and (self.server.accounts.is_admin(name) or self.server.accounts.is_designer(name))
 
-    def _patch_manager(self) -> str:
-        """The logged-in caller, who must be an administrator or a designer to see and switch design patches (403 otherwise)."""
+    def _admin_or_designer(self) -> str:
+        """The logged-in caller, who must be an administrator or a designer (403 otherwise): design patches and the icon studio."""
         name = self._user()
         accounts = self.server.accounts
         if not (accounts.is_admin(name) or accounts.is_designer(name)):
-            raise GameError(403, "only administrators and designers can switch design patches")
+            raise GameError(403, "only administrators and designers can do that")
         return name
+
+    def _icon_elements(self) -> dict[str, Any]:
+        """For the icon studio: every element, with the file name its picture has (or would have) and its current picture's
+        address. This reveals every element, found or not, which is why only administrators and designers get it."""
+        self._admin_or_designer()
+        pictures = self.server.registry.pictures
+        return {"elements": [{"id": e.id, "label": e.label, "emoji": e.emoji, "file": slugify(e.id) + ".png",
+                              **({"pic": url} if pictures is not None and (url := pictures.url_for(e.id)) else {})}
+                             for e in self.server.registry.book.elements.values()]}
 
     def _json(self, status: int, payload: Any) -> None:
         body = json.dumps(payload).encode("utf-8")
