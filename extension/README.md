@@ -50,8 +50,8 @@ components, hotkey-driven tools, `ava` 1.4 and `puppeteer` 10 for tests, `postcs
 WCAG AA/AAA **and APCA** contrast, a screenshot, and builds for Firefox, Safari and Edge. What it lacks: any **undo**, any **saved edits**
 (nothing survives a reload) and any **export of what changed**. Its tools write inline styles directly (44 places) and record nothing, so
 building those on top would mean rewriting every tool to go through a change-recording layer. Apache-2.0 lets us copy code if the licence and
-copyright notices stay on what we take and changes are marked; the name "VisBug" is not ours to use. The approach taken is to keep this picker
-(which has that layer) and port VisBug's missing features into it one at a time, with attribution. Source:
+copyright notices stay on what we take and changes are marked; the name "VisBug" is not ours to use. The approach proposed (not yet decided) is to keep
+this picker (which has that layer) and port VisBug's missing features into it one at a time, with attribution. Source:
 <https://github.com/GoogleChromeLabs/ProjectVisBug>.
 
 ## Known limits, and what is next
