@@ -175,6 +175,46 @@
     return { node, update };
   }
 
+  // ---------- the page's colours ----------
+  let paletteCache = null;
+  /** The colours this page already uses, so a designer can pick one rather than a near miss: first the site's own colour variables
+   *  (--brown and the like, with their names), then the colours most used on the page. [{hex, names, count}] */
+  function pagePalette() {
+    if (paletteCache && Date.now() - paletteCache.at < 5000) return paletteCache.list;
+    const found = new Map();
+    const add = (css, name) => {
+      const c = toRgba(css);
+      if (!c || c[3] < 1) return;
+      const hex = toHex(c[0], c[1], c[2]);
+      const item = found.get(hex) || { hex, names: [], count: 0 };
+      if (name) { if (!item.names.includes(name)) item.names.push(name); } else item.count += 1;
+      found.set(hex, item);
+    };
+    const names = new Set();
+    const walk = (rules) => {
+      for (const rule of rules) {
+        if (rule.style) for (let i = 0; i < rule.style.length; i++) if (rule.style[i].startsWith("--")) names.add(rule.style[i]);
+        if (rule.cssRules) walk(rule.cssRules);
+      }
+    };
+    for (const sheet of document.styleSheets) { try { walk(sheet.cssRules); } catch (_) { /* another site's sheet: not readable */ } }
+    const rootStyle = getComputedStyle(document.documentElement);
+    for (const name of names) {
+      const value = rootStyle.getPropertyValue(name).trim();
+      if (/^(#|rgb|hsl|oklch|color\()/i.test(value)) add(value, name);
+    }
+    let seen = 0;
+    for (const element of document.body.querySelectorAll("*")) {
+      if (++seen > 1500) break;
+      if (ours(element)) continue;
+      const cs = getComputedStyle(element);
+      add(cs.color); add(cs.backgroundColor); add(cs.borderTopColor);
+    }
+    const list = [...found.values()].sort((a, b) => (b.names.length > 0) - (a.names.length > 0) || b.count - a.count).slice(0, 20);
+    paletteCache = { at: Date.now(), list };
+    return list;
+  }
+
   // ---------- sizes, spacing and corners ----------
   const SIDES = ["top", "right", "bottom", "left"];
   const CORNERS = ["border-top-left-radius", "border-top-right-radius", "border-bottom-right-radius", "border-bottom-left-radius"];
@@ -218,6 +258,7 @@
   let menuOpen = false;
   let tool = null;             // "fill" | "border" | "shadow" | "text" | "font" | "size" | "spacing" | "radius" | null
   let showChanges = false;
+  let showPreview = false;    // the screen-size preview panel
   let showPatches = false;    // the design patches panel (patches.py): switch them off, to preview, or on
   let tourStep = null;         // the guide page being shown (0-based), or null
   let toastTimer = 0;
@@ -442,6 +483,7 @@
   }
   /** Call just before an edit to `element`; `kind` names what is being edited ("fill", "size", …) so unlike edits are separate steps. */
   function checkpoint(kind, element) {
+    if (comparing) setCompare(false);   // an edit while the original is showing: bring the edits back first
     if (restoring || bulk) return;
     const now = Date.now();
     const same = lastEdit.element === element && lastEdit.kind === kind && (holdStep || now - lastEdit.at < MERGE_MS);
@@ -476,6 +518,7 @@
   /** An entry that changes nothing (everything put back as it was) is not worth keeping, counting or exporting. */
   const hasChange = (item) => Object.keys(item.after || {}).length > 0 || !!(item.text && item.text.after !== item.text.before);
   function save() {
+    if (PREVIEW) return;
     try {
       const all = [...[...changes.values()].map(saved), ...pending].filter(hasChange);
       if (all.length) localStorage.setItem(STORE_KEY, JSON.stringify(all)); else localStorage.removeItem(STORE_KEY);
@@ -795,8 +838,90 @@
     });
     hexInput.addEventListener("blur", show);
     show();
+    const colours = pagePalette();
+    let paletteBox = null;
+    if (colours.length) {
+      paletteBox = h("div", { class: "dz-palette", role: "group", "aria-label": "Colours on this page" }, h("span", { class: "dz-hint", text: "On this page" }));
+      for (const item of colours) {
+        const chip = h("button", { type: "button", class: "dz-chip", title: item.names.length ? `${item.hex} · ${item.names.join(", ")}` : item.hex,
+          "aria-label": item.names.length ? `${item.hex}, ${item.names.join(", ")}` : item.hex,
+          onclick: () => { [r, g, b] = parseHex(item.hex); fromRgb(); emit(); } });
+        chip.style.backgroundColor = item.hex;
+        paletteBox.append(chip);
+      }
+    }
     return h("div", { class: "dz-picker" }, sv, h("label", { class: "dz-row" }, h("span", { text: "Hue" }), hueInput, swatch), ...rows,
-             h("label", { class: "dz-row" }, h("span", { text: "Hex" }), hexInput));
+             h("label", { class: "dz-row" }, h("span", { text: "Hex" }), hexInput), paletteBox);
+  }
+
+  // ---------- compare with the original ----------
+  // Hold the Compare link (or the \ key) to see the page without your edits; let go and they are back. Nothing is recorded or lost.
+  let comparing = null;   // while held: what was swapped out, per element, to put back
+  const compareBadge = h("div", { class: "dz-badge", hidden: true, text: "Original: let go to see your changes" });
+  root.append(compareBadge);
+  function setCompare(want) {
+    if (want === !!comparing) return;
+    if (want) {
+      comparing = [];
+      for (const [element, rec] of changes) {
+        if (!document.contains(element)) continue;
+        const stash = [];
+        for (const [prop, original] of rec.props) {
+          stash.push([prop, element.style.getPropertyValue(prop), element.style.getPropertyPriority(prop)]);
+          if (original.value) element.style.setProperty(prop, original.value, original.priority); else element.style.removeProperty(prop);
+        }
+        const text = rec.text && !element.children.length ? element.textContent : null;
+        if (text !== null) element.textContent = rec.text.before;
+        comparing.push({ element, stash, text });
+      }
+    } else {
+      for (const { element, stash, text } of comparing) {
+        for (const [prop, value, priority] of stash) {
+          if (value) element.style.setProperty(prop, value, priority); else element.style.removeProperty(prop);
+        }
+        if (text !== null && !element.children.length) element.textContent = text;
+      }
+      comparing = null;
+    }
+    compareBadge.hidden = !comparing;
+    refreshBoxes();
+  }
+  const isEditingField = (t) => t instanceof HTMLElement && (t.isContentEditable || t.tagName === "TEXTAREA" || (t.tagName === "INPUT" && !/^(range|checkbox|radio|button)$/.test(t.type)));
+  window.addEventListener("keyup", (event) => { if (event.key === "\\") setCompare(false); }, true);
+  window.addEventListener("blur", () => setCompare(false));
+
+  // ---------- preview at other screen sizes ----------
+  // Opens this page in a real browser window of that size (so its media queries really run). That window, named dz-preview,
+  // shows no picker: it puts the same saved edits on the page, and reloads when they change here (the storage event).
+  const PREVIEW = window.name === "dz-preview";
+  const PREVIEW_SIZES = [["Phone", 390, 844], ["Tablet", 820, 1180], ["Laptop", 1280, 800]];
+  function openPreview(width, height) {
+    const win = window.open(location.href, "dz-preview", `popup,width=${width},height=${height}`);
+    if (!win) { showToast("The browser blocked the window: allow pop-ups for this site, then try again."); return; }
+    win.focus();
+    setTimeout(() => {   // make the inside of the window, not its frame, the size asked for
+      try { win.resizeTo(width + (win.outerWidth - win.innerWidth), height + (win.outerHeight - win.innerHeight)); } catch (_) { /* not allowed: it stays as opened */ }
+    }, 500);
+  }
+  function previewPanel() {
+    return h("div", { class: "dz-panel" },
+      h("p", { class: "dz-hint", text: "Opens this page in a window of that size, with your edits on it. It updates when you change something here. Fixed sizes you set show how they hold up." }),
+      h("div", { class: "dz-menu" }, ...PREVIEW_SIZES.map(([name, width, height]) =>
+        h("button", { type: "button", class: "dz-menu-button", title: `${width} × ${height}`, text: `${name} ${width}`, onclick: () => openPreview(width, height) }))));
+  }
+  function startPreviewMode() {
+    const badge = h("div", { class: "dz-badge dz-size-badge" });
+    const show = () => { badge.textContent = `Preview ${window.innerWidth} × ${window.innerHeight}`; };
+    show();
+    window.addEventListener("resize", show);
+    document.body.append(h("div", { class: "dz-root", "data-designer": "" }, badge));
+    restore();
+    let timer = 0;
+    window.addEventListener("storage", (event) => {
+      if (event.key !== STORE_KEY && event.key !== null) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => location.reload(), 300);
+    });
   }
 
   // ---------- the dock ----------
@@ -818,7 +943,7 @@
       "↑ selects the parent of what you have selected. ↓ goes back down the way you came, or to the first child.",
       "Esc clears the selection."] },
     { title: "Change it", lines: [
-      "Enter opens the tools: Fill (colour), Border (style, thickness, colour), Shadow (presets, or offset, blur, spread, opacity, colour), Text (the words), Font (text colour, size, weight, line height, letter spacing, alignment), Size (width and height, or drag the pink handles), Spacing (padding and margin) and Radius (rounded corners). Fill and Font show the contrast against what is behind the text.",
+      "Enter opens the tools: Fill (colour), Border (style, thickness, colour), Shadow (presets, or offset, blur, spread, opacity, colour), Text (the words), Font (text colour, size, weight, line height, letter spacing, alignment), Size (width and height, or drag the pink handles), Spacing (padding and margin) and Radius (rounded corners). Fill and Font show the contrast against what is behind the text, and every colour picker lists the colours already on the page. Hold Compare (or the \\ key) to see the original, and Preview opens the page at phone, tablet and laptop sizes.",
       "Text works only on elements with nothing inside them. The page changes straight away, in this tab only; Done closes the tool. Ctrl+Z undoes a step and Ctrl+Shift+Z (or Ctrl+Y) redoes it."] },
     { title: "Export your changes", lines: [
       "Alt+Shift+E copies every change as Markdown. Paste it to Claude, who can then make the same changes in the code.",
@@ -854,21 +979,27 @@
     updateHandles();
     if (tourStep !== null) { dock.append(tourPanel()); return; }
 
-    changesLink = h("button", { type: "button", class: "dz-link", text: `Changes (${changeCount()})`, onclick: () => { showChanges = !showChanges; showPatches = false; renderDock(); } });
+    changesLink = h("button", { type: "button", class: "dz-link", text: `Changes (${changeCount()})`, onclick: () => { showChanges = !showChanges; showPatches = false; showPreview = false; renderDock(); } });
     undoLink = h("button", { type: "button", class: "dz-link", text: "Undo", title: "Undo (Ctrl+Z)", onclick: undo });
     redoLink = h("button", { type: "button", class: "dz-link", text: "Redo", title: "Redo (Ctrl+Shift+Z or Ctrl+Y)", onclick: redo });
     showHistory();
+    const compareLink = h("button", { type: "button", class: "dz-link", text: "Compare", title: "Hold to see the original page (or hold the \\ key)" });
+    compareLink.addEventListener("pointerdown", (event) => { event.preventDefault(); setCompare(true); });
+    for (const type of ["pointerup", "pointerleave", "pointercancel"]) compareLink.addEventListener(type, () => setCompare(false));
+    const previewLink = h("button", { type: "button", class: "dz-link", text: "Preview", title: "See this page at phone, tablet and laptop sizes",
+      onclick: () => { showPreview = !showPreview; showChanges = false; showPatches = false; renderDock(); } });
     const head = h("div", { class: "dz-head" },
       h("strong", { text: selected ? label(selected) : "UI picker" }),
-      undoLink, redoLink,
+      undoLink, redoLink, compareLink, previewLink,
       changesLink,
       h("button", { type: "button", class: "dz-link", text: "Patches", title: "Design patches: switch them off, to preview, or on",
-                    onclick: () => { showPatches = !showPatches; showChanges = false; renderDock(); } }),
+                    onclick: () => { showPatches = !showPatches; showChanges = false; showPreview = false; renderDock(); } }),
       h("button", { type: "button", class: "dz-link", text: "Guide", title: "How the picker works", onclick: () => { tourStep = 0; renderDock(); } }),
       h("button", { type: "button", class: "dz-link", text: "Off", title: "Turn picker mode off", onclick: () => setOn(false) }));
     dock.append(head);
 
     if (showPatches) { dock.append(patchesPanel()); return; }
+    if (showPreview) { dock.append(previewPanel()); return; }
     if (showChanges) { dock.append(changesPanel()); return; }
     if (!selected) {
       dock.append(h("p", { class: "dz-hint", text: "Click any element to select it. ↑ parent, ↓ child, Enter for the tools, Esc to clear. Alt+Shift+E copies your changes." }));
@@ -1299,6 +1430,7 @@
     menuOpen = false;
     showChanges = false;
     showPatches = false;
+    showPreview = false;
     renderDock();
     refreshBoxes();
   }
@@ -1323,16 +1455,21 @@
       if (event.key === "ArrowLeft" && tourStep > 0) { event.preventDefault(); tourStep -= 1; renderDock(); return; }
     }
     if ((event.ctrlKey || event.metaKey) && !event.altKey && /^[zy]$/i.test(event.key)) {
-      const t = event.target;
-      const editing = t instanceof HTMLElement && (t.isContentEditable || t.tagName === "TEXTAREA" || (t.tagName === "INPUT" && !/^(range|checkbox|radio|button)$/.test(t.type)));
+      const editing = isEditingField(event.target);
       const forward = event.key.toLowerCase() === "y" || event.shiftKey;
       if (!editing && (forward ? redoStack.length : undoStack.length)) { event.preventDefault(); if (forward) redo(); else undo(); }
+      return;
+    }
+    if (event.key === "\\" && !event.ctrlKey && !event.metaKey && !event.altKey && !isEditingField(event.target)) {   // hold to compare
+      event.preventDefault();
+      if (!event.repeat) setCompare(true);
       return;
     }
     const typing = ours(event.target) && /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName);
     if (event.key === "Escape") {
       event.preventDefault();
-      if (showPatches) showPatches = false;
+      if (showPreview) showPreview = false;
+      else if (showPatches) showPatches = false;
       else if (showChanges) showChanges = false;
       else if (tool) closeTool();
       else if (menuOpen) menuOpen = false;
@@ -1371,6 +1508,7 @@
     refreshBoxes();
   }
 
+  if (PREVIEW) { startPreviewMode(); return; }   // the screen-size preview window
   window.addEventListener("keydown", onKey, true);
   window.addEventListener("scroll", refreshBoxes, { capture: true, passive: true });
   window.addEventListener("resize", refreshBoxes);

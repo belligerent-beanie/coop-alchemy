@@ -184,7 +184,9 @@ The account must exist first, so sign up for it on the site, then mark it.
 **Designers** are accounts marked with `python3 accounts_admin.py make-designer <username>` (`remove-designer` undoes it).
 Their pages get a small UI picker: press Alt+Shift+P (or the Design button), click an element, then use Fill, Border, Shadow, Text, Font (text colour, size, weight, line height, letter spacing, alignment), Size (type a size, or drag the
 handles on the page), Spacing (padding and margin) or Radius. Fill and Font show the contrast ratio against what is behind the text (WCAG AA and
-AAA, the same measure axe-core uses), and the export notes when a change altered it. Ctrl+Z undoes a step and Ctrl+Shift+Z (or Ctrl+Y) redoes it
+AAA, the same measure axe-core uses), and the export notes when a change altered it. Every colour picker lists the colours already on the page, the site's own variables first (`--brown`, `--fg`…). Ctrl+Z undoes a step and
+Ctrl+Shift+Z (or Ctrl+Y) redoes it. Hold *Compare* (or the `\` key) to see the page without your edits. *Preview* opens the page in a real
+window of phone, tablet or laptop size (named `dz-preview`, with no picker) that shows the same edits and reloads when they change
 (↑ selects the parent, ↓ a child, Enter opens the tools, Esc closes them). Edits are only in that browser (they are kept
 through reloads, per page, until reset). Alt+Shift+E (or "Changes" > Copy) copies every change as Markdown (page, selector, before → after); paste it to
 Claude or a developer to apply in the code ("Download" saves it as ui-changes-<page>.md, which can be given to Claude the same way).
