@@ -98,3 +98,12 @@
 .dz-chip:hover { transform: scale(1.18); }
 .dz-badge { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); padding: 5px 12px; border-radius: 999px; background: #ff5ca8; color: #1f1f24; font-weight: 600; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35); pointer-events: none; }
 .dz-size-badge { top: auto; bottom: 8px; left: 8px; transform: none; padding: 3px 9px; background: #1f1f24; color: #f3f3f6; font-weight: 400; font-size: 12px; opacity: 0.85; }
+
+/* Layout tool, copy/paste look, measuring */
+.dz-tools { display: grid; gap: 0; }
+.dz-look { margin-top: -2px; }
+.dz-layout .dz-row > span:first-child { width: 52px; }
+.dz-layout .dz-select { min-width: 0; }
+.dz-measure { position: fixed; inset: 0; pointer-events: none; }
+.dz-m-line { position: fixed; background: #ff5ca8; pointer-events: none; }
+.dz-m-label { position: fixed; transform: translate(-50%, -50%); padding: 1px 6px; border-radius: 4px; background: #ff5ca8; color: #1f1f24; font: 600 11px/1.4 system-ui, sans-serif; white-space: nowrap; pointer-events: none; }

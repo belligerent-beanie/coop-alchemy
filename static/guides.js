@@ -21,7 +21,7 @@ const GUIDES = [
   },
   {
     name: "designer", title: "🎨 Designer picker", who: "Designers",
-    about: "Select any part of a page, change its fill, border, shadow, text, font, size, spacing or corner radius (with a live contrast check, undo, hold-to-compare and a screen-size preview), and copy the changes for a developer. Also how design patches are switched.",
+    about: "Select any part of a page, change its fill, border, shadow, text, font, size, spacing, corner radius or layout (with a live contrast check, undo, copy and paste of a look, measuring, hold-to-compare and a screen-size preview), and copy the changes for a developer. Also how design patches are switched.",
     where: "Opens on the home page, with the picker switched on.",
     seenKey: () => "alchemy-designer-tour", seenValue: "done",
     show: (me) => me.designer,

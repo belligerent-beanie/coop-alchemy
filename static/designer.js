@@ -1,7 +1,7 @@
 "use strict";
 // The designer's UI picker. Accounts marked as designers (accounts_admin.py make-designer) get this on every page (auth.js loads it).
 // Alt+Shift+P (or the Design button) turns picker mode on: clicks select an element instead of reaching the page; ↑ selects the
-// parent, ↓ a child, Enter opens Fill / Border / Shadow / Text / Font / Size / Spacing / Radius, Ctrl+Z undoes, Esc closes things and clears the selection; Alt+Shift+E copies every change
+// parent, ↓ a child, Enter opens Fill / Border / Shadow / Text / Font / Size / Spacing / Radius / Layout, Ctrl+Z undoes, Esc closes things and clears the selection; Alt+Shift+E copies every change
 // as Markdown (the guide, shown the first time and under "Guide", explains all of this). Edits are inline styles on THIS
 // browser's copy of the page only: nothing is sent to the server; they are kept in this browser (localStorage, per page) and put back after a reload. "Changes" exports them as
 // Markdown (selector, before → after) to hand to a developer or an AI. This is a convenience for designers, not a security
@@ -256,7 +256,7 @@
   let hovered = null;
   let climbed = [];            // the elements we came up from, so ↓ goes back the way we came
   let menuOpen = false;
-  let tool = null;             // "fill" | "border" | "shadow" | "text" | "font" | "size" | "spacing" | "radius" | null
+  let tool = null;             // "fill" | "border" | "shadow" | "text" | "font" | "size" | "spacing" | "radius" | "layout" | null
   let showChanges = false;
   let showPreview = false;    // the screen-size preview panel
   let showPatches = false;    // the design patches panel (patches.py): switch them off, to preview, or on
@@ -332,6 +332,7 @@
     place(hoverBox, on && hovered !== selected ? hovered : null);
     place(selectBox, on ? selected : null);
     updateHandles();
+    renderMeasure();
   }
 
   // ---------- selectors ----------
@@ -398,6 +399,14 @@
           "letter-spacing": cs.letterSpacing === "normal" ? "normal" : cs.letterSpacing,
           "text-align": alignOf(cs),
           contrast: contrastLabel(contrastInfo(element)),
+          display: cs.display,
+          "flex-direction": cs.flexDirection,
+          "flex-wrap": cs.flexWrap,
+          "justify-content": cs.justifyContent,
+          "align-items": cs.alignItems,
+          "justify-items": cs.justifyItems,
+          gap: cs.rowGap === cs.columnGap ? cs.rowGap : `${cs.rowGap} ${cs.columnGap}`,
+          opacity: cs.opacity,
         },
       };
       changes.set(element, rec);
@@ -431,7 +440,10 @@
     save();
     refreshBoxes();
   }
-  const changeCount = () => changes.size + pending.length;
+  /** Only an end state that differs from the start is a change: set and set back (or switched and switched back) is not. */
+  const hasChange = (item) => Object.entries(item.after || {}).some(([prop, value]) => value !== (item.before || {})[prop])
+    || !!(item.text && item.text.after !== item.text.before);
+  const changeCount = () => [...changes.values(), ...pending].filter(hasChange).length;
   function showCount() { if (changesLink) changesLink.textContent = `Changes (${changeCount()})`; }
 
   // ---------- undo and redo ----------
@@ -440,6 +452,7 @@
   // Edits of one kind to one element close together in time (a slider being dragged, digits being typed) are one step.
   const MANAGED = ["background-color", "color", "font-size", "font-weight", "line-height", "letter-spacing", "text-align",
     "border-style", "border-width", "border-color", "border-radius", "box-shadow", "width", "height",
+    "display", "flex-direction", "flex-wrap", "justify-content", "align-items", "justify-items", "gap", "opacity",
     ...["padding", "margin"].flatMap((kind) => ["top", "right", "bottom", "left"].map((side) => `${kind}-${side}`))];
   const MERGE_MS = 1200;
   const MAX_STEPS = 100;
@@ -516,7 +529,6 @@
   let pending = [];   // saved edits whose element is not on the page: {selector, snippet, before, after, text}
   const saved = (rec) => ({ selector: rec.selector, snippet: rec.snippet, before: rec.before, after: rec.after || {}, text: rec.text || null });
   /** An entry that changes nothing (everything put back as it was) is not worth keeping, counting or exporting. */
-  const hasChange = (item) => Object.keys(item.after || {}).length > 0 || !!(item.text && item.text.after !== item.text.before);
   function save() {
     if (PREVIEW) return;
     try {
@@ -552,7 +564,7 @@
         else if (m) applyBorder(element, m[2], +m[1], m[3]);
       }
       if (after["box-shadow"]) applyShadowValue(element, after["box-shadow"]);
-      if (/^\d+(\.\d+)?(px|%)$/.test(after["border-radius"] || "")) applyRadius(element, after["border-radius"]);
+      if (/^(\d+(\.\d+)?(px|%)( |$)){1,4}$/.test(after["border-radius"] || "")) applyRadius(element, after["border-radius"]);
       for (const kind of ["padding", "margin"]) {
         const sides = after[kind] ? parseSides(after[kind]) : null;
         if (sides) applySpacing(element, kind, sides);
@@ -571,6 +583,11 @@
       if (/^-?\d+(\.\d+)?px$/.test(after["letter-spacing"] || "")) type["letter-spacing"] = after["letter-spacing"];
       if (TEXT_ALIGNS.includes(after["text-align"])) type["text-align"] = after["text-align"];
       if (Object.keys(type).length) applyType(element, type);
+      const layout = {};
+      for (const prop of Object.keys(LAYOUT_OPTIONS)) if (/^[a-z]+(-[a-z]+)*$/.test(after[prop] || "")) layout[prop] = after[prop];
+      if (/^\d+(\.\d+)?px$/.test(after.gap || "")) layout.gap = after.gap;
+      if (/^(0|1|0?\.\d+)$/.test(after.opacity || "")) layout.opacity = after.opacity;
+      if (Object.keys(layout).length) applyLayout(element, layout);
       if (item.text && typeof item.text.after === "string" && !element.children.length) applyText(element, item.text.after);
       const rec = changes.get(element);
       if (rec) {   // "before" is how it was when the designer first changed it, not how it looks after a reload
@@ -704,7 +721,7 @@
     const blocks = [];
     for (const [element, rec] of [...changes.entries(), ...pending.map((item) => [null, item])]) {
       const lines = [];
-      for (const prop of ["background-color", "color", "font-size", "font-weight", "line-height", "letter-spacing", "text-align", "border", "border-radius", "box-shadow", "padding", "margin", "width", "height"]) {
+      for (const prop of ["background-color", "color", "font-size", "font-weight", "line-height", "letter-spacing", "text-align", "border", "border-radius", "box-shadow", "padding", "margin", "width", "height", "display", "flex-direction", "flex-wrap", "justify-content", "align-items", "justify-items", "gap", "opacity"]) {
         const after = rec.after && rec.after[prop];
         if (after !== undefined && after !== rec.before[prop]) lines.push(`  ${prop}: ${rec.before[prop]} → ${after}`);
       }
@@ -887,8 +904,11 @@
     refreshBoxes();
   }
   const isEditingField = (t) => t instanceof HTMLElement && (t.isContentEditable || t.tagName === "TEXTAREA" || (t.tagName === "INPUT" && !/^(range|checkbox|radio|button)$/.test(t.type)));
-  window.addEventListener("keyup", (event) => { if (event.key === "\\") setCompare(false); }, true);
-  window.addEventListener("blur", () => setCompare(false));
+  window.addEventListener("keyup", (event) => {
+    if (event.key === "\\") setCompare(false);
+    if (event.key.toLowerCase() === "m" && measuring) { measuring = false; renderMeasure(); }
+  }, true);
+  window.addEventListener("blur", () => { setCompare(false); if (measuring) { measuring = false; renderMeasure(); } });
 
   // ---------- preview at other screen sizes ----------
   // Opens this page in a real browser window of that size (so its media queries really run). That window, named dz-preview,
@@ -924,6 +944,154 @@
     });
   }
 
+  // ---------- the Layout tool ----------
+  const LAYOUT_OPTIONS = {
+    display: ["block", "flex", "grid", "inline-block", "inline-flex"],
+    "flex-direction": ["row", "row-reverse", "column", "column-reverse"],
+    "flex-wrap": ["nowrap", "wrap", "wrap-reverse"],
+    "justify-content": ["flex-start", "center", "flex-end", "space-between", "space-around", "space-evenly"],
+    "align-items": ["stretch", "flex-start", "center", "flex-end", "baseline"],
+    "justify-items": ["stretch", "start", "center", "end"],
+  };
+  const LAYOUT_LABELS = {
+    display: "Display", "flex-direction": "Direction", "flex-wrap": "Wrap", "justify-content": "Justify", "align-items": "Align", "justify-items": "Items",
+  };
+  const isFlex = (display) => display === "flex" || display === "inline-flex";
+  const isGrid = (display) => display === "grid" || display === "inline-grid";
+  /** values: CSS property -> value (display, flex-direction, flex-wrap, justify-content, align-items, justify-items, gap "12px", opacity "0.8"). */
+  function applyLayout(element, values) {
+    checkpoint("layout:" + Object.keys(values).join(), element);
+    const rec = record(element);
+    for (const [prop, value] of Object.entries(values)) {
+      rememberOriginal(rec, element, prop);
+      setStyle(element, prop, value);
+      rec.after = Object.assign(rec.after || {}, { [prop]: value });
+    }
+    edited();
+  }
+  function layoutPanel() {
+    const element = selected;
+    const cs = getComputedStyle(element);
+    const display = cs.display;
+    const set = (values, rebuild) => { applyLayout(element, values); if (rebuild) renderDock(); };
+
+    const choice = (prop, rebuild) => {
+      const current = cs.getPropertyValue(prop);
+      const options = LAYOUT_OPTIONS[prop].includes(current) ? LAYOUT_OPTIONS[prop] : [current, ...LAYOUT_OPTIONS[prop]];
+      const select = h("select", { class: "dz-select", "aria-label": LAYOUT_LABELS[prop] },
+        ...options.map((value) => h("option", { value, text: value, selected: value === current })));
+      select.addEventListener("change", () => set({ [prop]: select.value }, rebuild));
+      return h("label", { class: "dz-row" }, h("span", { text: LAYOUT_LABELS[prop] }), select);
+    };
+    const rows = [choice("display", true)];
+    const flex = isFlex(display), grid = isGrid(display);
+    if (flex) rows.push(choice("flex-direction"), choice("flex-wrap"), choice("justify-content"), choice("align-items"));
+    if (grid) rows.push(choice("justify-items"), choice("align-items"));
+    if (flex || grid) {
+      let gap = Math.round(parseFloat(cs.rowGap) || 0);
+      const range = h("input", { type: "range", min: "0", max: "64", class: "dz-range", "aria-label": "Gap between children" });
+      const number = h("span", { class: "dz-num" });
+      const show = () => { range.value = String(gap); number.textContent = gap + "px"; };
+      range.addEventListener("input", () => { gap = +range.value; show(); set({ gap: gap + "px" }); });
+      show();
+      rows.push(h("label", { class: "dz-row" }, h("span", { text: "Gap" }), range, number));
+    }
+    let opacity = Math.round((parseFloat(cs.opacity) || 0) * 100);
+    const opacityRange = h("input", { type: "range", min: "0", max: "100", class: "dz-range", "aria-label": "Opacity" });
+    const opacityNumber = h("span", { class: "dz-num" });
+    const showOpacity = () => { opacityRange.value = String(opacity); opacityNumber.textContent = opacity + "%"; };
+    opacityRange.addEventListener("input", () => { opacity = +opacityRange.value; showOpacity(); set({ opacity: String(opacity / 100) }); });
+    showOpacity();
+    rows.push(h("label", { class: "dz-row" }, h("span", { text: "Opacity" }), opacityRange, opacityNumber));
+    const hint = flex || grid ? null
+      : h("p", { class: "dz-hint dz-note", text: "This is not a flex or grid container. Set Display to flex or grid to line up and space its children." });
+    return h("div", { class: "dz-panel dz-layout" }, ...rows, hint);
+  }
+
+  // ---------- copy and paste a look ----------
+  let copiedLook = null;
+  function lookOf(element) {
+    const cs = getComputedStyle(element);
+    const border = toRgba(cs.borderTopColor) || [0, 0, 0, 1];
+    return {
+      from: label(element),
+      fill: colourText(cs.backgroundColor), color: colourText(cs.color),
+      "font-size": cs.fontSize, "font-weight": cs.fontWeight, lineHeight: lineHeightOf(cs),
+      letterSpacing: cs.letterSpacing === "normal" ? "0px" : cs.letterSpacing, "text-align": alignOf(cs),
+      border: { style: NO_BORDER(cs.borderTopStyle, cs.borderTopWidth) ? "none" : cs.borderTopStyle, width: Math.round(parseFloat(cs.borderTopWidth)) || 0, colour: toHex(border[0], border[1], border[2]) },
+      radius: radiusOf(cs), shadow: shadowText(cs.boxShadow), padding: sideNumbers(cs, "padding"),
+    };
+  }
+  function copyLook(element) {
+    copiedLook = lookOf(element);
+    showToast(`Copied the look of ${copiedLook.from}. Select another element and paste it (Alt+Shift+V).`);
+    renderDock();
+  }
+  /** Fill, text colour and type, border, corners, shadow and padding: not size, margin or layout, which belong to where it sits. */
+  function pasteLook(element) {
+    if (!copiedLook) { showToast("Copy an element's look first (Alt+Shift+C)."); return; }
+    const look = copiedLook;
+    checkpoint("paste:" + Date.now(), element);   // the whole paste is one step to undo
+    bulk = true;
+    try {
+      applyFill(element, look.fill);
+      const type = { color: look.color, "font-size": look["font-size"], "font-weight": look["font-weight"], "letter-spacing": look.letterSpacing, "text-align": look["text-align"] };
+      if (look.lineHeight !== "normal") type["line-height"] = look.lineHeight;
+      applyType(element, type);
+      applyBorder(element, look.border.style, look.border.width, look.border.colour);
+      applyRadius(element, look.radius);
+      applyShadowValue(element, look.shadow);
+      applySpacing(element, "padding", look.padding);
+    } finally { bulk = false; }
+    showToast(`Pasted the look of ${look.from} onto ${label(element)}.`);
+    renderDock();
+  }
+
+  // ---------- measuring ----------
+  // Hold M with an element selected and move over another: the distances between them, and the selected element's size.
+  const measureLayer = h("div", { class: "dz-measure" });
+  root.append(measureLayer);
+  let measuring = false;
+  function renderMeasure() {
+    measureLayer.replaceChildren();
+    if (!measuring || !on || !selected || !document.contains(selected)) return;
+    const a = selected.getBoundingClientRect();
+    const mark = (x1, y1, x2, y2, text) => {
+      const line = h("div", { class: "dz-m-line" });
+      line.style.left = Math.min(x1, x2) + "px"; line.style.top = Math.min(y1, y2) + "px";
+      line.style.width = Math.max(1, Math.abs(x2 - x1)) + "px"; line.style.height = Math.max(1, Math.abs(y2 - y1)) + "px";
+      measureLayer.append(line);
+      tag(text, (x1 + x2) / 2, (y1 + y2) / 2);
+    };
+    const tag = (text, x, y) => {
+      const chip = h("div", { class: "dz-m-label", text });
+      chip.style.left = x + "px"; chip.style.top = y + "px";
+      measureLayer.append(chip);
+    };
+    tag(`${Math.round(a.width)} × ${Math.round(a.height)}`, a.left + a.width / 2, a.bottom + 14);
+    const other = hovered && hovered !== selected && document.contains(hovered) && !ours(hovered) ? hovered : null;
+    if (!other) return;
+    const b = other.getBoundingClientRect();
+    const px = (n) => String(Math.round(n * 10) / 10).replace(/\.0$/, "");
+    const inside = (outer, inner) => outer.left <= inner.left && outer.right >= inner.right && outer.top <= inner.top && outer.bottom >= inner.bottom;
+    const [outer, inner] = inside(b, a) ? [b, a] : inside(a, b) ? [a, b] : [null, null];
+    if (outer) {   // one is inside the other: the distance to each edge
+      const mx = (inner.left + inner.right) / 2, my = (inner.top + inner.bottom) / 2;
+      if (inner.left - outer.left >= 0.5) mark(outer.left, my, inner.left, my, px(inner.left - outer.left));
+      if (outer.right - inner.right >= 0.5) mark(inner.right, my, outer.right, my, px(outer.right - inner.right));
+      if (inner.top - outer.top >= 0.5) mark(mx, outer.top, mx, inner.top, px(inner.top - outer.top));
+      if (outer.bottom - inner.bottom >= 0.5) mark(mx, inner.bottom, mx, outer.bottom, px(outer.bottom - inner.bottom));
+      return;
+    }
+    const ox = [Math.max(a.left, b.left), Math.min(a.right, b.right)], oy = [Math.max(a.top, b.top), Math.min(a.bottom, b.bottom)];
+    const midY = oy[0] < oy[1] ? (oy[0] + oy[1]) / 2 : (a.top + a.bottom) / 2;
+    const midX = ox[0] < ox[1] ? (ox[0] + ox[1]) / 2 : (a.left + a.right) / 2;
+    if (a.right <= b.left) mark(a.right, midY, b.left, midY, px(b.left - a.right));
+    else if (b.right <= a.left) mark(b.right, midY, a.left, midY, px(a.left - b.right));
+    if (a.bottom <= b.top) mark(midX, a.bottom, midX, b.top, px(b.top - a.bottom));
+    else if (b.bottom <= a.top) mark(midX, b.bottom, midX, a.top, px(a.top - b.bottom));
+  }
+
   // ---------- the dock ----------
   const NO_TEXT_TAGS = new Set(["IMG", "INPUT", "TEXTAREA", "SELECT", "BR", "HR", "SVG", "CANVAS", "VIDEO", "AUDIO", "IFRAME"]);
   function textBlocked(element) {
@@ -943,7 +1111,7 @@
       "↑ selects the parent of what you have selected. ↓ goes back down the way you came, or to the first child.",
       "Esc clears the selection."] },
     { title: "Change it", lines: [
-      "Enter opens the tools: Fill (colour), Border (style, thickness, colour), Shadow (presets, or offset, blur, spread, opacity, colour), Text (the words), Font (text colour, size, weight, line height, letter spacing, alignment), Size (width and height, or drag the pink handles), Spacing (padding and margin) and Radius (rounded corners). Fill and Font show the contrast against what is behind the text, and every colour picker lists the colours already on the page. Hold Compare (or the \\ key) to see the original, and Preview opens the page at phone, tablet and laptop sizes.",
+      "Enter opens the tools: Fill (colour), Border (style, thickness, colour), Shadow (presets, or offset, blur, spread, opacity, colour), Text (the words), Font (text colour, size, weight, line height, letter spacing, alignment), Size (width and height, or drag the pink handles), Spacing (padding and margin), Radius (rounded corners) and Layout (display, flex and grid alignment and gap, opacity). Alt+Shift+C copies an element's look and Alt+Shift+V pastes it onto another; hold M to measure distances. Fill and Font show the contrast against what is behind the text, and every colour picker lists the colours already on the page. Hold Compare (or the \\ key) to see the original, and Preview opens the page at phone, tablet and laptop sizes.",
       "Text works only on elements with nothing inside them. The page changes straight away, in this tab only; Done closes the tool. Ctrl+Z undoes a step and Ctrl+Shift+Z (or Ctrl+Y) redoes it."] },
     { title: "Export your changes", lines: [
       "Alt+Shift+E copies every change as Markdown. Paste it to Claude, who can then make the same changes in the code.",
@@ -1002,12 +1170,16 @@
     if (showPreview) { dock.append(previewPanel()); return; }
     if (showChanges) { dock.append(changesPanel()); return; }
     if (!selected) {
-      dock.append(h("p", { class: "dz-hint", text: "Click any element to select it. ↑ parent, ↓ child, Enter for the tools, Esc to clear. Alt+Shift+E copies your changes." }));
+      dock.append(h("p", { class: "dz-hint", text: "Click any element to select it. ↑ parent, ↓ child, Enter for the tools, Esc to clear. Hold M to measure. Alt+Shift+E copies your changes." }));
       return;
     }
-    const tools = () => h("div", { class: "dz-menu" },
+    const lookRow = () => h("div", { class: "dz-menu dz-look" },
+      h("button", { type: "button", class: "dz-menu-button", text: "Copy look", title: "Copy this element's fill, type, border, corners, shadow and padding (Alt+Shift+C)", onclick: () => copyLook(selected) }),
+      h("button", { type: "button", class: "dz-menu-button", text: "Paste look", disabled: !copiedLook, title: copiedLook ? `Paste the look of ${copiedLook.from} (Alt+Shift+V)` : "Copy an element's look first",
+                    onclick: () => pasteLook(selected) }));
+    const tools = () => h("div", { class: "dz-tools" }, h("div", { class: "dz-menu" },
       menuButton("fill", "Fill"), menuButton("border", "Border"), menuButton("shadow", "Shadow"), menuButton("text", "Text"), menuButton("font", "Font"),
-      menuButton("size", "Size"), menuButton("spacing", "Spacing"), menuButton("radius", "Radius"));
+      menuButton("size", "Size"), menuButton("spacing", "Spacing"), menuButton("radius", "Radius"), menuButton("layout", "Layout")), lookRow());
     if (!menuOpen && !tool) {
       dock.append(h("p", { class: "dz-hint", text: "Press Enter, or choose a tool." }), tools());
       return;
@@ -1021,6 +1193,7 @@
     else if (tool === "size") dock.append(sizePanel());
     else if (tool === "spacing") dock.append(spacingPanel());
     else if (tool === "radius") dock.append(radiusPanel());
+    else if (tool === "layout") dock.append(layoutPanel());
     // Edits apply as they are made, so there is nothing to confirm; Done just closes the tool and lets go of the element
     // (Esc does the same in steps). Without it a phone, which has no Esc key, had no visible way out of a tool.
     dock.append(h("div", { class: "dz-done-row" },
@@ -1405,6 +1578,7 @@
     const panel = h("div", { class: "dz-panel" });
     if (!changeCount()) { panel.append(h("p", { class: "dz-hint", text: "No changes yet." })); return panel; }
     for (const [element, rec] of changes) {
+      if (!hasChange(rec)) continue;
       panel.append(h("div", { class: "dz-change" },
         h("code", { text: rec.selector }),
         h("button", { type: "button", class: "dz-link", text: "Reset", onclick: () => resetElement(element) })));
@@ -1449,6 +1623,11 @@
     if (event.altKey && event.shiftKey && event.code === "KeyP") { event.preventDefault(); setOn(!on); return; }
     if (event.altKey && event.shiftKey && event.code === "KeyE") { event.preventDefault(); copyChanges(); return; }   // works with the picker off too
     if (!on) return;
+    if (event.altKey && event.shiftKey && (event.code === "KeyC" || event.code === "KeyV") && selected) {
+      event.preventDefault();
+      if (event.code === "KeyC") copyLook(selected); else pasteLook(selected);
+      return;
+    }
     if (tourStep !== null) {   // the guide is open: Esc closes it, the arrows turn its pages
       if (event.key === "Escape") { event.preventDefault(); endTour(); return; }
       if (event.key === "ArrowRight" && tourStep < TOUR.length - 1) { event.preventDefault(); tourStep += 1; renderDock(); return; }
@@ -1458,6 +1637,11 @@
       const editing = isEditingField(event.target);
       const forward = event.key.toLowerCase() === "y" || event.shiftKey;
       if (!editing && (forward ? redoStack.length : undoStack.length)) { event.preventDefault(); if (forward) redo(); else undo(); }
+      return;
+    }
+    if (event.key.toLowerCase() === "m" && !event.ctrlKey && !event.metaKey && !event.altKey && selected && !isEditingField(event.target)) {   // hold to measure
+      event.preventDefault();
+      if (!event.repeat) { measuring = true; renderMeasure(); }
       return;
     }
     if (event.key === "\\" && !event.ctrlKey && !event.metaKey && !event.altKey && !isEditingField(event.target)) {   // hold to compare
