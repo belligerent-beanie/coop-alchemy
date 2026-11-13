@@ -242,7 +242,7 @@ function updateCounter() {
 function setRace(r) {
   race = r;
   $("race").hidden = !r;
-  clearInterval(raceTimer);
+  if (raceTimer) raceTimer.stop();
   if (!r) return;
   $("race-goal").textContent = r.goal === "target"
     ? `First to discover ${r.target.emoji} ${r.target.label}` : `First to reach ${r.goal_count} elements`;
@@ -250,7 +250,7 @@ function setRace(r) {
   $("hints").hidden = true;    // no hints in a race (the server refuses them too)
   $("end").hidden = true;      // leaving goes through "Leave race"
   pollRace();
-  raceTimer = setInterval(pollRace, 1500);
+  raceTimer = Net.poll(pollRace, 1500);
 }
 
 async function pollRace() {
@@ -261,7 +261,7 @@ async function pollRace() {
     $("race-standings").textContent = room.state === "countdown" ? "Get ready…"
       : room.racers.map((r) => `${r.name.toLowerCase() === me ? "you" : r.name} ${r.count}`).join(" · ");
     if (room.state === "finished" && !$("race-done").open) {
-      clearInterval(raceTimer);
+      if (raceTimer) raceTimer.stop();
       const won = room.winner && room.winner.toLowerCase() === me;
       $("race-done-title").textContent = won ? "🏆 You won the race!" : `🏁 ${room.winner || "Nobody"} won the race`;
       $("race-done-text").textContent = room.racers.map((r) => `${r.name}: ${r.count}`).join(" · ");
@@ -1676,6 +1676,20 @@ const handlers = {
 };
 
 let reconnectTimer = null;
+let reconnectFailures = 0;   // in a row; reset when the stream opens
+
+/** Try connect() again after a wait that grows with each failure in a row (Net.backoff), and never before the server's
+ *  busy period (Net.wait) is over. The first retry still comes quickly (1 to 2 s), which covers a server reload. */
+function reconnectLater() {
+  clearTimeout(reconnectTimer);
+  reconnectFailures += 1;
+  reconnectTimer = setTimeout(connect, Math.max(Net.backoff(reconnectFailures), Net.wait()));
+}
+
+// Back in view (a laptop opened again, a tab switched to) while a reconnect is waiting: try now, unless the server said to wait.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && reconnectTimer && !gameEnded && !Net.wait() && !$("status").classList.contains("on")) connect();
+});
 
 /** Opens the event stream with a one-time ticket, so the player token never appears in a URL. */
 async function connect() {
@@ -1687,19 +1701,19 @@ async function connect() {
   } catch (err) {
     if (gameEnded) return;
     if (err.status === 403 || err.status === 404) rejoin(); // the server no longer knows us (e.g. it restarted)
-    else reconnectTimer = setTimeout(connect, 3000);       // the server is unreachable: keep trying
+    else reconnectLater();                                  // busy or unreachable: keep trying, more slowly each time
     return;
   }
   source = new EventSource(`${BASE}/events?ticket=${encodeURIComponent(ticket)}`);
   for (const [name, handler] of Object.entries(handlers)) {
     source.addEventListener(name, (e) => handler(JSON.parse(e.data)));
   }
-  source.onopen = () => $("status").classList.add("on");
+  source.onopen = () => { reconnectFailures = 0; $("status").classList.add("on"); };
   source.onerror = () => {
     $("status").classList.remove("on");
     // A ticket works once, so the browser's own retry cannot reuse it: close and ask for a fresh one.
     source.close();
-    if (!gameEnded) reconnectTimer = setTimeout(connect, 1500);
+    if (!gameEnded) reconnectLater();
   };
 }
 
@@ -1871,4 +1885,4 @@ async function checkVersion() {
 $("update-reload").addEventListener("click", () => location.reload());
 $("update-later").addEventListener("click", () => { $("update").hidden = true; pageVersion = null; checkVersion(); });
 checkVersion();
-setInterval(checkVersion, 20000);
+Net.poll(checkVersion, 20000);

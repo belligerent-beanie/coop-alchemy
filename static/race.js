@@ -64,7 +64,7 @@ async function poll() {
     render();
   } catch (err) {
     if (/does not exist/.test(err.message)) {
-      clearInterval(timer);
+      if (timer) timer.stop();
       $("race-status").textContent = "That race has ended.";
       $("race-start").hidden = $("race-play").hidden = true;
       $("race-racers").replaceChildren();
@@ -85,5 +85,5 @@ $("race-leave").addEventListener("click", async () => {
 });
 
 poll();
-timer = setInterval(poll, 1000);
+timer = Net.poll(poll, 1000);
 setInterval(render, 200);  // the countdown ticks faster than the polling

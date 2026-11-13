@@ -212,4 +212,4 @@ $("copy").addEventListener("click", async () => {
 loadPictureMap(() => { if (deck.length) render(); });
 loadQueue();
 loadApproved();
-setInterval(() => { if (!document.hidden && !busy) loadQueue(); }, 15000);
+Net.poll(() => { if (!busy) return loadQueue(); }, 15000);

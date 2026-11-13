@@ -319,11 +319,11 @@ $("race-form").addEventListener("submit", async (event) => {
 });
 
 loadRaces();
-setInterval(loadRaces, POLL_MS);
+Net.poll(loadRaces, POLL_MS);
 window.addEventListener("pageshow", loadRaces);
 
 loadDaily();
-setInterval(loadDaily, 15000);
+Net.poll(loadDaily, 15000);
 
 /** The profile card: the player's own numbers, with nothing to compare them against. */
 async function loadProfile() {
@@ -431,14 +431,14 @@ for (const button of document.querySelectorAll("[data-goto]")) {
 loadSolo();
 loadAchievements();
 loadProfile();
-setInterval(loadProfile, 30000);
+Net.poll(loadProfile, 30000);
 window.addEventListener("pageshow", () => { loadSolo(); loadAchievements(); loadProfile(); });
 window.addEventListener("pageshow", loadDaily);  // coming back with the browser's back button
 
 refresh();
 loadSaved();
-setInterval(refresh, POLL_MS);
-setInterval(loadSaved, 15000); // a game that is resumed or expires drops off the list
+Net.poll(refresh, POLL_MS);
+Net.poll(loadSaved, 15000); // a game that is resumed or expires drops off the list
 
 // ---- account: change password, delete account ---------------------------------------------------
 
@@ -516,7 +516,7 @@ async function loadAdmin() {
   } catch (_) { /* the link just stays hidden */ }
 }
 loadAdmin();
-setInterval(loadAdmin, 30000);
+Net.poll(loadAdmin, 30000);
 
 // ---- the three ways to play: Solo, Multiplayer, Challenges ----
 const HOME_TABS = ["solo", "multiplayer", "challenges"];

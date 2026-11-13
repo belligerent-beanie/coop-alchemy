@@ -1,5 +1,72 @@
 "use strict";
 
+// ---- being polite to the server ------------------------------------------------------------------------------------------
+// Two rules every page follows, so a busy server (or a tester with many tabs) cannot turn into a storm of retries:
+//  1. Background updates pause while the tab is hidden, and catch up the moment it is shown again (Net.poll).
+//  2. When the server says it is busy (503, 429, 502, 504) or cannot be reached, every background update on the page waits:
+//     2 s after the first failure, then 4, 8, … up to a minute, each wait randomised (so tabs do not retry in step) and never
+//     shorter than the server's Retry-After. The first success resets it. Things the player does (moving a tile, a click)
+//     are never held back: only the automatic polling and reconnecting waits.
+const Net = {
+  failures: 0,
+  busyUntil: 0,
+  /** How long to wait after the nth failure in a row: doubling from 2 s up to 60 s, then randomised to between half and all of it. */
+  backoff(failures) {
+    const ceiling = Math.min(60000, 2000 * 2 ** Math.max(0, failures - 1));
+    return ceiling / 2 + Math.random() * (ceiling / 2);
+  },
+  /** Called with every response (and with null when the request never got an answer). */
+  note(res) {
+    const busy = res === null || [429, 502, 503, 504].includes(res.status);
+    if (!busy) { this.failures = 0; this.busyUntil = 0; return; }
+    this.failures += 1;
+    let wait = this.backoff(this.failures);
+    const retryAfter = res && Number(res.headers.get("Retry-After"));
+    if (retryAfter > 0) wait = Math.max(wait, retryAfter * 1000 + Math.random() * 1000);
+    this.busyUntil = Math.max(this.busyUntil, Date.now() + wait);
+  },
+  /** Milliseconds until background requests may go again (0: now). */
+  wait() {
+    return Math.max(0, this.busyUntil - Date.now());
+  },
+  /** Run fn about every ms (±10%) while the tab is visible, never two at once, waiting out Net.wait(). When a hidden tab is
+   *  shown again, fn runs straight away if it is due. Returns {stop()}. fn's own errors are its business: they are swallowed. */
+  poll(fn, ms) {
+    let timer = 0, due = Date.now() + ms, running = false, stopped = false;
+    const schedule = () => {
+      clearTimeout(timer);
+      timer = 0;
+      if (stopped || running || document.hidden) return;
+      timer = setTimeout(tick, Math.max(0, due - Date.now(), this.wait()));
+    };
+    const tick = async () => {
+      timer = 0;
+      if (stopped || document.hidden) return;
+      if (this.wait() > 0) { schedule(); return; }
+      running = true;
+      try { await fn(); } catch (_) { /* the page shows its own errors */ } finally { running = false; }
+      due = Date.now() + ms * (0.9 + Math.random() * 0.2);
+      schedule();
+    };
+    document.addEventListener("visibilitychange", schedule);
+    schedule();
+    return { stop() { stopped = true; clearTimeout(timer); document.removeEventListener("visibilitychange", schedule); } };
+  },
+};
+// Every fetch on the page reports back to Net, whichever script made it (Auth.fetch, the game's api(), plain fetch calls).
+(function watchFetch() {
+  const realFetch = window.fetch.bind(window);
+  window.fetch = async (...args) => {
+    let res;
+    try { res = await realFetch(...args); } catch (err) {
+      if (err && err.name !== "AbortError") Net.note(null);   // no answer at all: down, restarting, or the network dropped
+      throw err;
+    }
+    Net.note(res);
+    return res;
+  };
+})();
+
 // Login session shared by every page. The server keeps the session in an HttpOnly cookie that scripts cannot read, so the page
 // only remembers WHO is logged in (a name, not a secret) to show it and to decide whether to ask for a login. The real check
 // is the server's: a 401 clears the name and sends the person to log in. An old tab may still hold the previous version's
@@ -95,7 +162,7 @@ upgradeOldToken();
     } catch (_) { /* offline: try again at the next check */ } finally { asking = false; }
   }
   check();
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) check(); });
-  window.addEventListener("focus", check);
-  setInterval(() => { if (!document.hidden) check(); }, RECHECK_MS);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && !Net.wait()) check(); });
+  window.addEventListener("focus", () => { if (!Net.wait()) check(); });
+  Net.poll(check, RECHECK_MS);   // check() does nothing once the picker is loaded
 })();

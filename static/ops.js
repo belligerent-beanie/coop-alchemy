@@ -298,4 +298,4 @@ async function refresh() {
 
 $("refresh").addEventListener("click", refresh);
 refresh();
-setInterval(refresh, REFRESH_MS);
+Net.poll(refresh, REFRESH_MS);
