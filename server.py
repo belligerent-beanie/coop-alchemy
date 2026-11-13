@@ -36,6 +36,16 @@ HTTP API
     GET  /icons/elements                -> {"elements": [{"id", "label", "emoji", "file", "pic"?}]}   every element with its
                                            picture's file name and current address, for the icon studio (/icons): administrators
                                            and designers only
+    GET  /icons/mine                    -> {"designs": [{"element", "status", "updated", "reply", "changed", "png"}]}   the caller's icon designs
+    GET  /icons/design?element=ID       -> {"design": {..., "doc"}}   one saved design (404 if none)
+    GET  /icons/file/<name>.png         -> a stored icon PNG (a design, a proposal or a replaced picture)
+    POST /icons/save    {"element", "doc", "png"} -> {"design"}   save the studio's design (up to MAX_ICON_BODY bytes)
+    POST /icons/propose {"element", "note"?} -> {"design"}   send the saved design to the administrators
+    POST /icons/delete  {"element"}     -> {"deleted"}   throw a design away
+                                           (all of /icons/*: administrators and designers only)
+    GET  /icons/queue                   -> {"waiting": [...], "recent": [...]}   icon proposals, for the review page (admins)
+    POST /icons/handle  {"id", "action", "reply"?} -> approve (the icon goes into the pictures folder at once) or reject (admins)
+    POST /icons/undo    {"id"}          -> {"restored"}   take back the latest approval of an element (admins)
     GET  /patches.css                   -> the design patches that apply to the caller: those switched on, plus those in
                                            preview for administrators and designers (patches.py; linked from every page)
     GET  /patches/text                  -> {"changes": [{"page", "selector", "text", "patch"}]}   the same patches' text changes
@@ -127,6 +137,7 @@ from bots import BotPolicy, BotRunner, bot_loop
 from cast import CAST
 from metrics import Metrics, metrics_loop
 from pictures import PictureIndex, slugify
+from iconstore import IconStore
 from patches import PatchError, PatchStore
 from profiles import ProfileStore, profile_loop
 from visitor import VisitorPolicy, is_reserved
@@ -148,6 +159,7 @@ from throttle import Throttle, TicketStore, client_ip, parse_networks, throttle_
 
 BASE_DIR = Path(__file__).resolve().parent
 MAX_BODY = 4096
+MAX_ICON_BODY = 800_000   # an icon design with its pixel layers and PNG (iconstore.py bounds each part); /icons/save only
 MAX_DRAIN = 65536  # an unread request body up to this size is read and thrown away before the connection closes
 KEEPALIVE_SECONDS = 3  # a closed browser is noticed on the second failed write, so about 6 s
 SESSION_COOKIE = "alchemy_session"   # HttpOnly, so scripts on the page cannot read it; also accepted: an X-Session header (API clients)
@@ -296,6 +308,7 @@ class AlchemyServer(ThreadingHTTPServer):
         self._stats_lock = threading.Lock()
         self.names = NameFilter.load()               # blocked words in usernames, game names and recipe names (--blocklist-file adds more)
         self.reports = ReportStore(None)             # player reports for the administrators (--reports-file keeps them on disk)
+        self.icons = IconStore(None, None)            # icon designs and proposals (iconstore.py; --icons-file keeps them on disk)
         self.patches = PatchStore(BASE_DIR / "patches", None)   # design patches (patches.py; --patches-state-file keeps their state)
         self.games_throttle = Throttle(10, 3600.0)   # games one account may start per hour
         self.reports_throttle = Throttle(5, 3600.0)  # reports one account may send per hour
@@ -642,6 +655,29 @@ class Handler(BaseHTTPRequestHandler):
                 self._static("icons.html")
             elif path == "/icons/elements":
                 self._json(200, self._icon_elements())
+            elif path == "/icons/mine":
+                self._json(200, {"designs": self.server.icons.mine(self._admin_or_designer())})
+            elif path == "/icons/design":
+                who, element = self._admin_or_designer(), self._icon_element(parse_qs(parts.query).get("element", [""])[0])
+                design = self.server.icons.design(who, element)
+                if design is None:
+                    raise GameError(404, "nothing saved for this element yet")
+                self._json(200, {"design": design})
+            elif path.startswith("/icons/file/") and path.endswith(".png"):
+                self._admin_or_designer()
+                data = self.server.icons.file(path[len("/icons/file/"):-len(".png")])
+                if data is None:
+                    raise GameError(404, "no such picture")
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "private, max-age=86400")   # a stored file never changes: new work gets a new name
+                self.end_headers()
+                self.wfile.write(data)
+            elif path == "/icons/queue":
+                self._admin()
+                pictures = self.server.registry.pictures
+                self._json(200, self.server.icons.queue(lambda eid: pictures.url_for(eid) if pictures is not None else None))
             elif path == "/healthz":  # for the watchdog and deploy checks: answers only if the server is really working
                 self._json(200, {"ok": True})
             elif path == "/auth-config":
@@ -814,6 +850,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path.startswith("/ops/"):
                 self._json(200, self._ops_action(path, self._read_json()))
+                return
+            if path.startswith("/icons/"):
+                self._json(200, self._icons_action(path))
                 return
             if path == "/patches/set":
                 who, body = self._admin_or_designer(), self._read_json()
@@ -1114,7 +1153,7 @@ class Handler(BaseHTTPRequestHandler):
         registry = server.registry
         summary = erase_account(username, accounts=accounts, saves=registry.saves, drafts=server.drafts,
                                 daily=registry.daily, invites=server.invites, reports=server.reports,
-                                solo=registry.solo, profiles=registry.profiles)
+                                solo=registry.solo, profiles=registry.profiles, icons=server.icons)
         server.bump("accounts_deleted")
         registry.evict_account(username)
         return {"deleted": summary.as_json()}
@@ -1145,7 +1184,7 @@ class Handler(BaseHTTPRequestHandler):
         registry = self.server.registry
         summary = erase_account(username, accounts=accounts, saves=registry.saves, drafts=self.server.drafts,
                                 daily=registry.daily, invites=self.server.invites, reports=self.server.reports,
-                                solo=registry.solo, profiles=registry.profiles)
+                                solo=registry.solo, profiles=registry.profiles, icons=self.server.icons)
         self.server.bump("accounts_deleted")
         registry.evict_account(username)
         log.info("account deleted: user %s", username)
@@ -1273,12 +1312,12 @@ class Handler(BaseHTTPRequestHandler):
         user = self._user()
         return {"games": registry.list(user), "max_games": registry.max_games, "multiplayer": self._multiplayer(user)}
 
-    def _read_json(self) -> dict[str, Any]:
+    def _read_json(self, limit: int = MAX_BODY) -> dict[str, Any]:
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             raise GameError(400, "bad Content-Length") from None
-        if length <= 0 or length > MAX_BODY:
+        if length <= 0 or length > limit:
             raise GameError(400, "request body missing or too large")
         self._body_read = True
         try:
@@ -1312,6 +1351,49 @@ class Handler(BaseHTTPRequestHandler):
         if not (accounts.is_admin(name) or accounts.is_designer(name)):
             raise GameError(403, "only administrators and designers can do that")
         return name
+
+    def _icon_element(self, element: object) -> str:
+        """An element id the icon routes were given, checked against the recipe book (404 otherwise)."""
+        if not isinstance(element, str) or element not in self.server.registry.book.elements:
+            raise GameError(404, "no such element")
+        return element
+
+    def _icons_action(self, path: str) -> dict[str, Any]:
+        """The icon studio's changes (designers and administrators) and the review page's decisions (administrators)."""
+        icons, pictures = self.server.icons, self.server.registry.pictures
+        if path in ("/icons/handle", "/icons/undo"):
+            admin, body = self._admin(), self._read_json()
+            if pictures is None:
+                raise GameError(409, "this server has no element pictures folder")
+            if path == "/icons/undo":
+                result = icons.undo(admin, body.get("id"), pictures.folder)
+                log.info("admin %s undid icon proposal %s", admin, log_safe(str(body.get("id"))))
+            elif body.get("action") == "approve":
+                proposal = next((p for p in icons.queue(lambda _e: None)["waiting"] if p["id"] == body.get("id")), None)
+                if proposal is None:
+                    raise GameError(404, "no such icon proposal waiting")
+                eid = self._icon_element(proposal["element"])
+                target = pictures.file_for(eid) or pictures.folder / f"{slugify(eid)}.png"
+                result = icons.approve(admin, body.get("id"), body.get("reply"), target)
+                log.info("admin %s approved the icon for %s by %s", admin, log_safe(eid), log_safe(proposal["author"]))
+            elif body.get("action") == "reject":
+                result = icons.reject(admin, body.get("id"), body.get("reply"))
+            else:
+                raise GameError(400, "action must be approve or reject")
+            pictures.refresh()   # players get the new picture now, not at the next look at the folder
+            return result
+        who = self._admin_or_designer()   # the role is checked before a large body is read
+        body = self._read_json(MAX_ICON_BODY if path == "/icons/save" else MAX_BODY)
+        element = self._icon_element(body.get("element"))
+        if path == "/icons/save":
+            return {"design": icons.save_design(who, element, body.get("doc"), body.get("png"))}
+        if path == "/icons/propose":
+            result = icons.propose(who, element, body.get("note"))
+            log.info("%s proposed an icon for %s", who, log_safe(element))
+            return {"design": result}
+        if path == "/icons/delete":
+            return {"deleted": icons.delete_design(who, element)}
+        raise GameError(404, "not found")
 
     def _icon_elements(self) -> dict[str, Any]:
         """For the icon studio: every element, with the file name its picture has (or would have) and its current picture's
@@ -1578,6 +1660,10 @@ def main() -> int:
                         help="records this server's process id so reload.py can find it (default: ./alchemy.pid)")
     parser.add_argument("--blocklist-file", metavar="FILE",
                         help="extra blocked words for usernames, game names and recipe names (one per line; see blocklist.txt)")
+    parser.add_argument("--icons-file", default=str(BASE_DIR / "icons.json"),
+                        help="icon designs and proposals from the icon studio (default: ./icons.json)")
+    parser.add_argument("--icon-files-dir", default=str(BASE_DIR / "icon_files"),
+                        help="the icon studio's PNGs: designs, proposals and replaced pictures (default: ./icon_files)")
     parser.add_argument("--patches-dir", default=str(BASE_DIR / "patches"),
                         help="where the design patches are (default: ./patches; see patches.py)")
     parser.add_argument("--patches-state-file", default=str(BASE_DIR / "patches_state.json"),
@@ -1674,6 +1760,7 @@ def main() -> int:
         return 1
     server.reports = ReportStore(args.reports_file)
     server.patches = PatchStore(args.patches_dir, args.patches_state_file)
+    server.icons = IconStore(args.icons_file, args.icon_files_dir)
     scheme = "http"
     if bool(args.tls_cert) != bool(args.tls_key):
         print("--tls-cert and --tls-key must be given together", file=sys.stderr)

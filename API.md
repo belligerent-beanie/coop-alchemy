@@ -70,7 +70,7 @@ this file in the same commit (and add a line to the [change log](#change-log)).
 | `POST /verify-email` | none | `{"token"}` → `{"username"}`: confirms the email address the link was sent to. `400` if the token is wrong, used or older than 24 hours. |
 | `POST /resend-verification` | none | `{"email"}` → `{"ok": true}`, always the same answer whether or not such an account exists. `404` ("email verification is not switched on") when the server does not use email verification. |
 | `POST /account/change-password` | session | `{"current", "new"}` → `{"session"}`. Checks the current password (`403` if it is wrong, never `401`, which only ever means "no valid login"; wrong ones count toward the lockout and the login limit), then sets the new one and ends every other login of the account; the returned session replaces the caller's. Also clears a temporary-password flag. `400` for a weak new password. |
-| `POST /account/delete` | session | `{"password"}` → `{"deleted": {"saves_deleted", "saves_kept_anonymised", "drafts", "daily_entries", "invite_codes", "reports"}}`. Deletes the caller's account and what it left behind: drafts, daily scores, saved games nobody else played, and the name in shared saved games (replaced by "deleted player"). Cannot be undone. `403` if the password is wrong. |
+| `POST /account/delete` | session | `{"password"}` → `{"deleted": {"saves_deleted", "saves_kept_anonymised", "drafts", "daily_entries", "invite_codes", "reports", "solo", "profile", "icon_designs"}}`. Deletes the caller's account and what it left behind: drafts, daily scores, saved games nobody else played, and the name in shared saved games (replaced by "deleted player"). Cannot be undone. `403` if the password is wrong. |
 
 ## Games
 
@@ -180,6 +180,15 @@ UI changes that can be switched off again (see `patches.py` and the README's *De
 | Endpoint | Auth | Description |
 |---|---|---|
 | `GET /icons/elements` | session + admin or designer | `{"elements": [{"id", "label", "emoji", "file", "pic"?}]}`: every element, found or not, with the file name its picture has in `static/elements/` and its current picture's address. For the icon studio. `403` for anyone else. |
+| `GET /icons/mine` | session + admin or designer | `{"designs": [{"element", "status", "updated", "reply", "changed", "png"}]}`: the caller's icon designs, newest first. `status` is `draft`, `waiting`, `approved`, `rejected` or `undone`; `changed` is true when a waiting design was edited after it was proposed. |
+| `GET /icons/design` | session + admin or designer | `?element=<id>` → `{"design": {…, "doc"}}`: the caller's saved design for the element, with the studio's description of it. `404` if there is none. |
+| `GET /icons/file/<name>.png` | session + admin or designer | A stored icon PNG: a design (`d-…`), a proposal (`p-…`) or a picture an approval replaced (`b-…`). `404` for anything else. |
+| `POST /icons/save` | session + admin or designer | `{"element", "doc", "png"}` → `{"design"}`. `png` is a 128 × 128 PNG data URL; `doc` has 1 to 24 layers of shapes or pixels (each pixel layer a 128 × 128 PNG data URL). This route alone takes bodies up to 800 kB. Saving a design that is approved, rejected or undone makes it a draft again. `400` for a bad picture or design, `404` for an unknown element, `409` beyond 300 designs. |
+| `POST /icons/propose` | session + admin or designer | `{"element", "note"?}` → `{"design"}`: sends the saved design to the administrators, replacing the caller's waiting proposal for that element. `404` if nothing is saved, `409` beyond 40 waiting. |
+| `POST /icons/delete` | session + admin or designer | `{"element"}` → `{"deleted"}`: throws the caller's design away (proposals already sent stay). |
+| `GET /icons/queue` | session + admin | `{"waiting": [{"id", "author", "element", "note", "created", "png", "current"}], "recent": [{…, "status", "reply", "handled_by", "handled_at", "replaced", "can_undo"}]}`: waiting icon proposals with the element's current picture address, and the 30 latest handled ones. |
+| `POST /icons/handle` | session + admin | `{"id", "action", "reply"?}` → approve: `{"installed"}`, the PNG goes into the pictures folder at once (as the element's current file, or `<id>.png`), keeping the picture it replaces; reject: `{}`. The designer sees the status and reply. `409` if already handled. |
+| `POST /icons/undo` | session + admin | `{"id"}` → `{"restored"}`: takes back the latest approval of an element (the old picture returns, or the picture goes if there was none). `409` if a newer icon for the element was approved since, or the picture was changed by hand. |
 | `GET /patches.css` | none | The patches that apply to the caller, as one stylesheet: those switched on, plus those in preview when the session is an administrator's or a designer's. Linked from every page's `<head>`; `Cache-Control: no-store`. |
 | `GET /patches/text` | none | `{"changes": [{"page", "selector", "text", "patch"}]}`: the same patches' text changes (`page` is `*` for every page). `look.js` applies them. |
 | `GET /patches/list` | session + admin or designer | `{"patches": [{"name", "title", "state", "text_changes", "problem"}]}`; `problem` is non-empty when a patch's text file cannot be read. `403` for anyone else. |
@@ -221,6 +230,7 @@ checks that every option the server accepts appears in the README.
 
 Newest first. Add a line whenever an endpoint, event, status code or option is added, changed or removed.
 
+- **2026-11 (icon proposals)**: `GET /icons/mine`, `GET /icons/design`, `GET /icons/file/<name>.png`, `POST /icons/save`, `/icons/propose`, `/icons/delete`, `GET /icons/queue`, `POST /icons/handle`, `/icons/undo`; options `--icons-file` and `--icon-files-dir`; `icon_designs` in the account-deletion summary; a picture's address changes when its file is replaced.
 - **2026-11 (icon studio)**: `GET /icons`, `GET /icons/elements`.
 - **2026-11 (design patches)**: `GET /patches.css`, `GET /patches/text`, `GET /patches/list`, `POST /patches/set`; options `--patches-dir` and `--patches-state-file`.
 - **2026-11 (notes)**: journal entries have `note`.

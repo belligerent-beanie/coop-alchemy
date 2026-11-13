@@ -81,3 +81,39 @@ body.icons-page { height: auto; min-height: 100%; }
 
 .ic-dialog { max-width: 420px; }
 .ic-dialog img { display: block; margin: 0 auto; background: #f4f1e8; border-radius: 10px; }
+
+/* ---- step 2: where the design is on its way to the game ---- */
+.ic-status { font-size: 0.8rem; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); max-width: 46ch;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ic-status.waiting { border-color: #d9a400; color: #d9a400; }
+.ic-status.approved { border-color: #27ae60; color: #27ae60; }
+.ic-status.rejected, .ic-status.undone { border-color: #c0392b; color: #c0392b; }
+.ic-badge.waiting { border-color: #d9a400; color: #d9a400; }
+.ic-badge.approved { border-color: #27ae60; color: #27ae60; }
+.ic-badge.rejected, .ic-badge.undone { border-color: #c0392b; color: #c0392b; }
+.ic-dialog textarea { width: 100%; box-sizing: border-box; }
+.ic-dialog canvas { display: block; margin: 0 auto; background: #f4f1e8; border-radius: 10px; }
+
+/* ---- the review page's icon section (admin.html) ---- */
+.ir-list { display: grid; gap: 16px; }
+.ir-card { border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; gap: 10px; }
+.ir-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.ir-head strong { font-size: 1.05rem; }
+.ir-compare { display: flex; flex-wrap: wrap; gap: 24px; }
+.ir-side { display: grid; gap: 6px; justify-items: start; }
+.ir-side h3 { margin: 0; font-size: 0.85rem; color: var(--muted); font-weight: 600; }
+.ir-sizes { display: flex; gap: 10px; align-items: flex-end; }
+.ir-full { width: 128px; height: 128px; border: 1px solid var(--line); border-radius: 4px;
+  background: repeating-conic-gradient(#d8d8d8 0% 25%, #ffffff 0% 50%) 0 0 / 16px 16px; }
+.ir-list60 { width: 60px; height: 60px; border-radius: 10px; background: #f4f1e8; object-fit: contain; }
+.ir-tile { display: flex; align-items: center; padding: 4px 8px; border-radius: 999px; }
+.ir-tile img { width: 28px; height: 28px; }
+.ir-tile.light { background: #ffffff; border: 1px solid #d9d6cd; }
+.ir-tile.dark { background: #2b2f38; border: 1px solid #333843; }
+.ir-tile.dark img { background: #f4f1e8; border-radius: 6px; padding: 2px; }
+.ir-none { width: 128px; height: 128px; display: grid; place-items: center; border: 1px dashed var(--line); border-radius: 4px; color: var(--muted); font-size: 0.85rem; text-align: center; }
+.ir-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ir-actions input { flex: 1; min-width: 200px; }
+.ir-recent { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ir-recent li { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ir-recent img { width: 32px; height: 32px; background: #f4f1e8; border-radius: 6px; }

@@ -34,6 +34,7 @@ from pathlib import Path
 from accounts import AccountStore
 from daily import DailyStore
 from drafts import DraftStore
+from iconstore import IconStore
 from erasure import erase_account
 from invites import InviteStore
 from reports import ReportStore
@@ -98,6 +99,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--daily-file", default=str(home / "daily.json"))
     parser.add_argument("--solo-file", default=str(home / "solo.json"))
     parser.add_argument("--profile-file", default=str(home / "profiles.json"))
+    parser.add_argument("--icons-file", default=str(home / "icons.json"))
+    parser.add_argument("--icon-files-dir", default=str(home / "icon_files"))
     parser.add_argument("--reports-file", default=str(home / "reports.json"))
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("list")
@@ -181,7 +184,8 @@ def main(argv: list[str]) -> int:
             summary = erase_account(args.username, accounts=store, saves=saves, drafts=DraftStore(args.drafts_file),
                                     daily=DailyStore(args.daily_file, None),  # type: ignore[arg-type]
                                     invites=InviteStore(args.invites_file), reports=ReportStore(args.reports_file),
-                                    solo=SoloStore(args.solo_file), profiles=ProfileStore(args.profile_file))
+                                    solo=SoloStore(args.solo_file), profiles=ProfileStore(args.profile_file),
+                                    icons=IconStore(args.icons_file, args.icon_files_dir))
             print(f"Deleted {args.username!r}: {summary.saves_deleted} saved game(s) deleted, "
                   f"{summary.saves_kept_anonymised} kept for the others, {summary.drafts} draft recipe(s), "
                   f"{summary.daily_entries} daily-challenge entries.")

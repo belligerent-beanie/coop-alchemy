@@ -38,3 +38,8 @@ test-output.log
 # Which design patches are on (patches.py): per-server state, not code
 patches_state.json
 patches_state.json.tmp
+
+# Icon studio: designs, proposals and the pictures approvals replaced (private, like accounts.json)
+icons.json
+icons.json.tmp
+icon_files/

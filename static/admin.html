@@ -6,6 +6,7 @@
   <title>Review proposals · Co-op Alchemy</title>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/euler.css">
+  <link rel="stylesheet" href="/static/icons.css">
   <link rel="stylesheet" href="/patches.css">
   <script src="/static/look.js"></script>
   <script src="/static/sparkle.js" defer></script>
@@ -57,9 +58,23 @@
       <button type="button" id="copy">Copy snippet</button>
       <pre id="snippet"></pre>
     </details>
+
+    <section id="icon-review">
+      <h2>Icon proposals <span id="ir-count" class="pill" hidden></span></h2>
+      <p class="who">Designers propose icons from the Icon studio. <strong>Approve</strong> puts the icon in the game straight away
+        (players see it within seconds); the picture it replaces is kept, so the latest approval of an element can be undone.</p>
+      <p id="ir-msg" class="error" role="alert"></p>
+      <div id="ir-list" class="ir-list"></div>
+      <p id="ir-empty" class="who" hidden>No icons are waiting.</p>
+      <details id="ir-recent-box">
+        <summary>Recently handled icons</summary>
+        <ul id="ir-recent" class="ir-recent"></ul>
+      </details>
+    </section>
   </main>
   <script src="/static/auth.js"></script>
   <script src="/static/pictures.js"></script>
   <script src="/static/admin.js"></script>
+  <script src="/static/admin-icons.js"></script>
 </body>
 </html>

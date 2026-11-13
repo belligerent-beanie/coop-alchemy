@@ -351,6 +351,8 @@ python3 server.py [--host 0.0.0.0] [--port 8000]
 | `--max-games-per-account` | `1` | How many running games one account may have started at once (`0` for no limit). |
 | `--blocklist-file` | none | Extra blocked words for usernames, game names and recipe names, one per line (the built-in list is `blocklist.txt`). |
 | `--reports-file` | `reports.json` next to `server.py` | Where player reports wait for the administrators, for 14 days at most. |
+| `--icons-file` | `icons.json` next to `server.py` | Icon studio designs and proposals (see [Icon studio](#icon-studio)). |
+| `--icon-files-dir` | `icon_files/` next to `server.py` | The icon studio's PNGs: designs, proposals and the pictures approvals replaced. |
 | `--patches-dir` | `patches/` next to `server.py` | Where the design patches are (see [Design patches](#design-patches)). |
 | `--patches-state-file` | `patches_state.json` next to `server.py` | Which design patches are on, in preview or off. |
 | `--bots` | `off` | Companions: computer-controlled players that keep a lone player company in a public game (below). |
@@ -549,6 +551,7 @@ below, more:
 | Saved games | `saves/<game>.json` | One file each; deleted after 3 days. |
 | Draft recipes, promotion proposals | `drafts.json` | Deleted with the account's other data by `accounts_admin.py delete` (proposals stay on record). |
 | Daily challenge targets, attempts and scores | `daily.json` | The last 400 days. A damaged file is reported, never overwritten. |
+| Icon designs and proposals | `icons.json`, `icon_files/` | Deleting an account deletes its designs; proposals stay on record. |
 | Which design patches are on | `patches_state.json` | `off`, `preview` or `on` per patch; the patches themselves are files in `patches/`. |
 | Running games | memory only | Lost if the server stops; `reload.py` carries them across a restart via `reload_snapshot.json`. |
 
@@ -591,8 +594,16 @@ element, those without an icon first, and draws on the same 128 × 128 canvas as
 Any colour and opacity can be used; the house navy (`#2f3a4a`) and recent colours are offered as swatches. Previews show the icon as players
 see it: full size, in the element list's 60-pixel slot, and on a 28-pixel tile in the light and the dark theme. An element that already has a
 picture can be **edited** (the picture becomes a pixel layer) or **traced over** (a faint picture under the canvas that is not part of the icon).
-Every change is saved in the browser, per element, with undo and redo. **Download PNG** gives the 128 × 128 file, named for
-`static/elements/`. (Saving designs on the server and proposing them to the administrators comes next.)
+Every change is saved on the server under the designer's account (and in the browser as a fallback), with undo and redo, so
+work carries over between devices. **Download PNG** gives the 128 × 128 file, named for `static/elements/`.
+
+**Propose…** sends the icon to the administrators with an optional note. They review it on the *Review proposals* page, next to the
+picture it would replace, at the sizes players see. **Approve** puts it in the game straight away: the PNG goes into the pictures
+folder, and because a picture's address changes when its file does, players get the new one instead of a cached copy (pages already
+open keep working). The picture it replaced is kept, so the latest approval of an element can be **undone**. The designer sees
+*Waiting*, *Approved* or *Not accepted* (with the reply) in the studio; editing and proposing again replaces a waiting proposal. The
+designer's name is kept with the proposal for the record and is not shown to players. Designs and proposals are kept in `icons.json`
+and `icon_files/` (private, like `accounts.json`).
 
 ## Design patches
 

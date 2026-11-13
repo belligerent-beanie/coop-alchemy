@@ -15,9 +15,11 @@
     <a class="back" href="/" title="Back to the home page">←</a>
     <h1>Icon studio</h1>
     <span id="ic-current" class="ic-current"></span>
+    <span id="ic-status" class="ic-status" hidden></span>
     <span id="ic-saved" class="muted" role="status" aria-live="polite"></span>
     <span class="ic-spacer"></span>
     <button type="button" id="ic-download" disabled>Download PNG</button>
+    <button type="button" id="ic-propose" class="primary" disabled title="Send this icon to the administrators">Propose…</button>
   </header>
   <p id="ic-error" class="error" role="alert"></p>
 
@@ -138,6 +140,21 @@
         <button value="edit">Edit it (as pixels)</button>
         <button value="trace">Trace over it</button>
         <button value="blank">Start blank</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="ic-propose-dialog" class="ic-dialog">
+    <form method="dialog">
+      <h2>Propose this icon</h2>
+      <p><canvas id="ic-propose-preview" width="96" height="96"></canvas></p>
+      <p class="muted">The administrators see it next to the current picture. If they approve it, it goes into the game
+        straight away (and they can undo that). Your name is kept with it but is not shown to players.</p>
+      <label for="ic-note">Note for the administrators (optional)</label>
+      <textarea id="ic-note" rows="3" maxlength="300"></textarea>
+      <div class="ic-buttons">
+        <button value="send" class="primary">Send</button>
+        <button value="cancel">Cancel</button>
       </div>
     </form>
   </dialog>

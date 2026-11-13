@@ -2,9 +2,9 @@
 // The icon studio (/icons), for designers and administrators: draw an element's icon on the 128 × 128 canvas the game uses,
 // with shape layers (rectangles, ellipses, lines, polygons, stars and freehand curves, each still editable) and pixel layers
 // (brush, eraser, fill), in any colours. A cut-out shape cuts a hole in its own layer. Every change is saved in this browser
-// (localStorage, one design per element) and can be undone; "Download PNG" gives the 128 × 128 file the game reads,
-// named for static/elements/. An element that already has a picture can be edited (as pixels) or traced over.
-// Step 2 will save designs on the server and send them to the administrators as proposals.
+// on the server (iconstore.py, under the designer's account) and in this browser as a fallback, and can be undone.
+// "Propose…" sends the icon to the administrators; once they approve it, it is in the game (see the review page).
+// "Download PNG" gives the 128 × 128 file. An element that already has a picture can be edited (as pixels) or traced over.
 
 const $ = (id) => document.getElementById(id);
 const SIZE = 128;                 // the canvas every element picture uses
@@ -404,15 +404,89 @@ function commit() {
   saveTimer = setTimeout(() => save(snapshot), 300);
   render();
 }
+/** Save in this browser at once (the fallback), then on the server shortly after (where the designer's work lives). */
 function save(snapshot) {
   if (!current) return;
   try {
-    localStorage.setItem(STORE_PREFIX + current.id, snapshot);
-    $("ic-saved").textContent = "Saved in this browser";
-    markDraft(current.id);
-  } catch (_) {
-    $("ic-saved").textContent = "Could not save (this browser's storage is full): download the PNG to keep it";
-  }
+    localStorage.setItem(STORE_PREFIX + current.id, JSON.stringify({ savedAt: Date.now(), doc: JSON.parse(snapshot) }));
+  } catch (_) { /* full or blocked: the server copy still counts */ }
+  queueServerSave();
+}
+function readLocal(id) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(STORE_PREFIX + id) || "null");
+    if (!raw) return null;
+    return raw.doc ? raw : { savedAt: 0, doc: raw };   // a design saved before the server kept them
+  } catch (_) { return null; }
+}
+
+// ---------- the server copy ----------
+let designs = new Map();    // element id -> {status, updated, reply, changed, png}: this account's designs on the server
+let serverTimer = 0;
+let serverBusy = null;      // the save under way, if any
+let serverAgain = false;
+function queueServerSave() {
+  clearTimeout(serverTimer);
+  serverTimer = setTimeout(saveToServer, 1200);
+}
+/** Send the design on the stage to the server (one at a time; a change made meanwhile is sent right after). */
+async function saveToServer() {
+  clearTimeout(serverTimer);
+  serverTimer = 0;
+  if (!current || !doc) return;
+  if (serverBusy) { serverAgain = true; return serverBusy; }
+  const el = current;
+  $("ic-saved").textContent = "Saving…";
+  serverBusy = (async () => {
+    try {
+      render();
+      const body = { element: el.id, doc: JSON.parse(serialize()), png: out.toDataURL("image/png") };
+      const { design } = await Auth.fetch("/icons/save", body);
+      designs.set(el.id, design);
+      if (current === el) { $("ic-saved").textContent = "Saved"; showStatus(); }
+      refreshBadges(el.id);
+      return true;
+    } catch (err) {
+      if (current === el) $("ic-saved").textContent = `Not saved on the server (${err.message}): kept in this browser, trying again soon`;
+      serverTimer = setTimeout(saveToServer, 15000);
+      return false;
+    } finally {
+      serverBusy = null;
+      if (serverAgain) { serverAgain = false; queueServerSave(); }
+    }
+  })();
+  return serverBusy;
+}
+/** Make sure nothing is waiting to be sent (before switching elements or proposing). */
+async function flushServerSave() {
+  if (serverBusy) await serverBusy;
+  if (serverTimer) return saveToServer();
+  return true;
+}
+async function loadMine() {
+  try {
+    designs = new Map((await Auth.fetch("/icons/mine")).designs.map((d) => [d.element, d]));
+    renderElementList();
+    showStatus();
+  } catch (_) { /* the badges wait for the next try */ }
+}
+const STATUS_TEXT = {
+  draft: () => "Draft · not proposed yet",
+  waiting: (d) => (d.changed ? "Waiting for an admin · edited since: propose again to send this version" : "Waiting for an admin"),
+  approved: (d) => "Approved: it is in the game" + (d.reply ? ` · “${d.reply}”` : ""),
+  rejected: (d) => "Not accepted" + (d.reply ? `: “${d.reply}”` : ""),
+  undone: () => "Approved, then taken back by an admin",
+};
+const BADGE_TEXT = { waiting: "waiting", approved: "approved", rejected: "not accepted", undone: "undone" };
+function showStatus() {
+  const d = current && designs.get(current.id);
+  const chip = $("ic-status");
+  chip.hidden = !d;
+  if (!d) return;
+  chip.className = "ic-status " + d.status;
+  chip.textContent = STATUS_TEXT[d.status] ? STATUS_TEXT[d.status](d) : d.status;
+  chip.title = chip.textContent;
+  $("ic-propose").textContent = d.status === "waiting" ? "Propose again…" : "Propose…";
 }
 function syncUndoButtons() {
   $("ic-undo").disabled = undoStack.length <= 1;
@@ -469,6 +543,7 @@ async function loadDoc(data) {
 
 // ---------- choosing an element ----------
 async function openElement(el) {
+  if (current && current.id !== el.id) await flushServerSave();   // the last change to the previous icon is sent first
   current = el;
   showError("");
   $("ic-current").textContent = `${el.emoji || ""} ${el.label}`.trim();
@@ -480,11 +555,21 @@ async function openElement(el) {
   try { localStorage.setItem(STORE_PREFIX + "last", el.id); } catch (_) { /* not remembered */ }
   renderElementList();
   undoStack = []; redoStack = [];
-  let saved = null;
-  try { saved = localStorage.getItem(STORE_PREFIX + el.id); } catch (_) { saved = null; }
-  if (saved) {
-    try { await loadDoc(JSON.parse(saved)); } catch (_) { saved = null; }
+  $("ic-propose").disabled = false;
+  $("ic-saved").textContent = "";
+  let fromServer = null;
+  try { fromServer = (await Auth.fetch(`/icons/design?element=${encodeURIComponent(el.id)}`)).design; }
+  catch (err) { if (err.status !== 404) showError(`The saved design could not be loaded (${err.message}); using this browser's copy.`); }
+  if (fromServer) designs.set(el.id, fromServer);
+  const local = readLocal(el.id);
+  let saved = false;
+  if (fromServer && (!local || fromServer.updated * 1000 >= local.savedAt)) {
+    try { await loadDoc(fromServer.doc); saved = true; } catch (_) { saved = false; }
+  } else if (local) {   // only this browser has it (or a newer copy): use it, and put it on the server
+    try { await loadDoc(local.doc); saved = true; queueServerSave(); } catch (_) { saved = false; }
   }
+  showStatus();
+  if (current !== el) return;   // another element was chosen while this one loaded
   if (!saved) {
     let start = "blank";
     if (el.pic) start = await askHowToStart(el);
@@ -514,11 +599,19 @@ function askHowToStart(el) {
   });
 }
 function hasDraft(id) {
+  if (designs.has(id)) return true;
   try { return localStorage.getItem(STORE_PREFIX + id) !== null; } catch (_) { return false; }
 }
-function markDraft(id) {
+function statusBadges(id) {
+  const d = designs.get(id);
+  if (d && BADGE_TEXT[d.status]) return [badge(BADGE_TEXT[d.status], d.status)];
+  return hasDraft(id) ? [badge("draft", "ic-draft")] : [];
+}
+function refreshBadges(id) {
   const button = document.querySelector(`#ic-element-list button[data-id="${CSS.escape(id)}"]`);
-  if (button && !button.querySelector(".ic-draft")) button.append(badge("draft", "ic-draft"));
+  if (!button) return;
+  for (const old of button.querySelectorAll(".ic-draft, .waiting, .approved, .rejected, .undone")) old.remove();
+  button.append(...statusBadges(id));
 }
 function badge(text, extra = "") {
   const b = document.createElement("span");
@@ -552,7 +645,7 @@ function renderElementList() {
     label.textContent = e.label;
     b.append(thumb, label);
     if (!e.pic) b.append(badge("no icon"));
-    if (hasDraft(e.id)) b.append(badge("draft", "ic-draft"));
+    b.append(...statusBadges(e.id));
     b.addEventListener("click", () => openElement(e));
     li.append(b);
     list.append(li);
@@ -797,6 +890,34 @@ function deleteShape() {
   commit(); renderLayers();
 }
 
+// ---------- proposing ----------
+async function propose() {
+  if (!current) return;
+  const el = current;
+  const dialog = $("ic-propose-dialog");
+  render();
+  const preview = $("ic-propose-preview").getContext("2d");
+  preview.clearRect(0, 0, 96, 96);
+  preview.drawImage(out, 0, 0, 96, 96);
+  $("ic-note").value = "";
+  dialog.returnValue = "";
+  const answer = await new Promise((resolve) => {
+    dialog.addEventListener("close", () => resolve(dialog.returnValue), { once: true });
+    dialog.showModal();
+  });
+  if (answer !== "send") return;
+  showError("");
+  const ok = await flushServerSave();
+  if (!ok && !designs.has(el.id)) { showError("The icon could not be saved on the server, so it cannot be proposed yet."); return; }
+  try {
+    const { design } = await Auth.fetch("/icons/propose", { element: el.id, note: $("ic-note").value });
+    designs.set(el.id, design);
+    showStatus();
+    refreshBadges(el.id);
+    $("ic-saved").textContent = "Sent to the administrators";
+  } catch (err) { showError(err.message); }
+}
+
 // ---------- download ----------
 function download() {
   if (!current) return;
@@ -833,6 +954,7 @@ $("ic-grid").addEventListener("click", () => {
 $("ic-undo").addEventListener("click", undo);
 $("ic-redo").addEventListener("click", redo);
 $("ic-download").addEventListener("click", download);
+$("ic-propose").addEventListener("click", propose);
 $("ic-add-shapes").addEventListener("click", () => { addLayer("shapes"); commit(); renderLayers(); });
 $("ic-add-pixels").addEventListener("click", () => { addLayer("pixels"); commit(); renderLayers(); });
 $("ic-ref-opacity").addEventListener("input", () => { doc.reference.opacity = +$("ic-ref-opacity").value; render(); });
@@ -884,7 +1006,7 @@ $("ic-missing-only").addEventListener("change", renderElementList);
 
 const KEYS = { v: "select", r: "rect", u: "rounded", o: "ellipse", l: "line", y: "polygon", s: "star", p: "pen", b: "brush", e: "eraser", f: "bucket", i: "picker" };
 document.addEventListener("keydown", (event) => {
-  if (!doc || $("ic-start").open) return;
+  if (!doc || $("ic-start").open || $("ic-propose-dialog").open) return;
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName) && event.target.type !== "range" && event.target.type !== "checkbox") return;
   const mod = event.metaKey || event.ctrlKey;
   const key = event.key.toLowerCase();
@@ -919,7 +1041,9 @@ async function start() {
   renderSwatches();
   syncColourLabels();
   setTool("rect");
+  await loadMine();
   renderElementList();
+  Net.poll(loadMine, 30000);   // an administrator's decision shows without a reload
   let last = null;
   try { last = localStorage.getItem(STORE_PREFIX + "last"); } catch (_) { last = null; }
   const el = last && elements.find((e) => e.id === last);

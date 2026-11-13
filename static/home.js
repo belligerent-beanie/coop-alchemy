@@ -511,9 +511,10 @@ async function loadAdmin() {
     if (!me.admin) return;
     $("ops-link").hidden = false;
     $("admin-link").hidden = false;
-    const data = await Auth.fetch("/admin/queue");
-    $("admin-pending").textContent = data.proposals.length;
-    $("admin-pending").hidden = data.proposals.length === 0;
+    const [data, icons] = await Promise.all([Auth.fetch("/admin/queue"), Auth.fetch("/icons/queue").catch(() => ({ waiting: [] }))]);
+    const waiting = data.proposals.length + icons.waiting.length;   // recipes and icons
+    $("admin-pending").textContent = waiting;
+    $("admin-pending").hidden = waiting === 0;
   } catch (_) { /* the link just stays hidden */ }
 }
 loadAdmin();
