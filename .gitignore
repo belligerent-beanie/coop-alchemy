@@ -50,3 +50,4 @@ icon_files/
 # the Chrome extension build (extension/build.mjs) and its test builds
 extension/dist/
 extension/dist-test/
+extension/*.zip

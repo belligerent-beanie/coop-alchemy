@@ -106,14 +106,21 @@ try {
   eq("the edits are in chrome.storage (one page)", await editsInStorage(), 1);
   eq("the page's own localStorage holds nothing of the picker's", await page.evaluate(() => Object.keys(localStorage).filter((k) => /dz|designer/i.test(k))), []);
 
-  // ---- reload: the page is plain again until the picker is turned back on, and then the edits come back
+  // ---- reload: with all-sites access (this test build has it) the saved edits come back by themselves, and the picker stays off
   await page.reload();
   await page.waitForLoadState("load");
-  check("after a reload the page is as the site made it (the extension only acts when asked)", (await css("#go", "backgroundColor")) === "rgb(51, 102, 204)");
+  await page.waitForFunction(() => getComputedStyle(document.getElementById("go")).backgroundColor === "rgb(34, 34, 34)", null, { timeout: 10000 }).catch(() => {});
+  eq("after a reload the saved edits come back by themselves", await css("#go", "backgroundColor"), "rgb(34, 34, 34)");
+  eq("and the picker is there but off", await page.locator(".dz-toggle").innerText(), "Design");
   await activate();
-  await page.locator(".dz-toggle").waitFor({ timeout: 8000 });
-  await page.waitForFunction(() => getComputedStyle(document.getElementById("go")).backgroundColor === "rgb(34, 34, 34)", null, { timeout: 8000 }).catch(() => {});
-  eq("turning it on again puts the saved edits back", await css("#go", "backgroundColor"), "rgb(34, 34, 34)");
+  eq("the toolbar button then turns it on, with the edits still in place", [await page.locator(".dz-toggle").innerText(), await css("#go", "backgroundColor")], ["Design: on", "rgb(34, 34, 34)"]);
+
+  // ---- a page with no saved edits is left completely alone
+  const other = await context.newPage();
+  await other.goto(url + "another-page");
+  await other.waitForTimeout(1500);
+  eq("a page with no saved edits gets no picker at all", await other.evaluate(() => !!document.getElementById("design-picker-extension-root")), false);
+  await other.close();
 
   // ---- the toolbar toggle turns it off and on without losing anything
   await activate();
@@ -126,6 +133,32 @@ try {
   await page.locator(".dz-dock .dz-head button:text-matches('Changes')").click();
   const exported = await page.locator(".dz-preview").innerText();
   check("the Markdown export names this page and the change", exported.includes(url) && exported.includes("background-color") && exported.includes("#222222"), exported.slice(0, 300));
+
+  // ---- multi-select: Shift-click adds, and a tool then changes all of them (inside the shadow root, on a foreign page)
+  await page.keyboard.press("Escape"); await page.keyboard.press("Escape"); await page.keyboard.press("Escape");
+  await page.locator(".title").click();
+  await page.keyboard.down("Shift");
+  await page.locator(".lede").click();
+  await page.locator(".muted").click();
+  await page.keyboard.up("Shift");
+  eq("Shift-click built a selection of three, drawn as three outlines", [await page.locator(".dz-head strong").first().innerText(), await page.locator(".dz-picked").count()], ["3 elements", 3]);
+  await page.keyboard.press("Enter");
+  await page.locator(".dz-dock button:text-is('Font')").click();
+  await page.locator("[aria-label='Font size in pixels']").click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("21");
+  eq("one Font edit changed all three elements", [await css(".title", "fontSize"), await css(".lede", "fontSize"), await css(".muted", "fontSize")], ["21px", "21px", "21px"]);
+  await page.evaluate(() => { const a = document.querySelector("#design-picker-extension-root").shadowRoot.activeElement; if (a) a.blur(); });
+  await page.keyboard.press("Control+z");
+  eq("and one undo took it off all three", [await css(".title", "fontSize"), await css(".lede", "fontSize"), await css(".muted", "fontSize")], ["32px", "16px", "16px"]);
+
+  // ---- the hover inspector, with APCA contrast, and a name for what a screen reader would announce
+  await page.keyboard.press("Escape"); await page.keyboard.press("Escape"); await page.keyboard.press("Escape");
+  await page.keyboard.press("i");
+  await page.locator(".muted").hover();
+  const tip = await page.locator(".dz-tip").innerText();
+  check("the inspector says what is under the pointer, with WCAG and APCA contrast", /span\.muted/.test(tip) && /WCAG AA/.test(tip) && /APCA Lc -?\d+/.test(tip), tip);
+  await page.keyboard.press("i");
 
   // ---- a screen-size preview opens as a real window of that size and shows the edits, without the picker
   await page.locator(".dz-dock .dz-head button:text-is('Preview')").click();

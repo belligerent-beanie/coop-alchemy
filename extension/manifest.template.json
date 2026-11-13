@@ -2,14 +2,42 @@
   "manifest_version": 3,
   "name": "Design Picker",
   "version": "__VERSION__",
-  "description": "Select, restyle and measure any element on any page; check contrast; preview other screen sizes; hand the changes to a developer or Claude as Markdown.",
-  "icons": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" },
-  "action": { "default_title": "Design Picker (Alt+Shift+P)", "default_icon": { "16": "icons/16.png", "48": "icons/48.png" } },
-  "background": { "service_worker": "background.js" },
-  "permissions": ["activeTab", "scripting", "storage"],
-  "optional_host_permissions": ["<all_urls>"],
-  "commands": {
-    "_execute_action": { "suggested_key": { "default": "Alt+Shift+P" }, "description": "Turn the design picker on or off" }
+  "description": "Select, restyle and measure any element on any page, check contrast, and hand the changes to a developer or Claude as Markdown.",
+  "minimum_chrome_version": "114",
+  "homepage_url": "https://github.com/belligerent-beanie/coop-alchemy/tree/main/extension",
+  "icons": {
+    "16": "icons/16.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
   },
-  "options_ui": { "page": "options.html", "open_in_tab": true }
+  "action": {
+    "default_title": "Design Picker (Alt+Shift+P)",
+    "default_icon": {
+      "16": "icons/16.png",
+      "48": "icons/48.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "optional_host_permissions": [
+    "<all_urls>"
+  ],
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+P"
+      },
+      "description": "Turn the design picker on or off"
+    }
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  }
 }

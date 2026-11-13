@@ -1,6 +1,7 @@
 // The extension's service worker. The toolbar button (or Alt+Shift+P) injects the picker into the current tab and toggles it. With only
 // "activeTab", that is all it may touch: the tab the designer just asked about, until they leave it. Screen-size previews open a second
-// window and need the optional "all sites" permission to put the picker's edits on it (see options.html).
+// window and need the optional "all sites" permission to put the picker's edits on it, and the same permission is what lets saved edits come
+// back by themselves after a reload (see options.html).
 
 const FILES = ["host.js", "designer-css.js", "designer.js"];   // host first: it sets window.__designerHost for the picker
 const ALL_SITES = { origins: ["<all_urls>"] };
@@ -25,6 +26,22 @@ async function toggle(tab) {
 }
 chrome.action.onClicked.addListener(toggle);
 
+// ---- putting saved edits back after a reload, by itself (only while the designer has allowed all sites)
+// Without that permission the extension cannot act on a page until asked, so after a reload the picker has to be turned on again, which
+// restores the edits. With it, a small script (restore.js) runs on every page, checks whether this page has saved edits and, only if it
+// does, has the worker put the picker (off) on the page.
+const RESTORER = { id: "restore", matches: ["<all_urls>"], js: ["restore.js"], runAt: "document_idle", persistAcrossSessions: true };
+async function syncRestorer() {
+  const allowed = await chrome.permissions.contains(ALL_SITES);
+  const registered = (await chrome.scripting.getRegisteredContentScripts({ ids: [RESTORER.id] })).length > 0;
+  if (allowed && !registered) await chrome.scripting.registerContentScripts([RESTORER]);
+  else if (!allowed && registered) await chrome.scripting.unregisterContentScripts({ ids: [RESTORER.id] });
+}
+chrome.runtime.onInstalled.addListener(syncRestorer);
+chrome.runtime.onStartup.addListener(syncRestorer);
+chrome.permissions.onAdded.addListener(syncRestorer);
+chrome.permissions.onRemoved.addListener(syncRestorer);
+
 // ---- screen-size previews: a real window of that size, with the same saved edits on the page
 // What is known about each preview tab lives in session storage (a service worker is stopped and restarted whenever it is idle).
 const previewTabs = {
@@ -48,6 +65,10 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (message.type === "who") {
     previewTabs.get(sender.tab ? sender.tab.id : -1).then((info) => respond({ preview: !!info }));
     return true;
+  }
+  if (message.type === "restore") {
+    if (sender.tab) inject(sender.tab.id).catch(() => { /* a page that does not allow scripts */ });
+    return false;
   }
   if (message.type === "preview") {
     openPreview(message).then(respond, (error) => respond({ error: String((error && error.message) || error) }));

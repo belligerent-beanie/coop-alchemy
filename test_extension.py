@@ -42,6 +42,8 @@ class ExtensionBuildTests(unittest.TestCase):
         named = [manifest["background"]["service_worker"], manifest["options_ui"]["page"], *manifest["icons"].values()]
         for name in named:
             self.assertTrue((self.out / name).is_file(), name)
+        self.assertLessEqual(len(manifest["description"]), 132)   # the Chrome Web Store's limit
+        self.assertTrue((self.out / "restore.js").is_file())        # registered by the worker once all sites are allowed
         for name in ("host.js", "designer-css.js", "designer.js"):   # the files the service worker injects, in this order
             self.assertTrue((self.out / name).is_file(), name)
         self.assertIn('const FILES = ["host.js", "designer-css.js", "designer.js"]', (self.out / "background.js").read_text(encoding="utf-8"))
@@ -56,6 +58,22 @@ class ExtensionBuildTests(unittest.TestCase):
         for name in ("host.js", "background.js", "designer.js", "options.js", "designer-css.js"):
             result = subprocess.run([NODE, "--check", str(self.out / name)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, f"{name}: {result.stderr}")
+
+    def test_the_zip_for_the_store_is_a_valid_archive_of_exactly_the_build(self) -> None:
+        import zipfile
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run([NODE, str(EXT / "build.mjs"), "--zip", "--out", str(Path(tmp) / "dist")], check=True, capture_output=True)
+            zips = list(EXT.glob("design-picker-*.zip"))
+            self.assertEqual(len(zips), 1)
+            try:
+                with zipfile.ZipFile(zips[0]) as archive:
+                    self.assertIsNone(archive.testzip())
+                    built = {str(p.relative_to(Path(tmp) / "dist")).replace("\\", "/") for p in (Path(tmp) / "dist").rglob("*") if p.is_file()}
+                    self.assertEqual(set(archive.namelist()), built)
+                    self.assertEqual(archive.read("designer.js"), (ROOT / "static" / "designer.js").read_bytes())
+            finally:
+                for z in zips:
+                    z.unlink()
 
     def test_the_test_build_is_the_only_one_with_host_access(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

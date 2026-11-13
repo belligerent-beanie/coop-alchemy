@@ -13,10 +13,14 @@
 </head>
 <body>
 <h1>Design Picker</h1>
-<p>The picker works on the tab you click it on, with no special permission. <strong>Screen-size previews</strong> open a second window, and
-putting your edits on it needs access to every site. That is optional: allow it here if you want previews.</p>
-<p>All sites: <span id="state">…</span></p>
-<p><button id="allow" type="button">Allow previews on all sites</button> <button id="revoke" type="button">Remove that permission</button></p>
+<p>The picker works on the tab you click it on, with no special permission. Access to every site is <strong>optional</strong>, and is what makes two
+things work:</p>
+<ul>
+  <li><strong>Edits come back by themselves after a reload.</strong> Without it, you turn the picker on again and they are restored.</li>
+  <li><strong>Screen-size previews</strong>, which open a second window and need to put your edits on it.</li>
+</ul>
+<p>All sites: <span id="state">…</span> (checks a page for saved edits; reads nothing else)</p>
+<p><button id="allow" type="button">Allow all sites</button> <button id="revoke" type="button">Remove that permission</button></p>
 <p class="small">Your edits are kept in this browser only, per site and page, and nothing is sent anywhere.</p>
 <script src="options.js"></script>
 </body>
