@@ -25,11 +25,12 @@ class FakeServer:
     """Stands in for the server process."""
     count = 0
 
-    def __init__(self) -> None:
+    def __init__(self, data_dir: Path | None = None) -> None:
         FakeServer.count += 1
         self.pid = 1000 + FakeServer.count
         self.returncode: int | None = None
         self.stopped_politely = False
+        self.data_dir = data_dir
 
     def poll(self) -> int | None:
         return self.returncode
@@ -39,6 +40,9 @@ class FakeServer:
         self.returncode = 0
 
     def wait(self, timeout: float | None = None) -> int:
+        # A polite stop is the stop file the server looks for (the only way on Windows) and, elsewhere, SIGTERM as well.
+        if self.data_dir is not None and (self.data_dir / "alchemy.stop").exists():
+            self.stopped_politely = True
         self.returncode = 0 if self.returncode is None else self.returncode
         return self.returncode
 
@@ -58,7 +62,7 @@ class SupervisorTests(unittest.TestCase):
         self.port_taken = [False]
 
         def popen(command: list[str], **kwargs: object) -> FakeServer:
-            server = FakeServer()
+            server = FakeServer(self.data)
             self.started.append(server)
             return server
 
@@ -207,6 +211,14 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(agent["ProgramArguments"], ["python3", "ops/supervise.py", "run"])
 
 
+def kill_outright(pid: int) -> None:
+    """End a process with no chance to clean up, as a crash does (Windows has no SIGKILL; taskkill /F is its equivalent)."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, check=True)
+    else:
+        os.kill(pid, signal.SIGKILL)
+
+
 class RealSupervisorTest(unittest.TestCase):
     """The real thing: a supervisor process running a real server on a scratch data folder."""
 
@@ -260,7 +272,7 @@ class RealSupervisorTest(unittest.TestCase):
         self.assertIn(game["id"], [g["id"] for g in self.get("/games", session)["games"]])
 
         # the server is killed outright (a crash): it comes back by itself
-        os.kill(second, signal.SIGKILL)
+        kill_outright(second)
         self.wait_for(lambda: (pid := self.server_pid()) and pid != second and supervise.probe(self.port))
 
         # stop: the supervisor ends cleanly, and the server with it
