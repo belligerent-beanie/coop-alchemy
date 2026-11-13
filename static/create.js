@@ -132,6 +132,8 @@ function onItemPointerUp(e) {
   if (e.pointerType === "touch" && Math.hypot(e.clientX - d.startX, e.clientY - d.startY) > 12) return; // a swipe, not a tap
   const rect = workspace.getBoundingClientRect();
   if (!d.ghost) { // a plain click or tap: drop a tile near the middle
+    if (isDoublePress(lastItemClick, d.id, e)) { lastItemClick = null; return; }   // the second click of a double click adds nothing
+    lastItemClick = { id: d.id, time: e.timeStamp, x: e.clientX, y: e.clientY };
     addTile(d.id, rect.width * (0.3 + Math.random() * 0.4), rect.height * (0.3 + Math.random() * 0.4));
     return;
   }
@@ -156,12 +158,7 @@ function addTile(elementId, x, y) {
   node.addEventListener("pointerdown", (e) => onTilePointerDown(e, tile));
   node.addEventListener("pointermove", (e) => onTilePointerMove(e, tile));
   node.addEventListener("pointerup", (e) => onTilePointerUp(e, tile));
-  node.addEventListener("pointercancel", (e) => onTilePointerUp(e, tile));
-  node.addEventListener("dblclick", () => {
-    const at = position(tile);
-    // Half a tile right and down: the copy overlaps the original by 50% along each axis.
-    addTile(tile.element, at.x + node.offsetWidth / 2, at.y + node.offsetHeight / 2);
-  });
+  node.addEventListener("pointercancel", (e) => onTilePointerUp(e, tile));   // a double press copies the tile: see onTilePointerDown
   node.addEventListener("animationend", () => node.classList.remove("pop"), { once: true });
   workspace.appendChild(node);
   tiles.set(tile.id, tile);
@@ -207,12 +204,35 @@ function setTarget(tile) {
   tile?.node.classList.add("target");
 }
 
+// ---- double press: copy a tile under the pointer, and keep holding to drag the copy away (as in the game, app.js) ----
+// The copy is made on the SECOND PRESS, not on the browser's dblclick (which only fires when that press is let go, too late to
+// start a drag). Tiles here live only in this page, so the copy exists at once and simply takes over the press.
+const DOUBLE_PRESS_MS = 450;   // the second press must come this soon after the first click ended…
+const DOUBLE_PRESS_PX = 10;    // …and this close to it
+let lastTileClick = null;      // {id, time, x, y}: the last plain click on a tile (a press let go without dragging)
+let lastItemClick = null;      // the same for the element list, where a double click must add one tile, not two
+
+function isDoublePress(last, id, e) {
+  return last !== null && last.id === id && e.timeStamp - last.time < DOUBLE_PRESS_MS
+    && Math.hypot(e.clientX - last.x, e.clientY - last.y) < DOUBLE_PRESS_PX;
+}
+
 function onTilePointerDown(e, tile) {
   if (e.button !== 0 || drag || itemDrag || busy) return;
   e.preventDefault();
+  let copied = false;
+  if (isDoublePress(lastTileClick, tile.id, e)) {
+    lastTileClick = null;
+    const rect = workspace.getBoundingClientRect();
+    const copy = addTile(tile.element, e.clientX - rect.left, e.clientY - rect.top);   // centred on the pointer
+    if (!copy) return;   // the workspace is full (addTile said so)
+    tile = copy;         // from here on the press belongs to the copy
+    copied = true;
+  }
   tile.node.setPointerCapture(e.pointerId);
   const at = position(tile);
-  drag = { tile, pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, baseX: at.x, baseY: at.y, moved: false };
+  drag = { tile, pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, baseX: at.x, baseY: at.y, moved: false,
+           copied };   // letting go of a copy is not the first click of another double press (a triple click makes one copy)
 }
 
 function onTilePointerMove(e, tile) {
@@ -237,7 +257,11 @@ function onTilePointerUp(e, tile) {
   sidebar.classList.remove("trash");
   const target = targeted;
   setTarget(null);
-  if (e.type === "pointercancel" || !d.moved) return;
+  if (e.type === "pointercancel") return;
+  if (!d.moved) {   // just a click; a second press soon copies the tile
+    if (!d.copied) lastTileClick = { id: tile.id, time: e.timeStamp, x: e.clientX, y: e.clientY };
+    return;
+  }
   if (inside(sidebar.getBoundingClientRect(), e.clientX, e.clientY)) {
     removeTile(tile);
     return;
