@@ -3,8 +3,12 @@
 .env
 __pycache__
 *.pyc
-# the Windows live-server tooling, tests, benchmarks and the AI suggestion tool are not needed to run the game
-ops
+# tests, benchmarks, the AI suggestion tool and the ops tools for a desktop live folder are not needed to run the game;
+# the supervisor (ops/supervise.py, the entry point) and the backup and summary code it uses are
+ops/deploy.py
+ops/smoke_test.py
+ops/preview.py
+ops/install_supervisor.py
 test_*.py
 bench_*.py
 aigen
@@ -25,6 +29,10 @@ solo.json
 profiles.json
 invites.json
 reports.json
+icons.json
+icon_files
+patches_state.json
+supervisor.*
 reload_snapshot.json*
 *.pem
 *.md

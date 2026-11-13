@@ -2,7 +2,7 @@
 #
 # Built and run on Docker Desktop for Windows (2026-11-07): the image builds, runs as the non-root user below, reports healthy,
 # keeps accounts and solo progress in /data across a restart, and serves element pictures. Not yet tried on the real server.
-# test_deploy_files.py also checks that every option used below exists.
+# test_deploy_files.py also checks that every option used below exists (the supervisor's, and the server's after "--").
 #
 # Data (accounts, saved games, logs, and the private recipe book and pictures: /data/recipes.json and /data/elements) lives in
 # the /data volume, never in the image. Extra server options can be added after the
@@ -18,13 +18,14 @@ USER alchemy
 VOLUME /data
 EXPOSE 8000
 
-# Healthy when the server answers its own health endpoint.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+# Healthy when the server answers its own health endpoint. (Docker only reports an unhealthy container; the supervisor below is
+# what restarts a server that crashed or stopped answering, and it saves running games when the container is stopped.)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
   CMD python -c "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4).status == 200 else 1)"
 
-ENTRYPOINT ["python", "server.py", "--host", "0.0.0.0", "--port", "8000", \
-            "--accounts-file", "/data/accounts.json", "--daily-file", "/data/daily.json", "--drafts-file", "/data/drafts.json", \
-            "--invites-file", "/data/invites.json", "--reports-file", "/data/reports.json", "--solo-file", "/data/solo.json", "--profile-file", "/data/profiles.json", "--saves-dir", "/data/saves", \
-            "--recipes", "/data/recipes.json", "--elements-dir", "/data/elements", "--snapshot-file", "/data/reload_snapshot.json", "--pid-file", "/data/alchemy.pid", \
-            "--log-file", "/data/live.log", "--log-days", "14"]
+# The supervisor (ops/supervise.py) runs the server with every data file in /data, restarts it if it crashes or hangs, and makes
+# the daily backup and summary in /data. Options after "--" go to the server; docker-compose.yml's `command:` adds more.
+ENTRYPOINT ["python", "ops/supervise.py", "run", "--live-dir", "/app", "--data-dir", "/data", "--host", "0.0.0.0", "--port", "8000", \
+            "--backups-dir", "/data/backups", "--summaries-dir", "/data/summaries", "--no-keep-awake", "--", \
+            "--recipes", "/data/recipes.json", "--elements-dir", "/data/elements"]
 CMD []

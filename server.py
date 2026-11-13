@@ -102,6 +102,7 @@ Positions are fractions (0..1) of the workspace size.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import html
 import ipaddress
@@ -683,7 +684,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._admin()
                 pictures = self.server.registry.pictures
                 self._json(200, self.server.icons.queue(lambda eid: pictures.url_for(eid) if pictures is not None else None))
-            elif path == "/healthz":  # for the watchdog and deploy checks: answers only if the server is really working
+            elif path == "/healthz":  # for the supervisor and deploy checks: answers only if the server is really working
                 self._json(200, {"ok": True})
             elif path == "/auth-config":
                 server = self.server
@@ -1843,11 +1844,39 @@ def write_pid_file(path: str, args: argparse.Namespace) -> None:
         print(f"warning: could not write {path}: {exc} (reload.py will not work)", file=sys.stderr)
 
 
+def park_games(server: AlchemyServer, thread: threading.Thread | None, registry: GameRegistry, accounts: AccountStore,
+               args: argparse.Namespace) -> None:
+    """Stop serving and save every running game (and login) to the snapshot file, for a polite stop: the next server started
+    within MAX_SNAPSHOT_AGE picks them up, so a restart by the supervisor (ops/supervise.py) keeps games, like a reload."""
+    server.shutdown()
+    if thread is not None:
+        thread.join()
+    time.sleep(0.3)   # let requests already under way finish
+    registry.profiles.flush()
+    try:
+        write_snapshot(args.snapshot_file, registry, accounts)
+        print("Running games saved; a server started in the next few minutes carries them on.")
+    except Exception as exc:
+        print(f"could not save the running games: {exc}", file=sys.stderr)
+
+
 def run(server: AlchemyServer, registry: GameRegistry, accounts: AccountStore, args: argparse.Namespace) -> int:
-    """Serve until Ctrl+C. On SIGUSR1 (sent by reload.py), restart in place with the games intact."""
+    """Serve until asked to stop. On SIGUSR1 (sent by reload.py), restart in place with the games intact.
+
+    A polite stop saves the running games first (park_games): Ctrl+C, SIGTERM, Ctrl+Break on Windows, or a file named
+    <pid file>.stop appearing next to the pid file (how ops/supervise.py asks, the same on every system)."""
     wanted = threading.Event()
+    stopping = threading.Event()
     if hasattr(signal, "SIGUSR1"):
         signal.signal(signal.SIGUSR1, lambda *_: wanted.set())
+    for name in ("SIGTERM", "SIGBREAK"):
+        if hasattr(signal, name):
+            with contextlib.suppress(ValueError, OSError):
+                signal.signal(getattr(signal, name), lambda *_: stopping.set())
+    stop_file = Path(args.pid_file).with_suffix(".stop")
+    with contextlib.suppress(OSError):
+        stop_file.unlink()   # one left from before must not stop this server at once
+    thread: threading.Thread | None = None
     threading.Thread(target=visitor_loop, args=(registry,), daemon=True, name="mr-alchemy").start()   # a reload re-runs main, so this restarts
     threading.Thread(target=metrics_loop, args=(server.metrics, registry), daemon=True, name="load-samples").start()
     threading.Thread(target=profile_loop, args=(registry.profiles,), daemon=True, name="profile-saves").start()
@@ -1858,7 +1887,14 @@ def run(server: AlchemyServer, registry: GameRegistry, accounts: AccountStore, a
             thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True)
             thread.start()
             while not wanted.wait(1.0):
-                pass
+                if stopping.is_set() or stop_file.exists():
+                    break
+            if not wanted.is_set():   # a polite stop
+                print("Stopping.")
+                park_games(server, thread, registry, accounts, args)
+                with contextlib.suppress(OSError):
+                    stop_file.unlink()
+                break
             wanted.clear()
             server.shutdown()  # stop accepting; new connections wait in the system's queue
             thread.join()
@@ -1869,6 +1905,7 @@ def run(server: AlchemyServer, registry: GameRegistry, accounts: AccountStore, a
                 print(f"reload failed, carrying on with the current code: {exc}", file=sys.stderr)
     except KeyboardInterrupt:
         print("\nStopping.")
+        park_games(server, thread, registry, accounts, args)
     finally:
         registry.profiles.flush()
         server.server_close()

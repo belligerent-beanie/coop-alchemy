@@ -20,7 +20,8 @@ Players never run development code. A change reaches them only through `ops\depl
 | Back up the live data now | `python ops\backup.py` |
 | See the backups | `python ops\backup.py list` |
 | Restore a backup (stop the server first) | `python ops\backup.py restore <name> --yes` |
-| Restart the live server by hand | `powershell -File ..\coop-alchemy-live\ops\restart-live.ps1` |
+| Restart the live server by hand (games are kept) | `python ..\coop-alchemy-live\ops\supervise.py restart` |
+| Is it running? Restarts, last backup | `python ..\coop-alchemy-live\ops\supervise.py status` |
 | Check a copy of the code end to end | `python ops\smoke_test.py` |
 | Check phones, tablets and desktop with real touch input (needs Chrome or Edge installed) | `python touch_check.py` |
 
@@ -32,35 +33,49 @@ Players never run development code. A change reaches them only through `ops\depl
 5. Moves the live folder to `main`, restarts the server, and requires it to answer correctly within 30 seconds.
 6. If it does not, it puts the live folder back on the previous commit, restarts, and says so. Data is never rolled back.
 
-Every deploy and rollback is appended to `coop-alchemy-live\deploys.log`. A deploy ends running games and logs everyone out
-once (saved games stay). `restart-live.ps1 -Update` also exists but skips all checks: prefer `deploy.py`.
+Every deploy and rollback is appended to `coop-alchemy-live\deploys.log`. The restart goes through the supervisor (below): the
+server saves its running games and logins as it stops and the new code picks them up, so players see a pause of a few seconds.
+A deploy needs the supervisor running for the live folder.
 
 This PC is a temporary host: the plan is to move to Cloudflare Tunnel on an external host, which is written up in
 `DEPLOYMENT.md` ("Moving to Cloudflare Tunnel and an external host"). Everything on this page then stops applying.
 
 ## Keeping it running without you
-`ops\install_tasks.ps1` registers three Windows scheduled tasks. It is **not run automatically**; read it, then run it once:
+`ops/supervise.py` keeps the server running, and is the same program on Windows, macOS and in the Docker container. It starts
+the server with every data file in `data\`, and then:
+
+| When | It |
+|---|---|
+| the server crashes | starts it again after 2 s, then 4, 8, … up to a minute if it keeps crashing |
+| the server stops answering | restarts it after 3 missed health checks 20 s apart |
+| it fails 5 times in 10 minutes | pauses for 10 minutes and says so in its log, since something needs a person |
+| another server already answers on the port | waits, and never starts a second one |
+| daily at 04:00 / 04:30 | backs up the data (keeping the newest 14) / writes yesterday's summary |
+| it is running | keeps the computer from sleeping |
+
+To have it start at every login, run once from the live folder (it reads `--data-dir`, `--port`, and server options after `--`, the
+same as `supervise.py run`):
 
 ```
-powershell -ExecutionPolicy Bypass -File ops\install_tasks.ps1        (to remove: add -Remove)
+python ops\install_supervisor.py install            (Windows: a scheduled task; macOS: a LaunchAgent)
+python ops\install_supervisor.py remove             (undo)
+python ops\install_supervisor.py show               (print what it would register, change nothing)
 ```
 
-| Task | When | Does |
-|---|---|---|
-| CoopAlchemy-Start | at logon | starts the server if it is not running |
-| CoopAlchemy-Watchdog | every minute | restarts the server after 3 missed health checks in a row; gives up (and logs) after 3 restarts in 30 minutes, since a server that cannot stay up needs a person |
-| CoopAlchemy-Backup | daily 04:00 | backs up the data, keeping the newest 14 |
+On Windows this replaces the four scheduled tasks the old `install_tasks.ps1` made (start, watchdog, backup, summary): installing
+removes them, since two watchers would fight. `supervise.py stop` stops the server and the supervisor until the next login
+(`install_supervisor.py start` starts it again); `supervise.py restart` restarts the server, keeping running games. `reload.py`
+asks the supervisor too, so reloading without ending games now works on Windows as well.
 
-Limits, because the host is a Windows PC:
-- The tasks run only while you are logged on to Windows. After a reboot the server returns when you log in; turn on automatic
-  sign-in for that account if the PC should recover on its own.
-- The PC must not sleep: Settings > System > Power > "When plugged in, put my device to sleep after" > **Never**.
-- If the PC is off, the site is off. A power cut or Windows update reboot is the likeliest outage.
+Limits:
+- It runs only while you are logged on. After a reboot the server returns when you log in; turn on automatic sign-in for that
+  account if the computer should recover on its own.
+- If the computer is off, the site is off. A power cut or an update reboot is the likeliest outage.
 
 Where to look when something seems wrong (all in `coop-alchemy-live`):
-`data\live.log` (the activity log, 14 days: sign-ups, logins, failures, admin actions), `data\live.err.log` (anything the server
-printed instead, such as a crash on start-up), `data\watchdog.log` (restarts), `deploys.log` (what was deployed when),
-`summaries\` (one small counts-only file per day) and `backups\`.
+`data\live.log` (the activity log, 14 days: sign-ups, logins, failures, admin actions), `data\live.out.log` (anything the server
+printed instead, such as a crash on start-up), `data\supervisor.log` (starts, restarts and why, backups), `deploys.log` (what was
+deployed when), `summaries\` (one small counts-only file per day) and `backups\`.
 
 ## Day-to-day moderation: the operations page
 Log in as an administrator and open `/ops` (the home page shows an "Operations" button). It shows counts since the server started

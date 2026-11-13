@@ -399,7 +399,8 @@ python3 reload.py
 - If the new copy crashes while starting, fix the problem and start the server again
   within 10 minutes: it picks the snapshot up. An unreadable snapshot is renamed
   `reload_snapshot.json.bad` and the server starts empty.
-- Not available on Windows (it uses a Unix signal): stop and start the server there.
+- Under the supervisor (`ops/supervise.py`, see OPS.md) a reload is a supervised restart that keeps games the same way, on Windows too;
+  without it, reloading in place needs a Unix signal, so on Windows stop and start the server.
 - `reload_snapshot.json*` holds login tokens: keep it private like `accounts.json`.
 - If a patch changes what a game stores, make the loading code tolerate snapshots
   written by the old version (`GameState.live_restore` skips anything that doesn't fit).
@@ -655,7 +656,7 @@ skipped if `recipes.json` is missing.
 | `namefilter.py`, `blocklist.txt`, `reports.py` | Blocked words in names, and player reports for the administrators (no reporter is recorded). |
 | `erasure.py` | Deleting an account and everything kept under its name (used by the player, the admin page and the admin tool). |
 | `API.md` | The HTTP API: every endpoint, the event stream, errors and limits, plus a change log. `test_api_docs.py` fails if it drifts from the code. |
-| `ops/` , `OPS.md` | Running the live server: safe deploys with automatic rollback, backups, a watchdog, a daily summary, scheduled tasks, smoke test. See OPS.md. |
+| `ops/` , `OPS.md` | Running the live server: safe deploys with automatic rollback, backups, the supervisor (keeps the server running, on Windows, macOS and in Docker), a daily summary, smoke test. See OPS.md. |
 | `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `.env.example` | Run the game, and its Cloudflare Tunnel, in containers on any host (not yet built: see DEPLOYMENT.md). |
 | `touch_check.py` | Drives a real Chrome as a phone, a tablet and a desktop, with real touch input, and checks layout and gestures (needs Chrome or Edge installed). |
 | `bench_load.py` | Load test: rooms of players and solo players against a real server; CPU, memory, threads, delay, errors. |

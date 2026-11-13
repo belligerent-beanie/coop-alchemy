@@ -1,4 +1,4 @@
-"""The operations tools: backups, the watchdog, and safe deploys with automatic rollback."""
+"""The operations tools: backups, the health probe, and safe deploys with automatic rollback (the supervisor: test_supervise.py)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
-from ops import backup, watchdog
+from ops import backup, supervise
 from ops.deploy import Deployer, git, keep_private_files
 
 
@@ -103,70 +103,6 @@ class BackupTests(unittest.TestCase):
         self.assertEqual(backup.main(base), 1)  # a damaged file is reported, not preserved
 
 
-class WatchdogTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.tmp = tempfile.TemporaryDirectory()
-        self.state = Path(self.tmp.name) / "watchdog.json"
-        self.now = [10_000.0]
-        self.restarts: list[float] = []
-        self.logs: list[str] = []
-        self.up = [False]
-
-    def tearDown(self) -> None:
-        self.tmp.cleanup()
-
-    def run_once(self) -> str:
-        return watchdog.check_once(self.state, lambda: self.up[0], lambda: self.restarts.append(self.now[0]),
-                                   clock=lambda: self.now[0], log=self.logs.append)
-
-    def test_a_short_hiccup_is_ignored_and_a_real_outage_restarts_once(self) -> None:
-        self.assertEqual([self.run_once(), self.run_once()], ["failing", "failing"])
-        self.assertEqual(self.restarts, [])
-        self.assertEqual(self.run_once(), "restarted")
-        self.assertEqual(len(self.restarts), 1)
-        self.up[0] = True
-        self.assertEqual(self.run_once(), "ok")
-
-    def test_recovery_resets_the_count(self) -> None:
-        self.run_once(); self.run_once()
-        self.up[0] = True
-        self.assertEqual(self.run_once(), "ok")
-        self.up[0] = False
-        self.assertEqual([self.run_once(), self.run_once()], ["failing", "failing"])  # the earlier misses no longer count
-        self.assertEqual(self.restarts, [])
-
-    def test_it_gives_up_instead_of_restart_looping_and_tries_again_later(self) -> None:
-        outcomes = []
-        for _ in range(3 * watchdog.FAILURES_NEEDED + 3):
-            self.now[0] += 60
-            outcomes.append(self.run_once())
-        self.assertEqual(outcomes.count("restarted"), watchdog.MAX_RESTARTS)
-        self.assertIn("gave up", outcomes)
-        self.assertEqual(len(self.restarts), watchdog.MAX_RESTARTS)
-        self.assertTrue(any("GIVING UP" in line for line in self.logs))
-        self.now[0] += watchdog.RESTART_WINDOW + 1  # a long time later it is allowed to try again, straight away
-        self.assertEqual(self.run_once(), "restarted")
-        self.assertEqual(len(self.restarts), watchdog.MAX_RESTARTS + 1)
-
-    def test_a_failing_restart_is_reported_and_counted(self) -> None:
-        def broken() -> None:
-            raise RuntimeError("no powershell")
-        self.run_once(); self.run_once()
-        result = watchdog.check_once(self.state, lambda: False, broken, clock=lambda: self.now[0], log=self.logs.append)
-        self.assertEqual(result, "restart failed")
-        self.assertTrue(any("no powershell" in line for line in self.logs))
-
-    def test_a_damaged_state_file_is_tolerated(self) -> None:
-        self.state.write_text("{garbage", encoding="utf-8")
-        self.assertEqual(self.run_once(), "failing")
-
-    def test_the_log_is_trimmed(self) -> None:
-        log = Path(self.tmp.name) / "watchdog.log"
-        log.write_text("x\n" * 150_000, encoding="utf-8")
-        watchdog.trim_log(log)
-        self.assertLess(log.stat().st_size, 5_000)
-
-
 class ProbeTests(unittest.TestCase):
     def serve(self, routes: dict[str, tuple[int, bytes]]) -> int:
         class Handler(BaseHTTPRequestHandler):
@@ -187,14 +123,14 @@ class ProbeTests(unittest.TestCase):
         return int(server.server_address[1])
 
     def test_probe_understands_healthy_old_and_broken_servers(self) -> None:
-        self.assertTrue(watchdog.probe(self.serve({"/healthz": (200, b'{"ok": true}')})))
-        self.assertTrue(watchdog.probe(self.serve({"/login": (200, b"<html>")})))  # a version from before /healthz
-        self.assertFalse(watchdog.probe(self.serve({"/healthz": (500, b"{}"), "/login": (200, b"x")})))
-        self.assertFalse(watchdog.probe(self.serve({"/healthz": (200, b'{"ok": false}')})))
-        self.assertFalse(watchdog.probe(self.serve({"/healthz": (200, b"not json")})))
-        self.assertFalse(watchdog.probe(self.serve({})))  # neither answers
+        self.assertTrue(supervise.probe(self.serve({"/healthz": (200, b'{"ok": true}')})))
+        self.assertTrue(supervise.probe(self.serve({"/login": (200, b"<html>")})))  # a version from before /healthz
+        self.assertFalse(supervise.probe(self.serve({"/healthz": (500, b"{}"), "/login": (200, b"x")})))
+        self.assertFalse(supervise.probe(self.serve({"/healthz": (200, b'{"ok": false}')})))
+        self.assertFalse(supervise.probe(self.serve({"/healthz": (200, b"not json")})))
+        self.assertFalse(supervise.probe(self.serve({})))  # neither answers
         free = socket.socket(); free.bind(("127.0.0.1", 0)); port = free.getsockname()[1]; free.close()
-        self.assertFalse(watchdog.probe(port, timeout=1))  # nothing listening
+        self.assertFalse(supervise.probe(port, timeout=1))  # nothing listening
 
 
 def make_repos(root: Path) -> tuple[Path, Path]:
