@@ -34,3 +34,7 @@ reports.json
 *-first-password.txt
 test-output.log
 .last-failed
+
+# Which design patches are on (patches.py): per-server state, not code
+patches_state.json
+patches_state.json.tmp

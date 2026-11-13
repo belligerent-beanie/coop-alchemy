@@ -6,6 +6,7 @@
   <title>Operations · Co-op Alchemy</title>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/euler.css">
+  <link rel="stylesheet" href="/patches.css">
   <script src="/static/look.js"></script>
   <script src="/static/sparkle.js" defer></script>
 </head>
@@ -99,6 +100,17 @@
           <tbody></tbody>
         </table>
       </div>
+    </section>
+
+    <section id="patches-section">
+      <h2>Design patches</h2>
+      <p class="muted">UI changes from designers that can be taken off again. <strong>Preview</strong>: only administrators and
+        designers see it. <strong>On</strong>: everyone does. Pages pick up a change when they are next loaded.</p>
+      <table id="patches-table" class="ops-table">
+        <thead><tr><th>Patch</th><th>What it does</th><th>State</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="no-patches" class="muted" hidden>No patches yet: they are files in <code>patches/</code> (see <code>patches.py</code>).</p>
     </section>
   </main>
   <script src="/static/auth.js"></script>

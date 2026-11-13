@@ -7,6 +7,24 @@
   try { if (localStorage.getItem(KEY) === "classic") look = "classic"; } catch (e) { /* storage blocked: the default look */ }
   document.documentElement.dataset.look = look;
 
+  // Which page this is, so a design patch (patches.py) can aim at one page: [data-page="home"] .card { … }
+  const first = location.pathname.split("/")[1] || "";
+  const page = first === "" ? "home" : first === "g" ? "game" : first;
+  document.documentElement.dataset.page = page;
+
+  // Design patches that change text: the styles come in /patches.css (linked in <head>); the words are put in here.
+  // Only elements with no children are changed (as the designer picker's Text tool does), and only with text, never markup.
+  document.addEventListener("DOMContentLoaded", () => {
+    fetch("/patches/text").then((res) => (res.ok ? res.json() : { changes: [] })).then(({ changes }) => {
+      for (const change of changes || []) {
+        if (change.page !== "*" && change.page !== page) continue;
+        let nodes = [];
+        try { nodes = document.querySelectorAll(change.selector); } catch (e) { continue; }   // a selector the browser rejects
+        for (const node of nodes) if (!node.children.length) node.textContent = change.text;
+      }
+    }).catch(() => { /* no text patches this time */ });
+  });
+
   document.addEventListener("DOMContentLoaded", () => {
     const body = document.body;
     if (!body.classList.length) return;   // the game board fills the screen; the switch lives on the other pages

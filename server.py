@@ -33,6 +33,12 @@ HTTP API
     GET  /achievements                  -> {"solo": [...], "multiplayer": [...], "challenges": [...]}   every achievement for the caller, with when
                                            it was earned (see achievements.py and profiles.py)
     GET  /emotes                        -> {"emotes": [{"id", "label", "glyph"}]}   what players can send (see emotes.py)
+    GET  /patches.css                   -> the design patches that apply to the caller: those switched on, plus those in
+                                           preview for administrators and designers (patches.py; linked from every page)
+    GET  /patches/text                  -> {"changes": [{"page", "selector", "text", "patch"}]}   the same patches' text changes
+    GET  /patches/list                  -> {"patches": [{"name", "title", "state", "text_changes", "problem"}]}   administrators
+                                           and designers only
+    POST /patches/set   {"name", "state"} -> {"patches": [...]}   switch a patch to off, preview or on (administrators and designers)
     POST /solo/start                    -> {"id", "url"}   the caller's private solo game: the one running, or a new one
                                            that carries on from what they found before (saved after every discovery)
     GET  /daily                         -> today's three challenges (easy, medium, hard) with the caller's results,
@@ -118,6 +124,7 @@ from bots import BotPolicy, BotRunner, bot_loop
 from cast import CAST
 from metrics import Metrics, metrics_loop
 from pictures import PictureIndex
+from patches import PatchError, PatchStore
 from profiles import ProfileStore, profile_loop
 from visitor import VisitorPolicy, is_reserved
 from solo import SoloStore
@@ -286,6 +293,7 @@ class AlchemyServer(ThreadingHTTPServer):
         self._stats_lock = threading.Lock()
         self.names = NameFilter.load()               # blocked words in usernames, game names and recipe names (--blocklist-file adds more)
         self.reports = ReportStore(None)             # player reports for the administrators (--reports-file keeps them on disk)
+        self.patches = PatchStore(BASE_DIR / "patches", None)   # design patches (patches.py; --patches-state-file keeps their state)
         self.games_throttle = Throttle(10, 3600.0)   # games one account may start per hour
         self.reports_throttle = Throttle(5, 3600.0)  # reports one account may send per hour
         self.tickets = TicketStore()                 # one-time passes for event streams
@@ -620,6 +628,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._admin()
                 invites = self.server.invites
                 self._json(200, {"enabled": invites is not None, "codes": invites.listing() if invites else []})
+            elif path == "/patches.css":   # linked from every page's <head>: the design patches that apply to this visitor
+                self._send_text(200, self.server.patches.css(self._sees_previews()), "text/css; charset=utf-8")
+            elif path == "/patches/text":
+                self._json(200, {"changes": self.server.patches.text(self._sees_previews())})
+            elif path == "/patches/list":
+                self._patch_manager()
+                self._json(200, {"patches": self.server.patches.listing()})
             elif path == "/healthz":  # for the watchdog and deploy checks: answers only if the server is really working
                 self._json(200, {"ok": True})
             elif path == "/auth-config":
@@ -792,6 +807,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path.startswith("/ops/"):
                 self._json(200, self._ops_action(path, self._read_json()))
+                return
+            if path == "/patches/set":
+                who, body = self._patch_manager(), self._read_json()
+                name, state = body.get("name"), body.get("state")
+                try:
+                    self.server.patches.set_state(name, state)
+                except PatchError as exc:
+                    raise GameError(400, str(exc)) from None
+                log.info("%s switched design patch %s to %s", who, log_safe(str(name)), log_safe(str(state)))
+                self._json(200, {"patches": self.server.patches.listing()})
                 return
             if path in ("/account/change-password", "/account/delete"):
                 self._account_self_service(path, self._read_json())
@@ -1257,6 +1282,30 @@ class Handler(BaseHTTPRequestHandler):
             raise GameError(400, "body must be a JSON object")
         return data
 
+    def _send_text(self, status: int, text: str, ctype: str) -> None:
+        body = text.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")   # what it holds depends on who asks and changes when a patch is switched
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _sees_previews(self) -> bool:
+        """Whether this visitor gets design patches in preview: logged-in administrators and designers. Anyone else (logged out,
+        or any problem with the session) just gets the patches that are on."""
+        token, _ = self._session_token()
+        name = self.server.accounts.username(token) if token else None
+        return bool(name) and (self.server.accounts.is_admin(name) or self.server.accounts.is_designer(name))
+
+    def _patch_manager(self) -> str:
+        """The logged-in caller, who must be an administrator or a designer to see and switch design patches (403 otherwise)."""
+        name = self._user()
+        accounts = self.server.accounts
+        if not (accounts.is_admin(name) or accounts.is_designer(name)):
+            raise GameError(403, "only administrators and designers can switch design patches")
+        return name
+
     def _json(self, status: int, payload: Any) -> None:
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
@@ -1513,6 +1562,10 @@ def main() -> int:
                         help="records this server's process id so reload.py can find it (default: ./alchemy.pid)")
     parser.add_argument("--blocklist-file", metavar="FILE",
                         help="extra blocked words for usernames, game names and recipe names (one per line; see blocklist.txt)")
+    parser.add_argument("--patches-dir", default=str(BASE_DIR / "patches"),
+                        help="where the design patches are (default: ./patches; see patches.py)")
+    parser.add_argument("--patches-state-file", default=str(BASE_DIR / "patches_state.json"),
+                        help="which design patches are on, in preview or off (default: ./patches_state.json)")
     parser.add_argument("--reports-file", default=str(BASE_DIR / "reports.json"),
                         help="where player reports wait for the administrators, for 14 days at most (default: ./reports.json)")
     parser.add_argument("--max-games-per-account", type=int, default=1,
@@ -1604,6 +1657,7 @@ def main() -> int:
         print(f"--blocklist-file: {exc}", file=sys.stderr)
         return 1
     server.reports = ReportStore(args.reports_file)
+    server.patches = PatchStore(args.patches_dir, args.patches_state_file)
     scheme = "http"
     if bool(args.tls_cert) != bool(args.tls_key):
         print("--tls-cert and --tls-key must be given together", file=sys.stderr)

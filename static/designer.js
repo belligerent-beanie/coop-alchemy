@@ -3,7 +3,7 @@
 // Alt+Shift+P (or the Design button) turns picker mode on: clicks select an element instead of reaching the page; ↑ selects the
 // parent, ↓ a child, Enter opens Fill / Border / Shadow / Text, Esc closes things and clears the selection; Alt+Shift+E copies every change
 // as Markdown (the guide, shown the first time and under "Guide", explains all of this). Edits are inline styles on THIS
-// browser's copy of the page only: nothing is sent to the server or saved, and a reload wipes them. "Changes" exports them as
+// browser's copy of the page only: nothing is sent to the server; they are kept in this browser (localStorage, per page) and put back after a reload. "Changes" exports them as
 // Markdown (selector, before → after) to hand to a developer or an AI. This is a convenience for designers, not a security
 // boundary: anyone can do the same in their browser's developer tools, and the server never trusts any of it.
 (function () {
@@ -109,6 +109,7 @@
   let menuOpen = false;
   let tool = null;             // "fill" | "border" | "shadow" | "text" | null
   let showChanges = false;
+  let showPatches = false;    // the design patches panel (patches.py): switch them off, to preview, or on
   let tourStep = null;         // the guide page being shown (0-based), or null
   let toastTimer = 0;
   let changesLink = null;      // the "Changes (n)" button in the dock, kept so its count can change without rebuilding the dock
@@ -221,8 +222,61 @@
   /** An edit was made. The panel is NOT rebuilt (a slider being dragged must stay in the page); only the count and outlines change. */
   function edited() {
     exported = false;
-    if (changesLink) changesLink.textContent = `Changes (${changes.size})`;
+    showCount();
+    save();
     refreshBoxes();
+  }
+  const changeCount = () => changes.size + pending.length;
+  function showCount() { if (changesLink) changesLink.textContent = `Changes (${changeCount()})`; }
+
+  // ---------- keeping edits across reloads ----------
+  // Every edit is saved in this browser (localStorage, one list per page) and put back when the page loads again, so a
+  // reload, a new version of the site or a design patch switched on never costs a designer their work. An edit whose element
+  // is not on the page (yet: the game board draws itself later; or any more: the page changed) is kept as it is, listed
+  // under Changes and still exported, until it is reset.
+  const STORE_KEY = "alchemy-designer-changes:" + location.pathname;
+  let pending = [];   // saved edits whose element is not on the page: {selector, snippet, before, after, text}
+  const saved = (rec) => ({ selector: rec.selector, snippet: rec.snippet, before: rec.before, after: rec.after || {}, text: rec.text || null });
+  function save() {
+    try {
+      const all = [...[...changes.values()].map(saved), ...pending];
+      if (all.length) localStorage.setItem(STORE_KEY, JSON.stringify(all)); else localStorage.removeItem(STORE_KEY);
+    } catch (_) { /* storage full or blocked: the edits still work in this tab */ }
+  }
+  function restore() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(STORE_KEY) || "[]");
+      pending = Array.isArray(raw) ? raw.filter((item) => item && typeof item.selector === "string" && item.before) : [];
+    } catch (_) { pending = []; }
+    if (!pending.length) return;
+    putBack();
+    let tries = 0;   // the page may build the element later: look again every second for half a minute
+    const timer = setInterval(() => { if (!pending.length || ++tries > 30) clearInterval(timer); else putBack(); }, 1000);
+  }
+  function putBack() {
+    const left = [];
+    for (const item of pending) {
+      let element = null;
+      try { element = document.querySelector(item.selector); } catch (_) { /* a selector the browser rejects */ }
+      if (!element || ours(element) || changes.has(element)) { left.push(item); continue; }
+      const after = item.after || {};
+      if (after["background-color"]) applyFill(element, after["background-color"]);
+      if (after.border) {
+        const m = /^(\d+)px (\w+) (.+)$/.exec(after.border);
+        if (after.border === "none") applyBorder(element, "none", 0, "#000000");
+        else if (m) applyBorder(element, m[2], +m[1], m[3]);
+      }
+      if (after["box-shadow"]) applyShadowValue(element, after["box-shadow"]);
+      if (item.text && typeof item.text.after === "string" && !element.children.length) applyText(element, item.text.after);
+      const rec = changes.get(element);
+      if (rec) {   // "before" is how it was when the designer first changed it, not how it looks after a reload
+        rec.before = item.before;
+        if (rec.text && item.text) rec.text.before = item.text.before;
+      }
+    }
+    pending = left;
+    showCount();
+    save();
   }
 
   function applyFill(element, colour) {
@@ -243,9 +297,11 @@
   }
   /** shadow is {x, y, blur, spread, rgb, alpha, inset}, or null for no shadow. */
   function applyShadow(element, shadow) {
+    applyShadowValue(element, shadow ? shadowCss(shadow) : "none");
+  }
+  function applyShadowValue(element, value) {
     const rec = record(element);
     rememberOriginal(rec, element, "box-shadow");
-    const value = shadow ? shadowCss(shadow) : "none";
     setStyle(element, "box-shadow", value);
     rec.after = Object.assign(rec.after || {}, { "box-shadow": value });
     edited();
@@ -266,11 +322,19 @@
     }
     if (rec.text) element.textContent = rec.text.before;
     changes.delete(element);
+    save();
     renderDock();
     refreshBoxes();
   }
+  function forgetPending(item) {
+    pending = pending.filter((other) => other !== item);
+    save();
+    renderDock();
+  }
   function resetAll() {
     for (const element of [...changes.keys()]) resetElement(element);
+    pending = [];
+    save();
     exported = true;
     renderDock();
   }
@@ -279,7 +343,7 @@
   /** One text block per changed element: its selector (and a snippet of its text to confirm it), then each before → after. */
   function exportBlocks() {
     const blocks = [];
-    for (const rec of changes.values()) {
+    for (const rec of [...changes.values(), ...pending]) {
       const lines = [];
       for (const prop of ["background-color", "border", "box-shadow"]) {
         const after = rec.after && rec.after[prop];
@@ -349,9 +413,6 @@
     }
     return true;
   }
-  window.addEventListener("beforeunload", (event) => {
-    if (changes.size && !exported) { event.preventDefault(); event.returnValue = ""; }
-  });
 
   // ---------- the colour picker (used by Fill and by Border's colour button) ----------
   function colourPicker(startHex, onChange) {
@@ -439,7 +500,7 @@
       "Text works only on elements with nothing inside them. The page changes straight away, in this tab only; Done closes the tool."] },
     { title: "Export your changes", lines: [
       "Alt+Shift+E copies every change as Markdown. Paste it to Claude, who can then make the same changes in the code.",
-      "\"Changes\" lists them with Copy, Download and Reset. A reload wipes the edits, so export first."] },
+      "\"Changes\" lists them with Copy, Download and Reset. They are kept in this browser, through reloads, until you reset them."] },
   ];
   function endTour() {
     tourStep = null;
@@ -469,14 +530,17 @@
     if (!on) return;
     if (tourStep !== null) { dock.append(tourPanel()); return; }
 
-    changesLink = h("button", { type: "button", class: "dz-link", text: `Changes (${changes.size})`, onclick: () => { showChanges = !showChanges; renderDock(); } });
+    changesLink = h("button", { type: "button", class: "dz-link", text: `Changes (${changeCount()})`, onclick: () => { showChanges = !showChanges; showPatches = false; renderDock(); } });
     const head = h("div", { class: "dz-head" },
       h("strong", { text: selected ? label(selected) : "UI picker" }),
       changesLink,
+      h("button", { type: "button", class: "dz-link", text: "Patches", title: "Design patches: switch them off, to preview, or on",
+                    onclick: () => { showPatches = !showPatches; showChanges = false; renderDock(); } }),
       h("button", { type: "button", class: "dz-link", text: "Guide", title: "How the picker works", onclick: () => { tourStep = 0; renderDock(); } }),
       h("button", { type: "button", class: "dz-link", text: "Off", title: "Turn picker mode off", onclick: () => setOn(false) }));
     dock.append(head);
 
+    if (showPatches) { dock.append(patchesPanel()); return; }
     if (showChanges) { dock.append(changesPanel()); return; }
     if (!selected) {
       dock.append(h("p", { class: "dz-hint", text: "Click any element to select it. ↑ parent, ↓ child, Enter for the tools, Esc to clear. Alt+Shift+E copies your changes." }));
@@ -651,13 +715,54 @@
     input.addEventListener("input", () => applyText(element, input.value));
     return h("div", { class: "dz-panel" }, input);
   }
+  // ---------- design patches ----------
+  const PATCH_STATES = [["off", "Off"], ["preview", "Preview"], ["on", "On"]];
+  /** Reload /patches.css in place, so a style patch shows (or goes) without reloading the page. */
+  function reloadPatchStyles() {
+    const link = document.querySelector('link[rel="stylesheet"][href^="/patches.css"]');
+    if (link) link.href = "/patches.css?t=" + Date.now();
+  }
+  function patchesPanel() {
+    const panel = h("div", { class: "dz-panel" }, h("p", { class: "dz-hint", text: "Loading patches…" }));
+    Auth.fetch("/patches/list").then(({ patches }) => fillPatches(panel, patches))
+      .catch((err) => panel.replaceChildren(h("p", { class: "dz-hint", text: err.message })));
+    return panel;
+  }
+  function fillPatches(panel, patches) {
+    panel.replaceChildren(h("p", { class: "dz-hint", text: "Preview: only admins and designers see it. On: everyone." }));
+    if (!patches.length) panel.append(h("p", { class: "dz-hint", text: "No patches yet." }));
+    for (const patch of patches) {
+      const buttons = PATCH_STATES.map(([state, label]) => h("button", {
+        type: "button", class: "dz-menu-button" + (patch.state === state ? " dz-active" : ""), text: label,
+        "aria-pressed": patch.state === state ? "true" : "false",
+        onclick: async () => {
+          if (patch.state === state) return;
+          try {
+            const data = await Auth.fetch("/patches/set", { name: patch.name, state });
+            fillPatches(panel, data.patches);
+            reloadPatchStyles();
+            showToast(patch.text_changes ? `${patch.name}: ${label}. Reload the page for its text changes (your edits are kept).` : `${patch.name}: ${label}`);
+          } catch (err) { showToast(err.message); }
+        },
+      }));
+      panel.append(h("div", { class: "dz-patch" },
+        h("strong", { text: patch.name }), h("span", { class: "dz-hint", text: patch.title + (patch.problem ? ` (${patch.problem})` : "") }),
+        h("div", { class: "dz-menu" }, ...buttons)));
+    }
+  }
+
   function changesPanel() {
     const panel = h("div", { class: "dz-panel" });
-    if (!changes.size) { panel.append(h("p", { class: "dz-hint", text: "No changes yet." })); return panel; }
+    if (!changeCount()) { panel.append(h("p", { class: "dz-hint", text: "No changes yet." })); return panel; }
     for (const [element, rec] of changes) {
       panel.append(h("div", { class: "dz-change" },
         h("code", { text: rec.selector }),
         h("button", { type: "button", class: "dz-link", text: "Reset", onclick: () => resetElement(element) })));
+    }
+    for (const item of pending) {   // saved, but the element is not on the page right now
+      panel.append(h("div", { class: "dz-change", title: "Kept and exported, but this element is not on the page right now" },
+        h("code", { text: item.selector + " (not on the page)" }),
+        h("button", { type: "button", class: "dz-link", text: "Forget", onclick: () => forgetPending(item) })));
     }
     const copy = h("button", { type: "button", class: "dz-menu-button", text: "Copy", title: "Alt+Shift+E", onclick: copyChanges });
     panel.append(h("pre", { class: "dz-preview", text: exportMarkdown() || "(nothing differs from the original)" }),
@@ -674,6 +779,7 @@
     closeTool();
     menuOpen = false;
     showChanges = false;
+    showPatches = false;
     renderDock();
     refreshBoxes();
   }
@@ -700,7 +806,8 @@
     const typing = ours(event.target) && /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName);
     if (event.key === "Escape") {
       event.preventDefault();
-      if (showChanges) showChanges = false;
+      if (showPatches) showPatches = false;
+      else if (showChanges) showChanges = false;
       else if (tool) closeTool();
       else if (menuOpen) menuOpen = false;
       else if (selected) { selected = null; climbed = []; }
@@ -728,7 +835,7 @@
     const method = on ? "addEventListener" : "removeEventListener";
     for (const type of STOPPED) window[method](type, swallow, true);
     window[method]("mousemove", onMove, true);
-    if (!on) { hovered = null; selected = null; climbed = []; menuOpen = false; tool = null; showChanges = false; tourStep = null; }
+    if (!on) { hovered = null; selected = null; climbed = []; menuOpen = false; tool = null; showChanges = false; tourStep = null; showPatches = false; }
     else {
       let seen = false;
       try { seen = localStorage.getItem(TOUR_KEY) === "done"; } catch (_) { /* unreadable: show the guide */ }
@@ -744,4 +851,5 @@
   setInterval(() => { if (on && selected) refreshBoxes(); }, 500);   // the page may move things around (the board does)
   toggle.addEventListener("click", () => setOn(!on));
   document.body.append(root);
+  restore();
 })();

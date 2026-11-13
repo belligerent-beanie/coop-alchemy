@@ -271,14 +271,39 @@ $("codes-done").addEventListener("click", () => {
   $("new-codes-list").textContent = "";
 });
 
+// ---- design patches (patches.py) ------------------------------------------------------------------
+
+const PATCH_STATES = [["off", "Off"], ["preview", "Preview"], ["on", "On"]];
+
+function renderPatches(data) {
+  const body = $("patches-table").querySelector("tbody");
+  body.replaceChildren();
+  $("no-patches").hidden = data.patches.length > 0;
+  for (const patch of data.patches) {
+    const row = el("tr");
+    const what = el("td", patch.title);
+    if (patch.text_changes) what.append(el("span", ` · ${patch.text_changes} text change${patch.text_changes === 1 ? "" : "s"}`, "muted"));
+    if (patch.problem) what.append(el("div", patch.problem, "error"));
+    const switches = el("td");
+    for (const [state, label] of PATCH_STATES) {
+      const button = plainButton(label, () => Auth.fetch("/patches/set", { name: patch.name, state }));
+      button.disabled = patch.state === state;
+      button.setAttribute("aria-pressed", String(patch.state === state));
+      switches.append(button, " ");
+    }
+    row.append(el("td", patch.name), what, el("td", PATCH_STATES.find(([s]) => s === patch.state)[1]), switches);
+    body.append(row);
+  }
+}
+
 // ---- loading ------------------------------------------------------------------------------------
 
 async function refresh() {
   if (confirming > 0) return; // a confirmation is pending: the next refresh will catch up
   try {
-    const [status, games, list, invites, reports] = await Promise.all([
+    const [status, games, list, invites, reports, patches] = await Promise.all([
       Auth.fetch("/ops/status"), Auth.fetch("/ops/games"), Auth.fetch("/ops/accounts"), Auth.fetch("/ops/invites"),
-      Auth.fetch("/ops/reports"),
+      Auth.fetch("/ops/reports"), Auth.fetch("/patches/list"),
     ]);
     renderStatus(status);
     renderReports(reports);
@@ -286,6 +311,7 @@ async function refresh() {
     accounts = list.accounts;
     renderAccounts();
     renderInvites(invites);
+    renderPatches(patches);
     $("updated").textContent = "Updated " + new Date().toLocaleTimeString();
   } catch (err) {
     if (err.status === 403) {

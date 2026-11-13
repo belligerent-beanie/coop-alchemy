@@ -171,6 +171,18 @@ A ticket works once, so after a dropped connection a page asks for a fresh ticke
 | `POST /admin/handle` | session + admin | `{"id", "action", "reply"?}`: accept or reject a proposal. |
 | `POST /admin/reopen` | session + admin | `{"id"}`: reopen a handled proposal. |
 
+## Design patches
+
+UI changes that can be switched off again (see `patches.py` and the README's *Design patches*). A patch is off, in preview
+(administrators and designers only) or on (everyone).
+
+| Endpoint | Auth | Description |
+|---|---|---|
+| `GET /patches.css` | none | The patches that apply to the caller, as one stylesheet: those switched on, plus those in preview when the session is an administrator's or a designer's. Linked from every page's `<head>`; `Cache-Control: no-store`. |
+| `GET /patches/text` | none | `{"changes": [{"page", "selector", "text", "patch"}]}`: the same patches' text changes (`page` is `*` for every page). `look.js` applies them. |
+| `GET /patches/list` | session + admin or designer | `{"patches": [{"name", "title", "state", "text_changes", "problem"}]}`; `problem` is non-empty when a patch's text file cannot be read. `403` for anyone else. |
+| `POST /patches/set` | session + admin or designer | `{"name", "state"}` → `{"patches": [...]}`; `state` is `off`, `preview` or `on`. `400` for an unknown patch or state, `403` for anyone else. |
+
 ## Operations (administrators only)
 
 The page at `/ops` uses these. Every one needs a session whose account is an administrator (`403` otherwise). Administrators
@@ -207,6 +219,7 @@ checks that every option the server accepts appears in the README.
 
 Newest first. Add a line whenever an endpoint, event, status code or option is added, changed or removed.
 
+- **2026-11 (design patches)**: `GET /patches.css`, `GET /patches/text`, `GET /patches/list`, `POST /patches/set`; options `--patches-dir` and `--patches-state-file`.
 - **2026-11 (notes)**: journal entries have `note`.
 - **2026-11 (categories)**: `POST /g/<id>/journal` entries have `category` and `progress` has `categories`; `categories.json` sorts every element into a category.
 - **2026-11 (hosting)**: `POST /ops/bots/host`; the `companions` entries of `GET /ops/games` have `hosting`; option `--bots-host`.

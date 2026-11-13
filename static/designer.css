@@ -58,3 +58,6 @@
 .dz-wide { color: #b9b9c4; }
 .dz-done-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 0 0; }
 .dz-done-row .dz-hint { margin: 0; }
+.dz-head { flex-wrap: wrap; row-gap: 4px; }
+.dz-patch { display: grid; gap: 4px; padding: 6px 0; border-top: 1px solid #3a3a44; }
+.dz-patch .dz-hint, .dz-patch .dz-menu { margin: 0; }

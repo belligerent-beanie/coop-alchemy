@@ -351,6 +351,8 @@ python3 server.py [--host 0.0.0.0] [--port 8000]
 | `--max-games-per-account` | `1` | How many running games one account may have started at once (`0` for no limit). |
 | `--blocklist-file` | none | Extra blocked words for usernames, game names and recipe names, one per line (the built-in list is `blocklist.txt`). |
 | `--reports-file` | `reports.json` next to `server.py` | Where player reports wait for the administrators, for 14 days at most. |
+| `--patches-dir` | `patches/` next to `server.py` | Where the design patches are (see [Design patches](#design-patches)). |
+| `--patches-state-file` | `patches_state.json` next to `server.py` | Which design patches are on, in preview or off. |
 | `--bots` | `off` | Companions: computer-controlled players that keep a lone player company in a public game (below). |
 | `--bots-host` | `on` | With `--bots on`: a companion opens a room when a person is looking at a lobby with nothing in it to join. |
 | `--bots-max` | `3` | The most companions playing at once, across all games. |
@@ -547,6 +549,7 @@ below, more:
 | Saved games | `saves/<game>.json` | One file each; deleted after 3 days. |
 | Draft recipes, promotion proposals | `drafts.json` | Deleted with the account's other data by `accounts_admin.py delete` (proposals stay on record). |
 | Daily challenge targets, attempts and scores | `daily.json` | The last 400 days. A damaged file is reported, never overwritten. |
+| Which design patches are on | `patches_state.json` | `off`, `preview` or `on` per patch; the patches themselves are files in `patches/`. |
 | Running games | memory only | Lost if the server stops; `reload.py` carries them across a restart via `reload_snapshot.json`. |
 
 If you keep the project in git, add `accounts.json`, `saves/`, `*.pem`,
@@ -573,6 +576,21 @@ look. Both are in the same stylesheets: `style.css` is the classic look on its o
 scrolls switches it. The game board has no link; it uses whichever look was chosen on the other pages.
 In the Euler look, hovering something with a mouse (`sparkle.js`) turns it black and white inside a pulsing dark aura that throws off black sparkles; touch screens get none of
 it, and with reduced motion only the grey-out stays.
+
+## Design patches
+
+UI changes from designers can be put on the live site **as patches that come off again**, before anyone decides to make them permanent.
+A patch is a stylesheet in `patches/` (`patches/<name>.css`; its first `/* comment */` is its title), with an optional
+`patches/<name>.text.json` for text changes (`[{"page": "home", "selector": "h1", "text": "New words"}]`). Rules can aim at one page with the
+attribute `look.js` puts on `<html>`: `[data-page="home"] .card { … }` (pages: `home`, `game`, `race`, `create`, `admin`, `ops`, `login`, `verify`,
+`privacy`, `terms`).
+
+Each patch is **Off** (the default), **Preview** (only administrators and designers see it) or **On** (everyone). Switch them on the
+Operations page (*Design patches*), in the designer picker (*Patches*, which also reloads the patch styles in place), or with
+`python3 patches.py list` and `python3 patches.py on|preview|off <name>`. The state is kept in `patches_state.json` (not in git); the patch
+files are code and are committed. Every page links `/patches.css`, which holds the patches that apply to whoever asks, so a change shows
+when a page is next loaded and nothing needs a restart. To keep a patch for good, move its rules into `static/style.css` (or `euler.css`) and
+delete its files; to drop it, switch it off or delete it.
 
 ## Tests
 
