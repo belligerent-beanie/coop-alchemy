@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Icon set · Co-op Alchemy</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/euler.css">
+  <link rel="stylesheet" href="/patches.css">
+  <link rel="stylesheet" href="/static/icons.css">
+  <script src="/static/look.js"></script>
+</head>
+<body class="icons-page">
+  <header class="ic-top">
+    <a class="back" href="/icons" title="Back to the Icon studio">←</a>
+    <h1>Icon set</h1>
+    <span id="is-summary" class="muted"></span>
+    <span class="ic-spacer"></span>
+    <a class="btn" href="/icons">Icon studio</a>
+  </header>
+  <p id="is-error" class="error" role="alert"></p>
+
+  <div class="is-controls" role="group" aria-label="How to show the set">
+    <label>Size
+      <select id="is-size">
+        <option value="28">28 px: a tile</option>
+        <option value="60" selected>60 px: the element list</option>
+        <option value="128">128 px: full size</option>
+      </select></label>
+    <label>Background
+      <select id="is-bg">
+        <option value="list" selected>List slot (cream)</option>
+        <option value="light">Tile, light theme</option>
+        <option value="dark">Tile, dark theme</option>
+        <option value="clear">Transparent</option>
+      </select></label>
+    <label>Sort
+      <select id="is-sort">
+        <option value="name">Name</option>
+        <option value="weight">Weight (ink used)</option>
+        <option value="fill">Size on the canvas</option>
+        <option value="offset">Off-centre</option>
+        <option value="colour">Main colour</option>
+        <option value="flags">Most flags first</option>
+      </select></label>
+    <input id="is-search" type="search" placeholder="Find an element" aria-label="Find an element" maxlength="40">
+    <label class="ic-check"><input type="checkbox" id="is-flagged"> Only flagged</label>
+    <label class="ic-check"><input type="checkbox" id="is-missing"> Show those without an icon</label>
+    <label class="ic-check"><input type="checkbox" id="is-previews" checked> Include icons in preview</label>
+  </div>
+  <p class="muted is-help">Flags mark icons that stand out from the rest of the set: much heavier or lighter, much bigger or smaller,
+    off-centre, touching the edge, or in a colour the others do not use. Click an icon for its numbers.</p>
+
+  <div class="is-layout">
+    <div id="is-grid" class="is-grid" aria-live="polite"></div>
+    <aside id="is-detail" class="is-detail" hidden>
+      <div class="ic-head-row"><h2 id="is-d-name"></h2><button type="button" id="is-d-close" class="link" aria-label="Close">✕</button></div>
+      <div class="is-d-sizes">
+        <span class="is-cell-bg clear"><img id="is-d-128" alt="" width="128" height="128"></span>
+        <span class="is-cell-bg list"><img id="is-d-60" alt="" width="60" height="60"></span>
+        <span class="is-cell-bg light"><img id="is-d-28l" alt="" width="28" height="28"></span>
+        <span class="is-cell-bg dark"><img id="is-d-28d" alt="" width="28" height="28"></span>
+      </div>
+      <dl id="is-d-facts" class="is-facts"></dl>
+      <ul id="is-d-flags" class="is-flags"></ul>
+      <a id="is-d-open" class="btn primary" href="/icons">Open in the studio</a>
+    </aside>
+  </div>
+
+  <script src="/static/auth.js"></script>
+  <script src="/static/icons-set.js"></script>
+</body>
+</html>

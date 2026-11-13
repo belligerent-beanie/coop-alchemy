@@ -1154,8 +1154,8 @@ async function start() {
   await loadMine();
   renderElementList();
   Net.poll(loadMine, 30000);   // an administrator's decision shows without a reload
-  let last = null;
-  try { last = localStorage.getItem(STORE_PREFIX + "last"); } catch (_) { last = null; }
+  let last = new URLSearchParams(location.search).get("element");   // "Open in the studio" from the icon set
+  if (!last) { try { last = localStorage.getItem(STORE_PREFIX + "last"); } catch (_) { last = null; } }
   const el = last && elements.find((e) => e.id === last);
   if (el) await openElement(el);
   if (!tourSeen()) showTour(0);   // the first visit in this browser

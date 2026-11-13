@@ -77,7 +77,7 @@ body.icons-page { height: auto; min-height: 100%; }
 .pv-tile-light span, .pv-tile-dark span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pv-tile-light { background: #ffffff; color: #22252a; border: 1px solid #d9d6cd; }
 .pv-tile-dark { background: #2b2f38; color: #e8e9ec; border: 1px solid #333843; }
-.pv-tile-dark canvas { background: #f4f1e8; border-radius: 6px; padding: 2px; box-sizing: content-box; }   /* the dark-mode backing */
+.pv-tile-dark canvas { background: #f4f1e8; border-radius: 6px; padding: 2px; box-sizing: border-box; width: 28px; height: 28px; }   /* the dark-mode backing: inside the 28 px, as in the game */
 
 .ic-dialog { max-width: 420px; }
 .ic-dialog img { display: block; margin: 0 auto; background: #f4f1e8; border-radius: 10px; }
@@ -131,3 +131,40 @@ body.icons-page { height: auto; min-height: 100%; }
 .ic-tour-step { font-size: 0.8rem; }
 .ic-tour-focus { outline: 3px solid #ff5ca8 !important; outline-offset: 3px; border-radius: 6px; }
 .ic-tour.left { right: auto; left: 16px; }
+
+/* ---- the icon set overview (icons-set.html) ---- */
+.is-controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; padding: 12px 16px 0; }
+.is-controls label { display: flex; align-items: center; gap: 6px; font-size: 0.9rem; }
+.is-help { margin: 6px 16px 0; font-size: 0.85rem; }
+.is-layout { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; padding: 12px 16px 24px; align-items: start; }
+@media (max-width: 800px) { .is-layout { grid-template-columns: 1fr; } }
+.is-grid { display: grid; gap: 8px; }
+.is-grid.size-28 { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); }
+.is-grid.size-60 { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+.is-grid.size-128 { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.is-cell { position: relative; display: grid; justify-items: center; gap: 4px; padding: 6px 4px; border: 1px solid transparent;
+  border-radius: 8px; background: none; color: inherit; font: inherit; cursor: pointer; min-width: 0; }
+.is-cell:hover, .is-cell.current { border-color: var(--line); background: var(--panel); }
+.is-cell.flagged .is-cell-bg { box-shadow: 0 0 0 2px #d9a400; }
+.is-cell.preview .is-cell-bg { outline: 2px dashed #ff5ca8; outline-offset: 2px; }
+.is-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.75rem; color: var(--muted); }
+.is-flag-count { position: absolute; top: 2px; right: 4px; min-width: 18px; padding: 0 4px; border-radius: 999px; background: #d9a400;
+  color: #1f1f24; font-size: 0.72rem; font-weight: 700; line-height: 18px; }
+/* the backgrounds the game puts behind a picture (style.css: .item .art, .tile, and the dark-mode backing) */
+.is-cell-bg { display: inline-grid; place-items: center; border-radius: 10px; }
+.is-cell-bg img { display: block; }
+.is-cell-bg.list { background: #f4f1e8; padding: 0; }
+.is-cell-bg.light { background: #ffffff; border: 1px solid #d9d6cd; padding: 6px 10px; border-radius: 999px; }
+.is-cell-bg.dark { background: #2b2f38; border: 1px solid #333843; padding: 6px 10px; border-radius: 999px; }
+.is-cell-bg.dark img, .is-cell-bg.dark .is-none { background: #f4f1e8; border-radius: 6px; padding: 2px; }
+.is-cell-bg.clear { background: repeating-conic-gradient(#d8d8d8 0% 25%, #ffffff 0% 50%) 0 0 / 16px 16px; border-radius: 4px; }
+.is-none { display: grid; place-items: center; border: 1px dashed #b9b9c4; border-radius: 6px; color: #6b7078; font-size: 0.9rem; box-sizing: border-box; }
+.is-detail { position: sticky; top: 12px; width: 300px; border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; gap: 10px; }
+@media (max-width: 800px) { .is-detail { position: static; width: auto; } }
+.is-detail h2 { margin: 0; font-size: 1.05rem; }
+.ic-head-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.is-d-sizes { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.is-facts { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 0.85rem; }
+.is-facts dt { color: var(--muted); }
+.is-facts dd { margin: 0; }
+.is-flags { margin: 0; padding-left: 1.2em; color: #b07f00; font-size: 0.85rem; display: grid; gap: 2px; }

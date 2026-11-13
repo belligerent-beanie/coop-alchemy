@@ -656,6 +656,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"patches": self.server.patches.listing()})
             elif path == "/icons":
                 self._static("icons.html")
+            elif path == "/icons/set":
+                self._static("icons-set.html")
             elif path == "/icons/elements":
                 self._json(200, self._icon_elements())
             elif path == "/icons/mine":

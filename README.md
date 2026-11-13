@@ -582,7 +582,7 @@ it, and with reduced motion only the grey-out stays.
 
 ## Icon studio
 
-**Icon studio** (a link on the home page for designers and administrators, at `/icons`) is where element icons are drawn. A short **guide** opens the first time it is used in a browser (and from *Guide* at any time): ten pages, from picking an element to proposing, each outlining the part of the studio it is about. It lists every
+**Icon studio** (a link on the home page for designers and administrators, at `/icons`) is where element icons are drawn. **Icon set** (`/icons/set`, linked from the studio) shows every icon side by side, at 28, 60 or 128 pixels on the backgrounds players see, and flags the ones that stand out from the rest: much heavier or lighter, bigger or smaller, off-centre, touching the edge, or in a colour few others use (measured in the browser, compared with the set's median). Sort by any of these, filter to the flagged ones, and open any icon in the studio. A short **guide** opens the first time it is used in a browser (and from *Guide* at any time): ten pages, from picking an element to proposing, each outlining the part of the studio it is about. It lists every
 element, those without an icon first, and draws on the same 128 × 128 canvas as `static/elements/`, shown four times larger with an
 8-pixel grid. A design is made of layers:
 

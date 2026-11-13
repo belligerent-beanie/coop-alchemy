@@ -241,6 +241,9 @@ class EndpointTests(unittest.TestCase):
         status, body = self.request("/icons")
         self.assertEqual(status, 200)
         self.assertIn(b"Icon studio", body)
+        status, body = self.request("/icons/set")
+        self.assertEqual(status, 200)
+        self.assertIn(b"Icon set", body)
 
     def test_a_designer_saves_and_proposes_and_an_admin_approves_it_into_the_game(self) -> None:
         designer, admin, player = self.session("drawer", designer=True), self.session("boss", admin=True), self.session("plain")
