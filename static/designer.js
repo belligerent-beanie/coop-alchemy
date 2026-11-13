@@ -6,9 +6,46 @@
 // browser's copy of the page only: nothing is sent to the server; they are kept in this browser (localStorage, per page) and put back after a reload. "Changes" exports them as
 // Markdown (selector, before → after) to hand to a developer or an AI. This is a convenience for designers, not a security
 // boundary: anyone can do the same in their browser's developer tools, and the server never trusts any of it.
-(function () {
+// The same file is the Chrome extension's picker (extension/): everything that depends on where it runs is in `host` below.
+(function boot() {
+  const pre = window.__designerHost;
+  if (pre && pre.ready && !pre.loaded) { pre.ready.then(() => { pre.loaded = true; boot(); }); return; }   // the extension loads its saved state first
   if (window.__designerLoaded) return;
   window.__designerLoaded = true;
+
+  // ---------- where it runs ----------
+  // Everything that depends on the place the picker runs in goes through `host`. These defaults are the game's own pages (edits in
+  // localStorage, patches from the server, a guide on the Guides page). The Chrome extension (extension/) sets window.__designerHost
+  // before this file runs to replace any of them: chrome.storage, no patches, its own mount point (a Shadow DOM), and so on.
+  const host = Object.assign({
+    storageKey: () => "alchemy-designer-changes:" + location.pathname,
+    readEdits(key) { try { return localStorage.getItem(key); } catch (_) { return null; } },
+    writeEdits(key, value) { try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch (_) { /* full or blocked: edits still work in this tab */ } },
+    onEditsChanged(key, callback) { window.addEventListener("storage", (event) => { if (event.key === key || event.key === null) callback(); }); },
+    tourSeen() { try { return localStorage.getItem("alchemy-designer-tour") === "done"; } catch (_) { return false; } },
+    markTourSeen() { try { localStorage.setItem("alchemy-designer-tour", "done"); } catch (_) { /* shows again next time */ } },
+    patches: typeof Auth !== "undefined" ? {
+      list: () => Auth.fetch("/patches/list").then((data) => data.patches),
+      set: (name, state) => Auth.fetch("/patches/set", { name, state }).then((data) => data.patches),
+      reload() {   // pick up /patches.css again, so a style patch shows (or goes) without reloading the page
+        const link = document.querySelector('link[rel="stylesheet"][href^="/patches.css"]');
+        if (link) link.href = "/patches.css?t=" + Date.now();
+      },
+    } : null,
+    takeGuide: (name) => typeof takeGuide === "function" && takeGuide(name),
+    isPreview: () => window.name === "dz-preview",
+    openPreview(width, height) {   // true if a window opened
+      const win = window.open(location.href, "dz-preview", `popup,width=${width},height=${height}`);
+      if (!win) return false;
+      win.focus();
+      setTimeout(() => {   // make the inside of the window, not its frame, the size asked for
+        try { win.resizeTo(width + (win.outerWidth - win.innerWidth), height + (win.outerHeight - win.innerHeight)); } catch (_) { /* not allowed: it stays as opened */ }
+      }, 500);
+      return true;
+    },
+    mount(root) { document.body.append(root); },
+    isOwn: () => false,   // a node outside the root that is still the picker's (the extension's shadow host)
+  }, pre || {});
 
   // ---------- small helpers ----------
   function h(tag, attrs, ...children) {
@@ -275,7 +312,11 @@
   const toast = h("div", { class: "dz-toast", role: "status", "aria-live": "polite", hidden: true });
   root.append(hoverBox, selectBox, dock, toggle, toast);
 
-  const ours = (node) => node instanceof Node && root.contains(node);
+  const ours = (node) => node instanceof Node && (root.contains(node) || host.isOwn(node));
+  /** The element that has focus: inside a Shadow DOM document.activeElement is only the shadow host. */
+  const activeEl = () => { const top = root.getRootNode(); return top instanceof ShadowRoot ? top.activeElement : document.activeElement; };
+  /** What an event really hit: event.target is retargeted to the shadow host for anything inside one. */
+  const eventTarget = (event) => (event.composedPath && event.composedPath()[0]) || event.target;
 
   // Drag handles on the selected element while the Size tool is open: right edge, bottom edge, and the corner (Shift keeps the proportions).
   let sizeSync = null;    // the Size panel's way of updating its fields while a handle is dragged
@@ -525,7 +566,7 @@
   // reload, a new version of the site or a design patch switched on never costs a designer their work. An edit whose element
   // is not on the page (yet: the game board draws itself later; or any more: the page changed) is kept as it is, listed
   // under Changes and still exported, until it is reset.
-  const STORE_KEY = "alchemy-designer-changes:" + location.pathname;
+  const STORE_KEY = host.storageKey();
   let pending = [];   // saved edits whose element is not on the page: {selector, snippet, before, after, text}
   const saved = (rec) => ({ selector: rec.selector, snippet: rec.snippet, before: rec.before, after: rec.after || {}, text: rec.text || null });
   /** An entry that changes nothing (everything put back as it was) is not worth keeping, counting or exporting. */
@@ -533,12 +574,12 @@
     if (PREVIEW) return;
     try {
       const all = [...[...changes.values()].map(saved), ...pending].filter(hasChange);
-      if (all.length) localStorage.setItem(STORE_KEY, JSON.stringify(all)); else localStorage.removeItem(STORE_KEY);
-    } catch (_) { /* storage full or blocked: the edits still work in this tab */ }
+      host.writeEdits(STORE_KEY, all.length ? JSON.stringify(all) : null);
+    } catch (_) { /* the edits still work in this tab */ }
   }
   function restore() {
     try {
-      const raw = JSON.parse(localStorage.getItem(STORE_KEY) || "[]");
+      const raw = JSON.parse(host.readEdits(STORE_KEY) || "[]");
       pending = Array.isArray(raw) ? raw.filter((item) => item && typeof item.selector === "string" && item.before && hasChange(item)) : [];
     } catch (_) { pending = []; }
     if (!pending.length) return;
@@ -824,7 +865,7 @@
       sliders.g.input.value = String(Math.round(g)); sliders.g.number.textContent = String(Math.round(g));
       sliders.b.input.value = String(Math.round(b)); sliders.b.number.textContent = String(Math.round(b));
       const text = toHex(r, g, b);
-      if (document.activeElement !== hexInput) hexInput.value = text;
+      if (activeEl() !== hexInput) hexInput.value = text;
       swatch.style.backgroundColor = text;
     }
     const fromRgb = () => { [hue, sat, val] = rgbToHsv(r, g, b); if (sat === 0 || val === 0) hue = +hueInput.value; };
@@ -913,15 +954,14 @@
   // ---------- preview at other screen sizes ----------
   // Opens this page in a real browser window of that size (so its media queries really run). That window, named dz-preview,
   // shows no picker: it puts the same saved edits on the page, and reloads when they change here (the storage event).
-  const PREVIEW = window.name === "dz-preview";
+  const PREVIEW = host.isPreview();
   const PREVIEW_SIZES = [["Phone", 390, 844], ["Tablet", 820, 1180], ["Laptop", 1280, 800]];
   function openPreview(width, height) {
-    const win = window.open(location.href, "dz-preview", `popup,width=${width},height=${height}`);
-    if (!win) { showToast("The browser blocked the window: allow pop-ups for this site, then try again."); return; }
-    win.focus();
-    setTimeout(() => {   // make the inside of the window, not its frame, the size asked for
-      try { win.resizeTo(width + (win.outerWidth - win.innerWidth), height + (win.outerHeight - win.innerHeight)); } catch (_) { /* not allowed: it stays as opened */ }
-    }, 500);
+    // true or false straight away (the game's pages), or a promise of true or a message to show (the extension)
+    Promise.resolve(host.openPreview(width, height)).then((result) => {
+      if (result === false) showToast("The browser blocked the window: allow pop-ups for this site, then try again.");
+      else if (typeof result === "string") showToast(result);
+    });
   }
   function previewPanel() {
     return h("div", { class: "dz-panel" },
@@ -934,11 +974,10 @@
     const show = () => { badge.textContent = `Preview ${window.innerWidth} × ${window.innerHeight}`; };
     show();
     window.addEventListener("resize", show);
-    document.body.append(h("div", { class: "dz-root", "data-designer": "" }, badge));
+    host.mount(h("div", { class: "dz-root", "data-designer": "" }, badge));
     restore();
     let timer = 0;
-    window.addEventListener("storage", (event) => {
-      if (event.key !== STORE_KEY && event.key !== null) return;
+    host.onEditsChanged(STORE_KEY, () => {
       clearTimeout(timer);
       timer = setTimeout(() => location.reload(), 300);
     });
@@ -1102,7 +1141,6 @@
   function closeTool() { tool = null; }
 
   // ---------- the guide ----------
-  const TOUR_KEY = "alchemy-designer-tour";
   const TOUR = [
     { title: "Select an element", lines: [
       "Alt+Shift+P turns the picker on and off.",
@@ -1119,7 +1157,7 @@
   ];
   function endTour() {
     tourStep = null;
-    try { localStorage.setItem(TOUR_KEY, "done"); } catch (_) { /* not remembered: it shows again next time */ }
+    host.markTourSeen();
     renderDock();
   }
   function tourPanel() {
@@ -1160,7 +1198,7 @@
       h("strong", { text: selected ? label(selected) : "UI picker" }),
       undoLink, redoLink, compareLink, previewLink,
       changesLink,
-      h("button", { type: "button", class: "dz-link", text: "Patches", title: "Design patches: switch them off, to preview, or on",
+      host.patches && h("button", { type: "button", class: "dz-link", text: "Patches", title: "Design patches: switch them off, to preview, or on",
                     onclick: () => { showPatches = !showPatches; showChanges = false; showPreview = false; renderDock(); } }),
       h("button", { type: "button", class: "dz-link", text: "Guide", title: "How the picker works", onclick: () => { tourStep = 0; renderDock(); } }),
       h("button", { type: "button", class: "dz-link", text: "Off", title: "Turn picker mode off", onclick: () => setOn(false) }));
@@ -1395,7 +1433,7 @@
 
     const sizeRange = h("input", { type: "range", min: "8", max: "72", class: "dz-range", "aria-label": "Font size slider" });
     const sizeField = numberField("Font size in pixels", 6, 200, (value) => { state.size = value; showSize(); set({ "font-size": value + "px" }); });
-    const showSize = () => { sizeRange.value = String(Math.min(72, Math.max(8, state.size))); if (document.activeElement !== sizeField) sizeField.value = String(state.size); };
+    const showSize = () => { sizeRange.value = String(Math.min(72, Math.max(8, state.size))); if (activeEl() !== sizeField) sizeField.value = String(state.size); };
     sizeRange.addEventListener("input", () => { state.size = +sizeRange.value; showSize(); set({ "font-size": state.size + "px" }); });
 
     const known = WEIGHTS.some(([value]) => value === state.weight);
@@ -1458,7 +1496,7 @@
         const { range, field } = controls[axis];
         range.max = String(Math.max(600, now[axis] * 2));
         range.value = String(now[axis]);
-        if (document.activeElement !== field) field.value = String(now[axis]);
+        if (activeEl() !== field) field.value = String(now[axis]);
       }
       const stuck = ["width", "height"].filter((axis) => askFor[axis] !== undefined && Math.abs(now[axis] - askFor[axis]) > 1);
       note.textContent = inline ? "This is inline text: it flows with its line and cannot be sized. Select its parent, or a box around it."
@@ -1540,14 +1578,9 @@
   }
   // ---------- design patches ----------
   const PATCH_STATES = [["off", "Off"], ["preview", "Preview"], ["on", "On"]];
-  /** Reload /patches.css in place, so a style patch shows (or goes) without reloading the page. */
-  function reloadPatchStyles() {
-    const link = document.querySelector('link[rel="stylesheet"][href^="/patches.css"]');
-    if (link) link.href = "/patches.css?t=" + Date.now();
-  }
   function patchesPanel() {
     const panel = h("div", { class: "dz-panel" }, h("p", { class: "dz-hint", text: "Loading patches…" }));
-    Auth.fetch("/patches/list").then(({ patches }) => fillPatches(panel, patches))
+    host.patches.list().then((patches) => fillPatches(panel, patches))
       .catch((err) => panel.replaceChildren(h("p", { class: "dz-hint", text: err.message })));
     return panel;
   }
@@ -1561,9 +1594,8 @@
         onclick: async () => {
           if (patch.state === state) return;
           try {
-            const data = await Auth.fetch("/patches/set", { name: patch.name, state });
-            fillPatches(panel, data.patches);
-            reloadPatchStyles();
+            fillPatches(panel, await host.patches.set(patch.name, state));
+            host.patches.reload();
             showToast(patch.text_changes ? `${patch.name}: ${label}. Reload the page for its text changes (your edits are kept).` : `${patch.name}: ${label}`);
           } catch (err) { showToast(err.message); }
         },
@@ -1610,13 +1642,13 @@
   }
   const STOPPED = ["click", "dblclick", "mousedown", "mouseup", "pointerdown", "pointerup", "auxclick", "contextmenu", "submit", "dragstart"];
   function swallow(event) {
-    if (ours(event.target)) return;
+    if (ours(eventTarget(event))) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    if (event.type === "click") { climbed = []; select(event.target); }
+    if (event.type === "click") { climbed = []; select(eventTarget(event)); }
   }
   function onMove(event) {
-    if (ours(event.target)) { hovered = null; } else { hovered = event.target === document.documentElement ? null : event.target; }
+    if (ours(eventTarget(event))) { hovered = null; } else { hovered = eventTarget(event) === document.documentElement ? null : eventTarget(event); }
     refreshBoxes();
   }
   function onKey(event) {
@@ -1634,22 +1666,22 @@
       if (event.key === "ArrowLeft" && tourStep > 0) { event.preventDefault(); tourStep -= 1; renderDock(); return; }
     }
     if ((event.ctrlKey || event.metaKey) && !event.altKey && /^[zy]$/i.test(event.key)) {
-      const editing = isEditingField(event.target);
+      const editing = isEditingField(eventTarget(event));
       const forward = event.key.toLowerCase() === "y" || event.shiftKey;
       if (!editing && (forward ? redoStack.length : undoStack.length)) { event.preventDefault(); if (forward) redo(); else undo(); }
       return;
     }
-    if (event.key.toLowerCase() === "m" && !event.ctrlKey && !event.metaKey && !event.altKey && selected && !isEditingField(event.target)) {   // hold to measure
+    if (event.key.toLowerCase() === "m" && !event.ctrlKey && !event.metaKey && !event.altKey && selected && !isEditingField(eventTarget(event))) {   // hold to measure
       event.preventDefault();
       if (!event.repeat) { measuring = true; renderMeasure(); }
       return;
     }
-    if (event.key === "\\" && !event.ctrlKey && !event.metaKey && !event.altKey && !isEditingField(event.target)) {   // hold to compare
+    if (event.key === "\\" && !event.ctrlKey && !event.metaKey && !event.altKey && !isEditingField(eventTarget(event))) {   // hold to compare
       event.preventDefault();
       if (!event.repeat) setCompare(true);
       return;
     }
-    const typing = ours(event.target) && /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName);
+    const typing = ours(eventTarget(event)) && /^(INPUT|TEXTAREA|SELECT)$/.test(eventTarget(event).tagName);
     if (event.key === "Escape") {
       event.preventDefault();
       if (showPreview) showPreview = false;
@@ -1671,7 +1703,7 @@
       let next = climbed.pop();
       if (!next || !selected.contains(next) || next === selected) next = [...selected.children].find((c) => !ours(c)) || null;
       if (next) select(next);
-    } else if (event.key === "Enter" && selected && (!ours(event.target) || event.target === toggle)) {   // the Design button keeps focus after a mouse click: Enter must not press it
+    } else if (event.key === "Enter" && selected && (!ours(eventTarget(event)) || eventTarget(event) === toggle)) {   // the Design button keeps focus after a mouse click: Enter must not press it
       event.preventDefault();
       menuOpen = true;
       renderDock();
@@ -1684,23 +1716,22 @@
     window[method]("mousemove", onMove, true);
     if (!on) { hovered = null; selected = null; climbed = []; menuOpen = false; tool = null; showChanges = false; tourStep = null; showPatches = false; }
     else {
-      let seen = false;
-      try { seen = localStorage.getItem(TOUR_KEY) === "done"; } catch (_) { /* unreadable: show the guide */ }
-      if (!seen) tourStep = 0;   // the first time on this browser
+      if (!host.tourSeen()) tourStep = 0;   // the first time on this browser
     }
     renderDock();
     refreshBoxes();
   }
 
+  window.__designerApi = { toggle: () => setOn(!on), isOn: () => on };   // the extension's toolbar button
   if (PREVIEW) { startPreviewMode(); return; }   // the screen-size preview window
   window.addEventListener("keydown", onKey, true);
   window.addEventListener("scroll", refreshBoxes, { capture: true, passive: true });
   window.addEventListener("resize", refreshBoxes);
   setInterval(() => { if (on && selected) refreshBoxes(); }, 500);   // the page may move things around (the board does)
   toggle.addEventListener("click", () => setOn(!on));
-  document.body.append(root);
+  host.mount(root);
   restore();
-  if (typeof takeGuide === "function" && takeGuide("designer")) {   // asked for on the Guides page
+  if (host.takeGuide("designer")) {   // asked for on the Guides page
     setOn(true);
     tourStep = 0;
     renderDock();

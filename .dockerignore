@@ -40,3 +40,4 @@ reload_snapshot.json*
 
 # the UI/UX tooling workspace (Storybook, shadcn/ui, Chromatic, axe, Lighthouse) is for designers, not part of the game image
 design
+extension

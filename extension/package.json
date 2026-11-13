@@ -1,0 +1,11 @@
+{
+  "name": "design-picker-extension",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Chrome extension build of the designer's UI picker (static/designer.js). See README.md.",
+  "scripts": {
+    "build": "node build.mjs",
+    "build:test": "node build.mjs --test --out dist-test"
+  }
+}

@@ -46,3 +46,7 @@ icon_files/
 
 # playwright-cli page snapshots and session files
 .playwright-cli/
+
+# the Chrome extension build (extension/build.mjs) and its test builds
+extension/dist/
+extension/dist-test/

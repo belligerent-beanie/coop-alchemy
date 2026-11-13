@@ -193,6 +193,7 @@ through reloads, per page, until reset). Alt+Shift+E (or "Changes" > Copy) copie
 Claude or a developer to apply in the code ("Download" saves it as ui-changes-<page>.md, which can be given to Claude the same way).
 A short guide opens the first time the picker is turned on and under "Guide".
 It changes nothing for other players and is a convenience, not a security feature.
+The same picker also ships as a **Chrome extension for any site** (`extension/`, see its README): `static/designer.js` is the one copy of the code.
 
 A first administrator can be made with `python3 accounts_admin.py create-admin` (an account called `admin`, with a random temporary password saved to `admin-first-password.txt` beside the accounts file and never printed; it must be changed at first login), and **admins** are accounts marked with `python3 accounts_admin.py make-admin <username>`
 (`remove-admin` undoes it; `list` shows them). Admins see **Review proposals** on the home

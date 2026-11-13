@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Design Picker options</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; max-width: 38rem; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { font-size: 1.3rem; }
+  button { font: inherit; padding: 6px 14px; cursor: pointer; }
+  #state { font-weight: 600; }
+  p.small { color: #555; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>Design Picker</h1>
+<p>The picker works on the tab you click it on, with no special permission. <strong>Screen-size previews</strong> open a second window, and
+putting your edits on it needs access to every site. That is optional: allow it here if you want previews.</p>
+<p>All sites: <span id="state">…</span></p>
+<p><button id="allow" type="button">Allow previews on all sites</button> <button id="revoke" type="button">Remove that permission</button></p>
+<p class="small">Your edits are kept in this browser only, per site and page, and nothing is sent anywhere.</p>
+<script src="options.js"></script>
+</body>
+</html>
