@@ -961,3 +961,6 @@ body.notfound { font: 16px system-ui; max-width: 30rem; margin: 4rem auto; paddi
 .help-pop::before { content: ""; position: absolute; left: 0; right: 0; top: -8px; height: 8px; }   /* a bridge, so the tip stays open while the pointer moves onto it */
 .help.left .help-pop { left: auto; right: 0; }
 .help:hover .help-pop, .help:focus-within .help-pop, .help.open .help-pop { display: block; }
+
+/* A proposed icon in preview (pictures.js): only administrators and designers see these. */
+img.pic.pic-preview { outline: 2px dashed #ff5ca8; outline-offset: -2px; }

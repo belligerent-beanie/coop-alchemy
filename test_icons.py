@@ -144,6 +144,33 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(len(self.store.queue(lambda e: None)["waiting"]), 1)
 
 
+class PreviewTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.store = IconStore(None, None)
+        for who in ("Mia", "Zed"):
+            self.store.save_design(who, "air", DOC, data_url(make_png()))
+            self.store.propose(who, "air", "")
+        self.ids = {p["author"]: p["id"] for p in self.store.queue(lambda e: None)["waiting"]}
+
+    def test_its_designer_or_an_admin_previews_and_only_one_per_element(self) -> None:
+        with self.assertRaises(GameError):
+            self.store.set_preview("Zed", False, self.ids["Mia"], True)          # not his proposal
+        self.store.set_preview("Mia", False, self.ids["Mia"], True)
+        self.assertEqual(set(self.store.previews()), {"air"})
+        self.assertTrue(self.store.design("Mia", "air")["preview"])
+        self.store.set_preview("Rooty", True, self.ids["Zed"], True)             # an admin switches to Zed's
+        self.assertFalse(self.store.design("Mia", "air")["preview"])
+        self.assertTrue(self.store.design("Zed", "air")["preview"])
+        self.assertEqual(self.store.previews()["air"], self.store.queue(lambda e: None)["waiting"][1]["png"])
+
+    def test_a_preview_ends_when_the_proposal_is_handled(self) -> None:
+        self.store.set_preview("Mia", False, self.ids["Mia"], True)
+        self.store.reject("Rooty", self.ids["Mia"], "")
+        self.assertEqual(self.store.previews(), {})
+        with self.assertRaises(GameError):
+            self.store.set_preview("Mia", False, self.ids["Mia"], True)          # only waiting ones
+
+
 class ReplacedPictureTests(unittest.TestCase):
     def test_a_replaced_picture_gets_a_new_address_and_the_old_one_still_works(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -243,6 +270,21 @@ class EndpointTests(unittest.TestCase):
         status, data = self.request("/icons/undo", admin, {"id": proposal["id"]})
         self.assertEqual((status, data), (200, {"restored": False}))
         self.assertIsNone(self.index.url_for(self.element))                                 # it had none before
+
+    def test_previews_reach_admins_and_designers_only(self) -> None:
+        designer, other = self.session("previewer", designer=True), self.session("otherdesigner", designer=True)
+        player = self.session("previewplayer")
+        self.request("/icons/save", designer, {"element": self.element, "doc": DOC, "png": data_url(make_png())})
+        design = self.request("/icons/propose", designer, {"element": self.element})[1]["design"]
+        self.assertEqual(self.request("/icons/preview", other, {"id": design["proposal"], "on": True})[0], 403)
+        self.assertEqual(self.request("/icons/preview", player, {"id": design["proposal"], "on": True})[0], 403)
+        self.assertEqual(self.request("/icons/preview", designer, {"id": design["proposal"], "on": True})[1], {"preview": True})
+        for who, expected in (("", {}), (player, {}), (other, {self.element}), (designer, {self.element})):
+            status, data = self.request("/icons/previews", who)
+            self.assertEqual((status, set(data["previews"])), (200, set(expected)), who)
+        url = self.request("/icons/previews", other)[1]["previews"][self.element]
+        self.assertEqual(self.request(url, player)[0], 403)                      # the file itself is not for players either
+        self.assertTrue(self.request("/icons/mine", designer)[1]["designs"][0]["preview"])
 
     def test_a_big_design_is_accepted_but_only_from_designers_and_only_on_save(self) -> None:
         designer = self.session("drawer2", designer=True)

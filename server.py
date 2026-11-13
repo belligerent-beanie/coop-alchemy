@@ -43,6 +43,9 @@ HTTP API
     POST /icons/propose {"element", "note"?} -> {"design"}   send the saved design to the administrators
     POST /icons/delete  {"element"}     -> {"deleted"}   throw a design away
                                            (all of /icons/*: administrators and designers only)
+    GET  /icons/previews                -> {"previews": {element id: address}}   proposed icons previewed in the game; {} for
+                                           anyone but administrators and designers
+    POST /icons/preview {"id", "on"}    -> {"preview"}   preview a waiting proposal in the game (its designer or an admin)
     GET  /icons/queue                   -> {"waiting": [...], "recent": [...]}   icon proposals, for the review page (admins)
     POST /icons/handle  {"id", "action", "reply"?} -> approve (the icon goes into the pictures folder at once) or reject (admins)
     POST /icons/undo    {"id"}          -> {"restored"}   take back the latest approval of an element (admins)
@@ -674,6 +677,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Cache-Control", "private, max-age=86400")   # a stored file never changes: new work gets a new name
                 self.end_headers()
                 self.wfile.write(data)
+            elif path == "/icons/previews":   # every page that shows pictures asks; only admins and designers get any
+                self._json(200, {"previews": self._icon_previews()})
             elif path == "/icons/queue":
                 self._admin()
                 pictures = self.server.registry.pictures
@@ -1382,18 +1387,40 @@ class Handler(BaseHTTPRequestHandler):
                 raise GameError(400, "action must be approve or reject")
             pictures.refresh()   # players get the new picture now, not at the next look at the folder
             return result
+        if path == "/icons/preview":
+            who, body = self._admin_or_designer(), self._read_json()
+            result = icons.set_preview(who, self.server.accounts.is_admin(who), body.get("id"), body.get("on") is True)
+            log.info("%s %s the preview of icon proposal %s", who, "started" if body.get("on") is True else "stopped",
+                     log_safe(str(body.get("id"))))
+            return result
         who = self._admin_or_designer()   # the role is checked before a large body is read
         body = self._read_json(MAX_ICON_BODY if path == "/icons/save" else MAX_BODY)
         element = self._icon_element(body.get("element"))
         if path == "/icons/save":
-            return {"design": icons.save_design(who, element, body.get("doc"), body.get("png"))}
+            icons.save_design(who, element, body.get("doc"), body.get("png"))
+            return {"design": self._design_summary(who, element)}
         if path == "/icons/propose":
-            result = icons.propose(who, element, body.get("note"))
+            icons.propose(who, element, body.get("note"))
             log.info("%s proposed an icon for %s", who, log_safe(element))
-            return {"design": result}
+            return {"design": self._design_summary(who, element)}
         if path == "/icons/delete":
             return {"deleted": icons.delete_design(who, element)}
         raise GameError(404, "not found")
+
+    def _design_summary(self, who: str, element: str) -> dict[str, Any]:
+        """A design's state for the studio (as /icons/mine lists it), without the design itself."""
+        design = self.server.icons.design(who, element) or {}
+        design.pop("doc", None)
+        return design
+
+    def _icon_previews(self) -> dict[str, str]:
+        """element id -> address of the proposed icon previewed for it, for a logged-in administrator or designer; {} for anyone
+        else (not an error: every page asks). The page only uses it for elements it already shows."""
+        token, _ = self._session_token()
+        name = self.server.accounts.username(token) if token else None
+        if not name or not (self.server.accounts.is_admin(name) or self.server.accounts.is_designer(name)):
+            return {}
+        return {eid: f"/icons/file/{png}.png" for eid, png in self.server.icons.previews().items()}
 
     def _icon_elements(self) -> dict[str, Any]:
         """For the icon studio: every element, with the file name its picture has (or would have) and its current picture's

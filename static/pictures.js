@@ -7,13 +7,19 @@
 // The server sends an element's picture address (`pic`) with the element itself, so a page only learns about the pictures of
 // elements it is allowed to see. Only the administrators' page asks for the whole list (see loadPictureMap).
 let pictureMap = {};   // element id -> address, for the administrators' page
+// Icons waiting for an administrator can be previewed in the real game (see iconstore.py): for administrators and designers the
+// server lists them (element id -> address), and they take the place of the current picture, outlined so nobody mistakes them
+// for the real one. Players get an empty list. Only elements the page already shows are affected, so nothing new is revealed.
+let previewMap = {};
 
 function imageUrl(el) {
-  return (el && (el.pic || pictureMap[el.id])) || null;
+  return (el && (previewMap[el.id] || el.pic || pictureMap[el.id])) || null;
 }
 
 /** Show (or remove) the element's picture inside `node`'s .art slot, or in `node` itself if it has none. */
 function applyImage(node, el) {
+  node.__picElement = el;   // remembered, so the picture can be redrawn when the previews change
+  node.classList.add("pic-host");
   const host = node.querySelector(".art") || node;
   let img = host.querySelector("img.pic");
   const url = el ? imageUrl(el) : null;
@@ -32,7 +38,26 @@ function applyImage(node, el) {
     host.prepend(img);
   }
   if (img.getAttribute("src") !== url) img.src = url;
+  const preview = Boolean(el && previewMap[el.id]);
+  img.classList.toggle("pic-preview", preview);
+  img.title = preview ? "Proposed icon, in preview: only administrators and designers see it" : "";
   node.classList.add("has-pic");
+}
+
+/** Fetch the previewed icons and redraw every picture on the page if they changed. */
+async function loadPreviews() {
+  let next = {};
+  try {
+    const res = await fetch("/icons/previews");
+    if (res.ok) next = (await res.json()).previews || {};
+  } catch (_) { return; /* keep what we have */ }
+  if (JSON.stringify(next) === JSON.stringify(previewMap)) return;
+  previewMap = next;
+  for (const node of document.querySelectorAll(".pic-host")) if (node.__picElement) applyImage(node, node.__picElement);
+}
+if (typeof Auth !== "undefined" && Auth.loggedIn()) {
+  loadPreviews();
+  if (typeof Net !== "undefined") Net.poll(loadPreviews, 60000);   // a preview switched on elsewhere shows within a minute
 }
 
 /** Administrators only: fetch every element's picture address, then call `refresh` so the page can apply them. */

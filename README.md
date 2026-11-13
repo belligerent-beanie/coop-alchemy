@@ -605,6 +605,10 @@ open keep working). The picture it replaced is kept, so the latest approval of a
 designer's name is kept with the proposal for the record and is not shown to players. Designs and proposals are kept in `icons.json`
 and `icon_files/` (private, like `accounts.json`).
 
+A waiting icon can be **previewed in the game** (a switch in the studio for its designer, and on the review page for administrators):
+administrators and designers then see it in place of the current picture wherever the element appears, with a dashed pink outline, while
+players keep seeing the real one. One proposal per element is previewed at a time; approving or rejecting it ends the preview.
+
 ## Design patches
 
 UI changes from designers can be put on the live site **as patches that come off again**, before anyone decides to make them permanent.

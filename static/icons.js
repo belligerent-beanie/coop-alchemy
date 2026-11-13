@@ -482,11 +482,27 @@ function showStatus() {
   const d = current && designs.get(current.id);
   const chip = $("ic-status");
   chip.hidden = !d;
-  if (!d) return;
+  if (!d) { $("ic-preview").hidden = true; return; }
   chip.className = "ic-status " + d.status;
   chip.textContent = STATUS_TEXT[d.status] ? STATUS_TEXT[d.status](d) : d.status;
   chip.title = chip.textContent;
   $("ic-propose").textContent = d.status === "waiting" ? "Propose again…" : "Propose…";
+  const preview = $("ic-preview");
+  preview.hidden = !(d.status === "waiting" && d.proposal);
+  preview.setAttribute("aria-pressed", String(Boolean(d.preview)));
+  preview.textContent = d.preview ? "Previewing in the game" : "Preview in the game";
+}
+async function togglePreview() {
+  const d = current && designs.get(current.id);
+  if (!d || !d.proposal) return;
+  try {
+    const { preview } = await Auth.fetch("/icons/preview", { id: d.proposal, on: !d.preview });
+    designs.set(current.id, { ...d, preview });
+    showStatus();
+    $("ic-saved").textContent = preview
+      ? "Previewing: administrators and designers see the proposed icon in the game (players do not)"
+      : "Preview stopped";
+  } catch (err) { showError(err.message); }
 }
 function syncUndoButtons() {
   $("ic-undo").disabled = undoStack.length <= 1;
@@ -955,6 +971,7 @@ $("ic-undo").addEventListener("click", undo);
 $("ic-redo").addEventListener("click", redo);
 $("ic-download").addEventListener("click", download);
 $("ic-propose").addEventListener("click", propose);
+$("ic-preview").addEventListener("click", togglePreview);
 $("ic-add-shapes").addEventListener("click", () => { addLayer("shapes"); commit(); renderLayers(); });
 $("ic-add-pixels").addEventListener("click", () => { addLayer("pixels"); commit(); renderLayers(); });
 $("ic-ref-opacity").addEventListener("input", () => { doc.reference.opacity = +$("ic-ref-opacity").value; render(); });

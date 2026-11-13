@@ -10,6 +10,10 @@ An administrator *approves* (the PNG goes straight into the element pictures fol
 *rejects* it, with an optional reply the designer sees. Approving a redraw keeps the picture it replaced, so the latest
 approval of an element can be *undone*: the old picture comes back (or, for an element that had none, the picture goes away).
 
+A waiting proposal can be *previewed*: administrators and designers then see it in the real game in place of the current picture
+(players never do), so it can be judged where it will live. The designer of the proposal or an administrator switches that, and
+only one proposal per element is previewed at a time.
+
 Everything is in one JSON file (icons.json) plus a folder of PNGs (icon_files/: d-* designs, p-* proposals, b-* the pictures
 approvals replaced). Both are private data, like accounts.json: not in git, and the PNGs are served only to administrators and
 designers. The JSON file is written atomically and a damaged one is never overwritten.
@@ -217,14 +221,24 @@ class IconStore:
         self._drop_file(old_file)
         return self._summary(design)
 
+    @staticmethod
+    def _previewed(data: dict[str, Any], design: dict[str, Any]) -> bool:
+        proposal = next((p for p in data["proposals"] if p["id"] == design.get("proposal")), None)
+        return bool(proposal and proposal["status"] == WAITING and proposal.get("preview"))
+
     def design(self, username: str, element: str) -> dict[str, Any] | None:
-        design = self._load()["designs"].get(self._key(username, element))
-        return {**self._summary(design), "doc": design["doc"]} if design else None
+        data = self._load()
+        design = data["designs"].get(self._key(username, element))
+        if not design:
+            return None
+        return {**self._summary(design), "doc": design["doc"], "preview": self._previewed(data, design),
+                "proposal": design.get("proposal") if design["status"] == WAITING else None}
 
     def mine(self, username: str) -> list[dict[str, Any]]:
-        who = key_of(username)
-        return sorted((self._summary(d) for d in self._load()["designs"].values() if key_of(d["author"]) == who),
-                      key=lambda d: -d["updated"])
+        who, data = key_of(username), self._load()
+        return sorted(({**self._summary(d), "preview": self._previewed(data, d),
+                        "proposal": d.get("proposal") if d["status"] == WAITING else None}
+                       for d in data["designs"].values() if key_of(d["author"]) == who), key=lambda d: -d["updated"])
 
     def delete_design(self, username: str, element: str) -> bool:
         with self._lock:
@@ -297,7 +311,8 @@ class IconStore:
             return {"id": p["id"], "author": p["author"], "element": p["element"], "note": p.get("note", ""),
                     "created": p["created"], "status": p["status"], "png": p["png"], "reply": p.get("reply", ""),
                     "handled_by": p.get("handled_by", ""), "handled_at": p.get("handled_at"),
-                    "replaced": p.get("backup"), "can_undo": p["status"] == APPROVED and latest.get(p["element"]) == p["id"]}
+                    "replaced": p.get("backup"), "can_undo": p["status"] == APPROVED and latest.get(p["element"]) == p["id"],
+                    "preview": p["status"] == WAITING and bool(p.get("preview"))}
         waiting = [{**row(p), "current": current_picture(p["element"])} for p in data["proposals"] if p["status"] == WAITING]
         handled = sorted((p for p in data["proposals"] if p["status"] in (APPROVED, REJECTED, UNDONE)),
                          key=lambda p: -(p.get("handled_at") or 0))[:30]
@@ -378,6 +393,30 @@ class IconStore:
             self._set_design_status(data, proposal, UNDONE)
             self._save(data)
         return {"restored": old is not None}
+
+    def set_preview(self, username: str, is_admin: bool, proposal_id: object, on: object) -> dict[str, Any]:
+        """Show (or stop showing) a waiting proposal in the real game, to administrators and designers. Its designer or an
+        administrator may; switching one on switches off any other preview of the same element."""
+        with self._lock:
+            data = self._load()
+            proposal = self._proposal(data, proposal_id)
+            if not is_admin and key_of(proposal["author"]) != key_of(username):
+                raise GameError(403, "only its designer or an administrator can preview this icon")
+            if proposal["status"] != WAITING:
+                raise GameError(409, "only an icon waiting for an administrator can be previewed")
+            if on:
+                for other in data["proposals"]:
+                    if other["element"] == proposal["element"] and other is not proposal:
+                        other.pop("preview", None)
+                proposal["preview"] = True
+            else:
+                proposal.pop("preview", None)
+            self._save(data)
+        return {"preview": bool(on)}
+
+    def previews(self) -> dict[str, str]:
+        """element id -> the stored PNG of the proposal previewed for it (waiting ones only)."""
+        return {p["element"]: p["png"] for p in self._load()["proposals"] if p["status"] == WAITING and p.get("preview")}
 
     def delete_user(self, username: str) -> int:
         """An account is deleted: its designs go. Its proposals stay on record (as recipe proposals do), with the name."""

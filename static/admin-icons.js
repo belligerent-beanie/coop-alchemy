@@ -69,7 +69,13 @@
       approve.addEventListener("click", () => act("/icons/handle", { id: p.id, action: "approve", reply: reply.value }));
       reject.addEventListener("click", () => act("/icons/handle", { id: p.id, action: "reject", reply: reply.value }));
       actions.append(reply, approve, reject);
-      card.append(actions);
+      const preview = node("label", "", "ir-preview");
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = Boolean(p.preview);
+      box.addEventListener("change", () => act("/icons/preview", { id: p.id, on: box.checked }));
+      preview.append(box, " Preview in the game (administrators and designers see it in place of the current picture)");
+      card.append(actions, preview);
       list.append(card);
     }
     const recent = byId("ir-recent");
