@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Guides · Co-op Alchemy</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/euler.css">
+  <link rel="stylesheet" href="/patches.css">
+  <script src="/static/look.js"></script>
+  <script src="/static/sparkle.js" defer></script>
+</head>
+<body class="guides-page">
+  <main id="guides-main">
+    <p><a href="/">← Home</a></p>
+    <h1>Guides</h1>
+    <p class="who">Every short guide in one place. Each one opens where it belongs, over the page it explains: close it to carry on there.</p>
+    <p id="guides-error" class="error" role="alert"></p>
+    <div id="guides-list" class="guides-list"></div>
+    <section class="guides-more">
+      <h2>Other help</h2>
+      <p>Look for <span class="help-btn" aria-hidden="true">?</span> next to headings on the home page and in games: each explains the part it sits beside.</p>
+      <p><button type="button" id="guides-reset" class="link">Show every guide again by itself, the next time it applies</button>
+        <span id="guides-reset-done" class="muted" hidden>Done.</span></p>
+    </section>
+  </main>
+  <script src="/static/auth.js"></script>
+  <script src="/static/guides.js"></script>
+</body>
+</html>

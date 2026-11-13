@@ -1430,6 +1430,7 @@ function closeHintTutorial() {
 
 /** The first time an account opens a solo game, the hint guide appears by itself. */
 function maybeShowHintTutorial() {
+  if (takeGuide("hints")) { openHintTutorial(); return; }   // asked for on the Guides page
   if (hintsLeft === null || $("hint-tutorial").open) return;
   let seen = false;
   try { seen = localStorage.getItem(tutorialKey()) === "1"; } catch (_) { /* treat as not seen */ }

@@ -67,6 +67,18 @@ const Net = {
   };
 })();
 
+// ---- guides on demand ----
+// The Guides page (/guides) opens a tutorial by sending the player to the page it lives on with ?guide=<name>. The page asks
+// takeGuide(name) when it is ready; the request is used once and taken out of the address, so a reload does not open it again.
+function takeGuide(name) {
+  const params = new URLSearchParams(location.search);
+  if (params.get("guide") !== name) return false;
+  params.delete("guide");
+  const rest = params.toString();
+  history.replaceState(history.state, "", location.pathname + (rest ? "?" + rest : "") + location.hash);
+  return true;
+}
+
 // Login session shared by every page. The server keeps the session in an HttpOnly cookie that scripts cannot read, so the page
 // only remembers WHO is logged in (a name, not a secret) to show it and to decide whether to ask for a login. The real check
 // is the server's: a 401 clears the name and sends the person to log in. An old tab may still hold the previous version's

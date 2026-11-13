@@ -1158,6 +1158,6 @@ async function start() {
   if (!last) { try { last = localStorage.getItem(STORE_PREFIX + "last"); } catch (_) { last = null; } }
   const el = last && elements.find((e) => e.id === last);
   if (el) await openElement(el);
-  if (!tourSeen()) showTour(0);   // the first visit in this browser
+  if (takeGuide("icons") || !tourSeen()) showTour(0);   // asked for on the Guides page, or the first visit in this browser
 }
 start();

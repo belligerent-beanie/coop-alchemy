@@ -42,6 +42,7 @@ this file in the same commit (and add a line to the [change log](#change-log)).
 | `GET /admin` | none | Recipe review page (its data calls need an admin session). |
 | `GET /ops` | none | The administrator's operations page (its data calls need an admin session). |
 | `GET /icons` | none | The icon studio, where designers and administrators draw element icons (its data call needs one of those roles). `?element=<id>` opens that element. |
+| `GET /guides` | none | Every tutorial on the site, opened on demand (each opens on its own page with `?guide=<name>`: `hints` in the solo game, `designer` on the home page, `icons` in the icon studio). |
 | `GET /icons/set` | none | The icon set overview: every icon side by side at the size and on the background players see, with the ones that stand out flagged (its data calls need an administrator or a designer). |
 | `GET /terms` | none | The terms of use page. The administrator's contact line (`--contact`) is filled in where it says so; `/privacy` has it too. |
 | `GET /privacy` | none | What the server stores about players and for how long, in plain language. |
@@ -233,6 +234,7 @@ checks that every option the server accepts appears in the README.
 
 Newest first. Add a line whenever an endpoint, event, status code or option is added, changed or removed.
 
+- **2026-11 (guides)**: `GET /guides`; `?guide=<name>` on the pages that hold a guide.
 - **2026-11 (icon set)**: `GET /icons/set`; `GET /icons?element=<id>`.
 - **2026-11 (icon previews)**: `GET /icons/previews`, `POST /icons/preview`; `proposal` and `preview` in `/icons/mine` and `/icons/design`; `preview` in `/icons/queue`.
 - **2026-11 (icon proposals)**: `GET /icons/mine`, `GET /icons/design`, `GET /icons/file/<name>.png`, `POST /icons/save`, `/icons/propose`, `/icons/delete`, `GET /icons/queue`, `POST /icons/handle`, `/icons/undo`; options `--icons-file` and `--icon-files-dir`; `icon_designs` in the account-deletion summary; a picture's address changes when its file is replaced.

@@ -964,3 +964,17 @@ body.notfound { font: 16px system-ui; max-width: 30rem; margin: 4rem auto; paddi
 
 /* A proposed icon in preview (pictures.js): only administrators and designers see these. */
 img.pic.pic-preview { outline: 2px dashed #ff5ca8; outline-offset: -2px; }
+
+/* ---- Guides (guides.html) ---- */
+body.guides-page { overflow: auto; }
+#guides-main { max-width: 64rem; margin: 0 auto; padding: 24px 16px 48px; display: flex; flex-direction: column; gap: 10px; }
+#guides-main h1 { font-size: 1.5rem; }
+#guides-main .error:empty { display: none; }
+.guide-card .pill.muted { background: var(--line); color: var(--fg); }
+.guides-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; margin: 16px 0 24px; }
+.guide-card { display: grid; gap: 8px; align-content: start; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.guide-card h2 { margin: 0; font-size: 1.1rem; }
+.guide-card p { margin: 0; }
+.guide-card button { justify-self: start; }
+.guide-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.guides-more .help-btn { display: inline-grid; place-items: center; width: 1.3em; height: 1.3em; border: 1px solid var(--line); border-radius: 4px; font-size: 0.85em; }

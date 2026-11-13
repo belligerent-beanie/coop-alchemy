@@ -852,4 +852,9 @@
   toggle.addEventListener("click", () => setOn(!on));
   document.body.append(root);
   restore();
+  if (typeof takeGuide === "function" && takeGuide("designer")) {   // asked for on the Guides page
+    setOn(true);
+    tourStep = 0;
+    renderDock();
+  }
 })();

@@ -79,13 +79,13 @@ html[data-look="euler"] {
   & .dialog-buttons .danger { border-color: var(--danger); color: var(--danger); }
 
   /* ---- pages: a centred column, no cards ---- */
-  & body.home, & body.admin, & body.ops { background: var(--bg); }
-  & #home, & #admin-main, & #ops-main { max-width: 1000px; padding: 12px 16px 40px; }
-  & #home h1, & #admin-main h1, & #ops-main h1 {
+  & body.home, & body.admin, & body.ops, & body.guides-page { background: var(--bg); }
+  & #home, & #admin-main, & #ops-main, & #guides-main { max-width: 1000px; padding: 12px 16px 40px; }
+  & #home h1, & #admin-main h1, & #ops-main h1, & #guides-main h1 {
     font-size: 2.1rem; font-weight: 800; letter-spacing: -0.5px; color: var(--brown); margin: 8px 0 2px;
   }
   & #home section { background: none; border: 0; border-radius: 0; padding: 0; }
-  & #home h2, & #admin-main h2, & #ops-main h2 { font-size: 1.35rem; color: var(--brown); padding: 10px 0 5px; margin: 0; }
+  & #home h2, & #admin-main h2, & #ops-main h2, & #guides-main h2 { font-size: 1.35rem; color: var(--brown); padding: 10px 0 5px; margin: 0; }
   & #home h3, & #admin-main h3 { font-size: 1.05rem; color: var(--fg); }
   & .game-card, & .stat, & .notice, & .draft, & .proposal, & .achievement, & .tier, & #drafts, & #genie, & #hints, & .profile {
     border: 1px solid var(--line); border-radius: 0; background: var(--bg);
@@ -161,10 +161,10 @@ html[data-look="euler"] {
 /* on a phone: tabs share the row, the column is edge to edge and tap targets stay generous */
 @media (max-width: 700px) {
   html[data-look="euler"] {
-    & #home h1, & #admin-main h1, & #ops-main h1 { font-size: 1.7rem; }
+    & #home h1, & #admin-main h1, & #ops-main h1, & #guides-main h1 { font-size: 1.7rem; }
     & .home-tabs { display: grid; grid-template-columns: repeat(3, 1fr); }
     & .home-tab { padding: 0.55em 0.4em; text-align: center; }
-    & #home, & #admin-main, & #ops-main { padding: 8px 12px 32px; }
+    & #home, & #admin-main, & #ops-main, & #guides-main { padding: 8px 12px 32px; }
   }
 }
 
