@@ -25,11 +25,12 @@ in `manifest.template.json` (`name`) if so. Do not use "VisBug" (Apache-2.0 give
 >
 > **Select and change** any element: fill, border, shadow, text, font (colour, size, weight, line height, spacing, alignment), size (type a
 > number or drag the handles), padding and margin, corner radius, and flex and grid layout. Shift-click to select several elements and change
-> them all at once. Copy one element's look and paste it onto others.
+> them all at once, or search by CSS selector to select every match. Copy one element's look and paste it onto others. Shift the hue, saturation and
+> brightness of a whole selection together.
 >
 > **Check as you go.** Every colour picker shows the WCAG contrast ratio (AA and AAA) and the APCA contrast value live, and lists the colours
 > the page already uses, with the names of its CSS variables. Hover anything with the inspector to see its size, type, colours, contrast and
-> the name a screen reader would announce. Hold a key to measure distances between elements. Hold another to flip back to the original page.
+> the name a screen reader would announce. Hold a key to measure distances between elements, another to see what lines up with the selected one, and another to flip back to the original page.
 >
 > **Work safely.** Undo and redo every step. Edits are kept per page and come back after a reload. Preview your edits at phone, tablet and
 > laptop sizes in a real browser window.
@@ -54,6 +55,6 @@ Lets a designer select, restyle and measure elements on a web page to try change
 
 ## Release checklist
 
-1. `node extension/test/e2e.mjs` passes (31 checks) and `python -m unittest test_extension` passes.
+1. `node extension/test/e2e.mjs` passes (35 checks) and `python -m unittest test_extension` passes.
 2. Bump `version` in `extension/package.json`; `node extension/build.mjs --zip`.
 3. Upload the zip; paste the fields above; add the screenshots and the promo tile; submit.

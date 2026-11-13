@@ -306,9 +306,10 @@
   let hovered = null;
   let climbed = [];            // the elements we came up from, so ↓ goes back the way we came
   let menuOpen = false;
-  let tool = null;             // "fill" | "border" | "shadow" | "text" | "font" | "size" | "spacing" | "radius" | "layout" | null
+  let tool = null;             // "fill" | "border" | "shadow" | "text" | "font" | "size" | "spacing" | "radius" | "layout" | "tone" | null
   let showChanges = false;
   let showPreview = false;    // the screen-size preview panel
+  let showFind = false;       // the find-by-selector panel
   let showPatches = false;    // the design patches panel (patches.py): switch them off, to preview, or on
   let tourStep = null;         // the guide page being shown (0-based), or null
   let toastTimer = 0;
@@ -392,6 +393,7 @@
     const others = on ? selection.filter((el) => el !== selected) : [];
     while (extraBoxes.length < others.length) { const box = h("div", { class: "dz-box dz-picked dz-more", hidden: true }); root.append(box); extraBoxes.push(box); }
     extraBoxes.forEach((box, i) => place(box, others[i] || null));
+    while (extraBoxes.length > Math.max(24, others.length)) extraBoxes.pop().remove();   // a selector typed into Find can select hundreds for a moment
   }
   function refreshBoxes() {
     if (selection.some((el) => !document.contains(el))) { setSelection(selection); climbed = []; if (!selected) closeTool(); }
@@ -401,6 +403,7 @@
     placeSelection();
     updateHandles();
     renderMeasure();
+    renderGuides();
   }
 
   // ---------- selectors ----------
@@ -977,8 +980,9 @@
   window.addEventListener("keyup", (event) => {
     if (event.key === "\\") setCompare(false);
     if (event.key.toLowerCase() === "m" && measuring) { measuring = false; renderMeasure(); }
+    if (event.key.toLowerCase() === "g" && guiding) { guiding = false; renderGuides(); }
   }, true);
-  window.addEventListener("blur", () => { setCompare(false); if (measuring) { measuring = false; renderMeasure(); } });
+  window.addEventListener("blur", () => { setCompare(false); if (measuring) { measuring = false; renderMeasure(); } if (guiding) { guiding = false; renderGuides(); } });
 
   // ---------- preview at other screen sizes ----------
   // Opens this page in a real browser window of that size (so its media queries really run). That window, named dz-preview,
@@ -1236,6 +1240,112 @@
   }
   let inspectLink = null;
 
+  // ---------- find: select everything that matches ----------
+  // A CSS selector (.card, h2, button[disabled]) or, failing that, words that appear on the page. The matches become the selection, so one
+  // tool then changes all of them. An idea from VisBug (Apache-2.0, github.com/GoogleChromeLabs/ProjectVisBug), written afresh here.
+  const FIND_LIMIT = 300;
+  function findMatches(query) {
+    const q = query.trim();
+    if (!q) return [];
+    let found = [];
+    try { found = [...document.querySelectorAll(q)]; } catch (_) { /* not a selector: it is words */ }
+    if (!found.length) {
+      const needle = q.toLowerCase();
+      found = [...document.body.querySelectorAll("*")].filter((el) => !ours(el) && [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.toLowerCase().includes(needle)));
+    }
+    return found.filter((el) => !ours(el) && el !== document.documentElement && el.getBoundingClientRect().width > 0).slice(0, FIND_LIMIT);
+  }
+  function findPanel() {
+    const input = h("input", { type: "search", class: "dz-hex dz-find", "aria-label": "Find elements", placeholder: ".card   h2   or some words", spellcheck: "false" });
+    const count = h("p", { class: "dz-hint dz-note", text: "Selects every match. Try .card, button, img:not([alt]), or words from the page." });
+    const update = () => {
+      const matches = findMatches(input.value);
+      setSelection(matches);
+      count.textContent = input.value.trim() ? `${matches.length} found${matches.length >= FIND_LIMIT ? ` (the first ${FIND_LIMIT})` : ""}` : "Selects every match. Try .card, button, img:not([alt]), or words from the page.";
+      refreshBoxes();
+    };
+    const useThem = () => { if (!selection.length) return; showFind = false; menuOpen = true; renderDock(); refreshBoxes(); };
+    input.addEventListener("input", update);
+    input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); useThem(); } });
+    return h("div", { class: "dz-panel" }, input, count,
+      h("div", { class: "dz-menu" }, h("button", { type: "button", class: "dz-menu-button dz-active", text: "Edit these", onclick: useThem })));
+  }
+
+  // ---------- the Tone tool: shift hue, saturation and brightness together ----------
+  // Relative to how the selected elements look when the tool opens, on their fill, text colour and border at once, so a whole set keeps its
+  // relationships while its mood changes. (VisBug has a hue shift; this one also does saturation and brightness, and records every change.)
+  function tonePanel() {
+    const elements = targets();
+    const baseline = elements.map((element) => {
+      const cs = getComputedStyle(element);
+      const fill = toRgba(cs.backgroundColor), text = toRgba(cs.color), edge = toRgba(cs.borderTopColor);
+      const border = !NO_BORDER(cs.borderTopStyle, cs.borderTopWidth) && edge ? { style: cs.borderTopStyle, width: Math.round(parseFloat(cs.borderTopWidth)) || 0, rgba: edge } : null;
+      return { element, fill: fill && fill[3] > 0 ? fill : null, text: element.textContent.trim() ? text : null, border };
+    });
+    const state = { hue: 0, sat: 0, val: 0 };
+    const shift = ([r, g, b, a]) => {
+      const [hue, sat, val] = rgbToHsv(r, g, b);
+      const [nr, ng, nb] = hsvToRgb((hue + state.hue + 360) % 360, clamp(sat + state.sat / 100, 0, 1), clamp(val + state.val / 100, 0, 1));
+      return a < 1 ? `rgba(${Math.round(nr)}, ${Math.round(ng)}, ${Math.round(nb)}, ${a})` : toHex(nr, ng, nb);
+    };
+    const apply = () => {
+      checkpoint("tone", elements);
+      bulk++;
+      try {
+        for (const { element, fill, text, border } of baseline) {
+          if (fill) applyFill([element], shift(fill));
+          if (text) applyType([element], { color: shift(text) });
+          if (border) { const edge = shift(border.rgba); applyBorder([element], border.style, border.width, edge.startsWith("#") ? edge : toHex(...border.rgba)); }
+        }
+      } finally { bulk--; }
+    };
+    const rows = [["hue", "Hue", -180, 180, "°"], ["sat", "Saturation", -100, 100, "%"], ["val", "Brightness", -100, 100, "%"]].map(([key, name, min, max, unit]) => {
+      const range = h("input", { type: "range", min: String(min), max: String(max), class: "dz-range", "aria-label": `${name} shift` });
+      const number = h("span", { class: "dz-num" });
+      const show = () => { range.value = String(state[key]); number.textContent = (state[key] > 0 ? "+" : "") + state[key] + unit; };
+      range.addEventListener("input", () => { state[key] = +range.value; show(); apply(); });
+      show();
+      return { row: h("label", { class: "dz-row" }, h("span", { text: name }), range, number), show, key };
+    });
+    const reset = h("button", { type: "button", class: "dz-menu-button", text: "Back to start", title: "Put the colours back as they were when this tool opened",
+      onclick: () => { state.hue = state.sat = state.val = 0; rows.forEach((r) => r.show()); apply(); } });
+    const used = baseline.filter((b) => b.fill || b.text || b.border).length;
+    return h("div", { class: "dz-panel dz-tone" },
+      h("p", { class: "dz-hint dz-note", text: `Shifts the fill, text colour and border of ${elements.length > 1 ? `all ${elements.length} elements` : "this element"} together.${used ? "" : " Nothing here has a colour to shift."}` }),
+      ...rows.map((r) => r.row), h("div", { class: "dz-menu" }, reset));
+  }
+
+  // ---------- alignment guides ----------
+  // Hold G with an element selected: its edges and centres run across the page, and everything that lines up with them is outlined.
+  const guideLayer = h("div", { class: "dz-guides" });
+  root.append(guideLayer);
+  let guiding = false;
+  function renderGuides() {
+    guideLayer.replaceChildren();
+    if (!guiding || !on || !selected || !document.contains(selected)) return;
+    const a = selected.getBoundingClientRect();
+    const xs = [["left", a.left], ["centre", a.left + a.width / 2], ["right", a.right]];
+    const ys = [["top", a.top], ["centre", a.top + a.height / 2], ["bottom", a.bottom]];
+    for (const [, x] of xs) { const line = h("div", { class: "dz-g-line" }); line.style.left = x + "px"; line.style.top = "0px"; line.style.width = "1px"; line.style.height = "100vh"; guideLayer.append(line); }
+    for (const [, y] of ys) { const line = h("div", { class: "dz-g-line" }); line.style.top = y + "px"; line.style.left = "0px"; line.style.height = "1px"; line.style.width = "100vw"; guideLayer.append(line); }
+    let aligned = 0, seen = 0;
+    for (const element of document.body.querySelectorAll("*")) {
+      if (++seen > 1200) break;
+      if (element === selected || selection.includes(element) || ours(element)) continue;
+      const r = element.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2 || r.bottom < 0 || r.top > window.innerHeight || r.right < 0 || r.left > window.innerWidth) continue;
+      const near = (v, list) => list.some(([, t]) => Math.abs(v - t) <= 0.6);
+      if (near(r.left, xs) || near(r.right, xs) || near(r.left + r.width / 2, xs) || near(r.top, ys) || near(r.bottom, ys) || near(r.top + r.height / 2, ys)) {
+        aligned++;
+        const box = h("div", { class: "dz-g-box" });
+        box.style.left = r.left + "px"; box.style.top = r.top + "px"; box.style.width = r.width + "px"; box.style.height = r.height + "px";
+        guideLayer.append(box);
+      }
+    }
+    const badge = h("div", { class: "dz-badge", text: aligned ? `${aligned} element${aligned > 1 ? "s" : ""} line up with this one` : "Nothing else lines up with this one" });
+    guideLayer.append(badge);
+  }
+
   // ---------- the dock ----------
   const NO_TEXT_TAGS = new Set(["IMG", "INPUT", "TEXTAREA", "SELECT", "BR", "HR", "SVG", "CANVAS", "VIDEO", "AUDIO", "IFRAME"]);
   function textBlocked(element) {
@@ -1254,7 +1364,7 @@
       "↑ selects the parent of what you have selected. ↓ goes back down the way you came, or to the first child.",
       "Shift-click adds elements to the selection (or takes them out): the tools then change all of them at once. Esc clears the selection."] },
     { title: "Change it", lines: [
-      "Enter opens the tools: Fill (colour), Border (style, thickness, colour), Shadow (presets, or offset, blur, spread, opacity, colour), Text (the words), Font (text colour, size, weight, line height, letter spacing, alignment), Size (width and height, or drag the pink handles), Spacing (padding and margin), Radius (rounded corners) and Layout (display, flex and grid alignment and gap, opacity). Alt+Shift+C copies an element's look and Alt+Shift+V pastes it onto another; hold M to measure distances, and press I to inspect what is under the pointer (size, type, colours, WCAG and APCA contrast, accessible name). Fill and Font show the contrast against what is behind the text, and every colour picker lists the colours already on the page. Hold Compare (or the \\ key) to see the original, and Preview opens the page at phone, tablet and laptop sizes.",
+      "Enter opens the tools: Fill (colour), Border (style, thickness, colour), Shadow (presets, or offset, blur, spread, opacity, colour), Text (the words), Font (text colour, size, weight, line height, letter spacing, alignment), Size (width and height, or drag the pink handles), Spacing (padding and margin), Radius (rounded corners), Layout (display, flex and grid alignment and gap, opacity) and Tone (shift hue, saturation and brightness together). Alt+Shift+C copies an element's look and Alt+Shift+V pastes it onto another; hold M to measure distances or G to see what lines up with the selected element, press / to select everything that matches a CSS selector or some words, and press I to inspect what is under the pointer (size, type, colours, WCAG and APCA contrast, accessible name). Fill and Font show the contrast against what is behind the text, and every colour picker lists the colours already on the page. Hold Compare (or the \\ key) to see the original, and Preview opens the page at phone, tablet and laptop sizes.",
       "Text works only on elements with nothing inside them. The page changes straight away, in this tab only; Done closes the tool. Ctrl+Z undoes a step and Ctrl+Shift+Z (or Ctrl+Y) redoes it."] },
     { title: "Export your changes", lines: [
       "Alt+Shift+E copies every change as Markdown. Paste it to Claude, who can then make the same changes in the code.",
@@ -1290,7 +1400,7 @@
     updateHandles();
     if (tourStep !== null) { dock.append(tourPanel()); return; }
 
-    changesLink = h("button", { type: "button", class: "dz-link", text: `Changes (${changeCount()})`, onclick: () => { showChanges = !showChanges; showPatches = false; showPreview = false; renderDock(); } });
+    changesLink = h("button", { type: "button", class: "dz-link", text: `Changes (${changeCount()})`, onclick: () => { showChanges = !showChanges; showPatches = false; showPreview = false; showFind = false; renderDock(); } });
     undoLink = h("button", { type: "button", class: "dz-link", text: "Undo", title: "Undo (Ctrl+Z)", onclick: undo });
     redoLink = h("button", { type: "button", class: "dz-link", text: "Redo", title: "Redo (Ctrl+Shift+Z or Ctrl+Y)", onclick: redo });
     showHistory();
@@ -1299,23 +1409,26 @@
     const compareLink = h("button", { type: "button", class: "dz-link", text: "Compare", title: "Hold to see the original page (or hold the \\ key)" });
     compareLink.addEventListener("pointerdown", (event) => { event.preventDefault(); setCompare(true); });
     for (const type of ["pointerup", "pointerleave", "pointercancel"]) compareLink.addEventListener(type, () => setCompare(false));
+    const findLink = h("button", { type: "button", class: "dz-link", text: "Find", title: "Select everything that matches a CSS selector or some words (/)",
+      onclick: () => { showFind = !showFind; showChanges = false; showPatches = false; showPreview = false; renderDock(); } });
     const previewLink = h("button", { type: "button", class: "dz-link", text: "Preview", title: "See this page at phone, tablet and laptop sizes",
-      onclick: () => { showPreview = !showPreview; showChanges = false; showPatches = false; renderDock(); } });
+      onclick: () => { showPreview = !showPreview; showChanges = false; showPatches = false; showFind = false; renderDock(); } });
     const head = h("div", { class: "dz-head" },
       h("strong", { text: selection.length > 1 ? `${selection.length} elements` : selected ? label(selected) : "UI picker" }),
-      undoLink, redoLink, inspectLink, compareLink, previewLink,
+      undoLink, redoLink, findLink, inspectLink, compareLink, previewLink,
       changesLink,
       host.patches && h("button", { type: "button", class: "dz-link", text: "Patches", title: "Design patches: switch them off, to preview, or on",
-                    onclick: () => { showPatches = !showPatches; showChanges = false; showPreview = false; renderDock(); } }),
+                    onclick: () => { showPatches = !showPatches; showChanges = false; showPreview = false; showFind = false; renderDock(); } }),
       h("button", { type: "button", class: "dz-link", text: "Guide", title: "How the picker works", onclick: () => { tourStep = 0; renderDock(); } }),
       h("button", { type: "button", class: "dz-link", text: "Off", title: "Turn picker mode off", onclick: () => setOn(false) }));
     dock.append(head);
 
     if (showPatches) { dock.append(patchesPanel()); return; }
     if (showPreview) { dock.append(previewPanel()); return; }
+    if (showFind) { const panel = findPanel(); dock.append(panel); panel.querySelector(".dz-find").focus(); return; }   // focus at once: keys typed straight after / must land in the field
     if (showChanges) { dock.append(changesPanel()); return; }
     if (!selected) {
-      dock.append(h("p", { class: "dz-hint", text: "Click any element to select it; Shift-click adds more. ↑ parent, ↓ child, Enter for the tools, Esc to clear. Hold M to measure, I to inspect. Alt+Shift+E copies your changes." }));
+      dock.append(h("p", { class: "dz-hint", text: "Click any element to select it; Shift-click adds more. ↑ parent, ↓ child, Enter for the tools, Esc to clear. / to find, hold M to measure or G for alignment guides, I to inspect. Alt+Shift+E copies your changes." }));
       return;
     }
     const lookRow = () => h("div", { class: "dz-menu dz-look" },
@@ -1324,7 +1437,7 @@
                     onclick: () => pasteLook(targets()) }));
     const tools = () => h("div", { class: "dz-tools" }, h("div", { class: "dz-menu" },
       menuButton("fill", "Fill"), menuButton("border", "Border"), menuButton("shadow", "Shadow"), menuButton("text", "Text"), menuButton("font", "Font"),
-      menuButton("size", "Size"), menuButton("spacing", "Spacing"), menuButton("radius", "Radius"), menuButton("layout", "Layout")), lookRow());
+      menuButton("size", "Size"), menuButton("spacing", "Spacing"), menuButton("radius", "Radius"), menuButton("layout", "Layout"), menuButton("tone", "Tone")), lookRow());
     if (!menuOpen && !tool) {
       dock.append(h("p", { class: "dz-hint", text: "Press Enter, or choose a tool." }), tools());
       return;
@@ -1339,6 +1452,7 @@
     else if (tool === "spacing") dock.append(spacingPanel());
     else if (tool === "radius") dock.append(radiusPanel());
     else if (tool === "layout") dock.append(layoutPanel());
+    else if (tool === "tone") dock.append(tonePanel());
     // Edits apply as they are made, so there is nothing to confirm; Done just closes the tool and lets go of the element
     // (Esc does the same in steps). Without it a phone, which has no Esc key, had no visible way out of a tool.
     dock.append(h("div", { class: "dz-done-row" },
@@ -1744,6 +1858,7 @@
     showChanges = false;
     showPatches = false;
     showPreview = false;
+    showFind = false;
     renderDock();
     refreshBoxes();
   }
@@ -1778,6 +1893,17 @@
       if (!editing && (forward ? redoStack.length : undoStack.length)) { event.preventDefault(); if (forward) redo(); else undo(); }
       return;
     }
+    if (event.key === "/" && !event.ctrlKey && !event.metaKey && !event.altKey && !isEditingField(eventTarget(event))) {   // find
+      event.preventDefault();
+      showFind = true; showChanges = false; showPatches = false; showPreview = false;
+      renderDock();
+      return;
+    }
+    if (event.key.toLowerCase() === "g" && !event.ctrlKey && !event.metaKey && !event.altKey && selected && !isEditingField(eventTarget(event))) {   // hold for guides
+      event.preventDefault();
+      if (!event.repeat) { guiding = true; renderGuides(); }
+      return;
+    }
     if (event.key.toLowerCase() === "i" && !event.ctrlKey && !event.metaKey && !event.altKey && !isEditingField(eventTarget(event))) {   // toggle the inspector
       event.preventDefault();
       if (!event.repeat) { setInspect(!inspecting); renderDock(); }
@@ -1796,7 +1922,8 @@
     const typing = ours(eventTarget(event)) && /^(INPUT|TEXTAREA|SELECT)$/.test(eventTarget(event).tagName);
     if (event.key === "Escape") {
       event.preventDefault();
-      if (showPreview) showPreview = false;
+      if (showFind) showFind = false;
+      else if (showPreview) showPreview = false;
       else if (showPatches) showPatches = false;
       else if (showChanges) showChanges = false;
       else if (tool) closeTool();

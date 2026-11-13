@@ -160,6 +160,32 @@ try {
   check("the inspector says what is under the pointer, with WCAG and APCA contrast", /span\.muted/.test(tip) && /WCAG AA/.test(tip) && /APCA Lc -?\d+/.test(tip), tip);
   await page.keyboard.press("i");
 
+  // ---- find: "/" then a selector selects every match; Tone shifts their colours together and puts them back
+  await page.keyboard.press("Escape"); await page.keyboard.press("Escape"); await page.keyboard.press("Escape");
+  await page.keyboard.press("/");
+  await page.locator(".dz-find").waitFor();
+  await page.keyboard.type("h1, p");
+  eq("Find selected everything that matches the selector, and said how many", await page.locator(".dz-dock .dz-note").innerText(), "2 found");
+  await page.keyboard.press("Enter");
+  eq("Enter turns the matches into the selection", await page.locator(".dz-head strong").first().innerText(), "2 elements");
+  await page.locator(".dz-dock button:text-is('Tone')").click();
+  const inks = () => page.evaluate(() => [getComputedStyle(document.querySelector(".title")).color, getComputedStyle(document.querySelector(".lede")).color]);
+  const before = await inks();
+  await page.locator("[aria-label='Brightness shift']").focus();
+  for (let i = 0; i < 30; i++) await page.keyboard.press("ArrowLeft");
+  const darker = await inks();
+  await page.locator(".dz-dock button:text-is('Back to start')").click();
+  eq("Tone changed both elements together, and Back to start returned them exactly", [darker.every((c) => c === "rgb(0, 0, 0)"), (await inks()).join()], [true, before.join()]);
+
+  // ---- alignment guides
+  await page.evaluate(() => { const a = document.querySelector("#design-picker-extension-root").shadowRoot.activeElement; if (a) a.blur(); });
+  await page.keyboard.press("Escape"); await page.keyboard.press("Escape"); await page.keyboard.press("Escape");
+  await page.locator("#go").click();
+  await page.keyboard.down("g");
+  const lines = await page.locator(".dz-g-line").count();
+  await page.keyboard.up("g");
+  eq("holding G draws the six guide lines and they go when it is released", [lines, await page.locator(".dz-g-line").count()], [6, 0]);
+
   // ---- a screen-size preview opens as a real window of that size and shows the edits, without the picker
   await page.locator(".dz-dock .dz-head button:text-is('Preview')").click();
   const [popup] = await Promise.all([context.waitForEvent("page", { timeout: 15000 }), page.locator(".dz-dock button:text-matches('Phone')").click()]);
