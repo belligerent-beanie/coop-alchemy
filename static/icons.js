@@ -687,7 +687,7 @@ function setTool(name) {
   for (const b of document.querySelectorAll("[data-tool]")) b.setAttribute("aria-pressed", String(b.dataset.tool === name));
   setHint();
 }
-function setHint() { $("ic-hint").textContent = (cutMode && SHAPE_TOOLS.includes(tool) ? "Cut-out: " : "") + (HINTS[tool] || ""); }
+function setHint() { $("ic-hint").textContent = (cutMode && SHAPE_TOOLS.includes(tool) ? "Cut-out (cuts holes in the shapes on this layer only): " : "") + (HINTS[tool] || ""); }
 
 function iconPoint(event) {
   const r = view.getBoundingClientRect();

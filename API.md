@@ -43,6 +43,7 @@ this file in the same commit (and add a line to the [change log](#change-log)).
 | `GET /ops` | none | The administrator's operations page (its data calls need an admin session). |
 | `GET /icons` | none | The icon studio, where designers and administrators draw element icons (its data call needs one of those roles). `?element=<id>` opens that element. |
 | `GET /guides` | none | Every tutorial on the site, opened on demand (each opens on its own page with `?guide=<name>`: `hints` in the solo game, `designer` on the home page, `icons` in the icon studio). |
+| `GET /favicon.ico` | none | The site's small flask icon (an SVG, `static/favicon.svg`), under the name browsers ask for. |
 | `GET /icons/set` | none | The icon set overview: every icon side by side at the size and on the background players see, with the ones that stand out flagged (its data calls need an administrator or a designer). |
 | `GET /terms` | none | The terms of use page. The administrator's contact line (`--contact`) is filled in where it says so; `/privacy` has it too. |
 | `GET /privacy` | none | What the server stores about players and for how long, in plain language. |
@@ -183,7 +184,7 @@ UI changes that can be switched off again (see `patches.py` and the README's *De
 |---|---|---|
 | `GET /icons/elements` | session + admin or designer | `{"elements": [{"id", "label", "emoji", "file", "pic"?}]}`: every element, found or not, with the file name its picture has in `static/elements/` and its current picture's address. For the icon studio. `403` for anyone else. |
 | `GET /icons/mine` | session + admin or designer | `{"designs": [{"element", "status", "updated", "reply", "changed", "png"}]}`: the caller's icon designs, newest first. `status` is `draft`, `waiting`, `approved`, `rejected` or `undone`; `changed` is true when a waiting design was edited after it was proposed; `proposal` is the waiting proposal's id (or null) and `preview` whether it is being previewed in the game. |
-| `GET /icons/design` | session + admin or designer | `?element=<id>` → `{"design": {…, "doc"}}`: the caller's saved design for the element, with the studio's description of it. `404` if there is none. |
+| `GET /icons/design` | session + admin or designer | `?element=<id>` → `{"design": {…, "doc"}}`: the caller's saved design for the element, with the studio's description of it; `{"design": null}` if there is none. |
 | `GET /icons/file/<name>.png` | session + admin or designer | A stored icon PNG: a design (`d-…`), a proposal (`p-…`) or a picture an approval replaced (`b-…`). `404` for anything else. |
 | `POST /icons/save` | session + admin or designer | `{"element", "doc", "png"}` → `{"design"}`. `png` is a 128 × 128 PNG data URL; `doc` has 1 to 24 layers of shapes or pixels (each pixel layer a 128 × 128 PNG data URL). This route alone takes bodies up to 800 kB. Saving a design that is approved, rejected or undone makes it a draft again. `400` for a bad picture or design, `404` for an unknown element, `409` beyond 300 designs. |
 | `POST /icons/propose` | session + admin or designer | `{"element", "note"?}` → `{"design"}`: sends the saved design to the administrators, replacing the caller's waiting proposal for that element. `404` if nothing is saved, `409` beyond 40 waiting. |
@@ -235,6 +236,7 @@ checks that every option the server accepts appears in the README.
 Newest first. Add a line whenever an endpoint, event, status code or option is added, changed or removed.
 
 - **2026-11 (guides)**: `GET /guides`; `?guide=<name>` on the pages that hold a guide.
+- **2026-11 (small fixes)**: `GET /favicon.ico`; `GET /icons/design` answers `{"design": null}` instead of `404` when nothing is saved.
 - **2026-11 (icon set)**: `GET /icons/set`; `GET /icons?element=<id>`.
 - **2026-11 (icon previews)**: `GET /icons/previews`, `POST /icons/preview`; `proposal` and `preview` in `/icons/mine` and `/icons/design`; `preview` in `/icons/queue`.
 - **2026-11 (icon proposals)**: `GET /icons/mine`, `GET /icons/design`, `GET /icons/file/<name>.png`, `POST /icons/save`, `/icons/propose`, `/icons/delete`, `GET /icons/queue`, `POST /icons/handle`, `/icons/undo`; options `--icons-file` and `--icon-files-dir`; `icon_designs` in the account-deletion summary; a picture's address changes when its file is replaced.

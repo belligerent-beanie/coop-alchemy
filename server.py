@@ -37,7 +37,7 @@ HTTP API
                                            picture's file name and current address, for the icon studio (/icons): administrators
                                            and designers only
     GET  /icons/mine                    -> {"designs": [{"element", "status", "updated", "reply", "changed", "png"}]}   the caller's icon designs
-    GET  /icons/design?element=ID       -> {"design": {..., "doc"}}   one saved design (404 if none)
+    GET  /icons/design?element=ID       -> {"design": {..., "doc"} | null}   one saved design (null if none)
     GET  /icons/file/<name>.png         -> a stored icon PNG (a design, a proposal or a replaced picture)
     POST /icons/save    {"element", "doc", "png"} -> {"design"}   save the studio's design (up to MAX_ICON_BODY bytes)
     POST /icons/propose {"element", "note"?} -> {"design"}   send the saved design to the administrators
@@ -655,6 +655,8 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/patches/list":
                 self._admin_or_designer()
                 self._json(200, {"patches": self.server.patches.listing()})
+            elif path == "/favicon.ico":   # browsers ask for it by this name whatever the pages say
+                self._static("favicon.svg")
             elif path == "/icons":
                 self._static("icons.html")
             elif path == "/guides":
@@ -668,9 +670,7 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/icons/design":
                 who, element = self._admin_or_designer(), self._icon_element(parse_qs(parts.query).get("element", [""])[0])
                 design = self.server.icons.design(who, element)
-                if design is None:
-                    raise GameError(404, "nothing saved for this element yet")
-                self._json(200, {"design": design})
+                self._json(200, {"design": design})   # None when nothing is saved yet (not a 404: the studio asks every time)
             elif path.startswith("/icons/file/") and path.endswith(".png"):
                 self._admin_or_designer()
                 data = self.server.icons.file(path[len("/icons/file/"):-len(".png")])

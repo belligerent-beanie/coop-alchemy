@@ -12,7 +12,8 @@
     "build-storybook": "storybook build",
     "chromatic": "chromatic --exit-zero-on-changes",
     "a11y:site": "node scripts/axe-site.mjs",
-    "lighthouse": "node scripts/lighthouse-site.mjs"
+    "lighthouse": "node scripts/lighthouse-site.mjs",
+    "test:stories": "vitest run"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",

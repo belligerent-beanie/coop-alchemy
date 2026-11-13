@@ -1,4 +1,5 @@
 import type { Preview } from '@storybook/react-vite'
+import '../src/index.css'   // Tailwind and the shadcn theme, so components look here as they do in the app
 
 const preview: Preview = {
   parameters: {

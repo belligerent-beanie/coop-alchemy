@@ -85,12 +85,12 @@ body.icons-page { height: auto; min-height: 100%; }
 /* ---- step 2: where the design is on its way to the game ---- */
 .ic-status { font-size: 0.8rem; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); max-width: 46ch;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ic-status.waiting { border-color: #d9a400; color: #d9a400; }
-.ic-status.approved { border-color: #27ae60; color: #27ae60; }
-.ic-status.rejected, .ic-status.undone { border-color: #c0392b; color: #c0392b; }
-.ic-badge.waiting { border-color: #d9a400; color: #d9a400; }
-.ic-badge.approved { border-color: #27ae60; color: #27ae60; }
-.ic-badge.rejected, .ic-badge.undone { border-color: #c0392b; color: #c0392b; }
+.ic-status.waiting { border-color: #7a5900; color: #7a5900; }
+.ic-status.approved { border-color: #1b6e3c; color: #1b6e3c; }
+.ic-status.rejected, .ic-status.undone { border-color: #a82a1d; color: #a82a1d; }
+.ic-badge.waiting { border-color: #7a5900; color: #7a5900; }
+.ic-badge.approved { border-color: #1b6e3c; color: #1b6e3c; }
+.ic-badge.rejected, .ic-badge.undone { border-color: #a82a1d; color: #a82a1d; }
 .ic-dialog textarea { width: 100%; box-sizing: border-box; }
 .ic-dialog canvas { display: block; margin: 0 auto; background: #f4f1e8; border-radius: 10px; }
 

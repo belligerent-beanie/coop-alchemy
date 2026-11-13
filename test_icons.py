@@ -255,6 +255,8 @@ class EndpointTests(unittest.TestCase):
         self.assertEqual(self.request("/icons/save", player, save)[0], 403)
         self.assertEqual(self.request("/icons/save", designer, {**save, "element": "no-such-thing"})[0], 404)
         self.assertEqual(self.request("/icons/save", designer, {**save, "png": data_url(make_png(32, 32))})[0], 400)
+        status, data = self.request(f"/icons/design?element={self.element}", designer)
+        self.assertEqual((status, data), (200, {"design": None}))   # nothing saved yet: an answer, not an error
         status, data = self.request("/icons/save", designer, save)
         self.assertEqual((status, data["design"]["status"]), (200, "draft"))
         self.assertEqual(self.request(f"/icons/design?element={self.element}", designer)[1]["design"]["doc"], DOC)

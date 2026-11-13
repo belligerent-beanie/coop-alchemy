@@ -1442,6 +1442,12 @@ $("hint-tutorial-next").addEventListener("click", () => showTutorialPage(tutoria
 $("hint-tutorial-back").addEventListener("click", () => showTutorialPage(tutorialPage - 1));
 $("hint-tutorial-done").addEventListener("click", closeHintTutorial);
 $("hint-tutorial").addEventListener("cancel", (e) => { e.preventDefault(); closeHintTutorial(); });   // Escape ends the guide too
+$("hint-tutorial").addEventListener("keydown", (e) => {   // the arrow keys turn its pages, as in the other guides
+  if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+  e.preventDefault();
+  showTutorialPage(tutorialPage + (e.key === "ArrowRight" ? 1 : -1));
+  $(tutorialPage === TUTORIAL_PAGES.length - 1 ? "hint-tutorial-done" : "hint-tutorial-next").focus();   // the button that was focused may now be hidden
+});
 
 // ---- Mr Alchemy -----------------------------------------------------------------------------------------------------
 //

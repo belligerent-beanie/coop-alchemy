@@ -8,6 +8,7 @@ built into the Docker image (`design` is in `.dockerignore`) or needed to run or
 | Tool | Command | What it is for |
 |---|---|---|
 | Storybook | `bun run storybook` (port 6006) | Build and try components in isolation. `bun run build-storybook` makes a static copy. |
+| Story tests | `bun run test:stories` | Runs every story in a real browser: its `play` function and the axe-core accessibility checks. |
 | shadcn/ui + Tailwind 4 | `bunx --bun shadcn@latest add <component>` | Components land in `src/components/ui`. Config: `components.json`. |
 | Chromatic | `bun run chromatic` | Publishes Storybook and flags **visual changes** to components for review. Needs a project token (below). |
 | axe-core | `bun run a11y:site` | WCAG 2.0/2.1/2.2 A and AA checks on the real pages of the running game. The Storybook *Accessibility* panel runs the same engine on components. |

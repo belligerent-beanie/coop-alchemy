@@ -896,7 +896,8 @@ button.collection-tile:hover { border-color: var(--accent); }
 
 .achievements { list-style: none; margin: 8px 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 6px; }
 .achievement { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--tile); }
-.achievement.locked { opacity: 0.5; border-style: dashed; background: none; }
+.achievement.locked { border-style: dashed; background: none; color: var(--muted); }
+.achievement.locked .ach-icon { opacity: 0.55; }
 .ach-icon { font-size: 1.4rem; }
 .ach-text { display: flex; flex-direction: column; font-size: 0.9rem; }
 

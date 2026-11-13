@@ -26,6 +26,7 @@ html[data-look="euler"] {
   --grey-dark: #bbb;
   --shadow: #ccc;
   --orange: #f93;
+  --orange-strong: #b85600;   /* the orange to put white text on (4.8:1; --orange itself is only 2.1:1) */
   --danger: #a00;
   font-family: "DM Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
@@ -105,9 +106,9 @@ html[data-look="euler"] {
     padding: 0.3em 0.9em;
   }
   & .home-tab:hover { background: var(--grey-dark); color: var(--fg); }
-  & .home-tab.selected { background: var(--orange); color: #fff; font-weight: 500; }
+  & .home-tab.selected { background: var(--orange-strong); color: #fff; font-weight: 500; }
   & .tabs button { border-radius: 0; background: var(--grey); color: var(--fg); border-color: var(--line); }
-  & .tabs button[aria-selected="true"] { background: var(--orange); border-color: var(--orange); color: #fff; }
+  & .tabs button[aria-selected="true"] { background: var(--orange-strong); border-color: var(--orange-strong); color: #fff; }
   & .pill { border-radius: 0; background: var(--danger); }
 
   /* ---- the game ---- */
@@ -134,7 +135,7 @@ html[data-look="euler"] {
   }
   & .journal-bar { border-radius: 0; }
   & .journal-note { border-left-color: var(--orange); border-radius: 0; background: var(--tile); }
-  & .journal-tab.selected { background: var(--orange); color: #fff; border-color: var(--orange); }
+  & .journal-tab.selected { background: var(--orange-strong); color: #fff; border-color: var(--orange-strong); }
   & .collection-tile, & .journal-entry, & .swipe-buttons button, & #emote-picker button { border-radius: 0; }
   & .collection-category h3 { color: var(--brown); }
   & #emote-picker, & .toast, & #tooltip, & .update, & #end-dialog, & #ended > div { border-radius: 0; }
