@@ -87,7 +87,7 @@ class ContainerFileTests(unittest.TestCase):
         for where, flags in (("Dockerfile ENTRYPOINT (after --)", passed_on), ("docker-compose.yml command", compose_flags())):
             self.assertGreaterEqual(len(flags), 2, f"found too few options in the {where}: did its layout change?")
             self.assertEqual(sorted(flags - known), [], f"options in the {where} that server.py does not accept")
-        from ops.supervise import DATA_OPTIONS   # the data files the supervisor adds itself
+        from ops.supervise import DATA_OPTIONS  # the data files the supervisor adds itself
         self.assertEqual(sorted({option for option, _ in DATA_OPTIONS} - known), [], "supervisor data options server.py does not accept")
 
     def test_the_health_check_uses_a_documented_endpoint(self) -> None:

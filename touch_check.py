@@ -675,7 +675,7 @@ def run(out: Path, chrome_path: str) -> int:
             time.sleep(0.8)
             wide = browser.evaluate("document.documentElement.scrollWidth - innerWidth")
             report.check(wide <= 1, f"{name} page fits the screen", f"{wide}px too wide")
-            report.check(browser.evaluate("document.documentElement.dataset.look") == "euler", f"...in the Euler look")
+            report.check(browser.evaluate("document.documentElement.dataset.look") == "euler", "...in the Euler look")
             browser.screenshot(out / f"phone-{name}.png")
 
         print(chr(10) + "the classic look, kept as a variant, on a phone")

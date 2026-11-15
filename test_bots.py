@@ -19,7 +19,6 @@ from state import MAX_PLAYERS, GameError, GameState
 from test_coop import RECIPES, call, drain, load_recipes, login_as, serve
 from visitor import MR_ALCHEMY, is_reserved
 
-
 # ---- the cast ----------------------------------------------------------------------------------------------------------
 
 class CastTests(unittest.TestCase):

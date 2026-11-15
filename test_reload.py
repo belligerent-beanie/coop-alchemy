@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import http.client
 import json
-import os
 import signal
 import socket
 import subprocess
@@ -77,7 +76,7 @@ class SnapshotTests(unittest.TestCase):
         fresh = GameState(BOOK, clock=clock)
         fresh.live_restore(data)
         clock.now += 60
-        with self.assertRaises(Exception):
+        with self.assertRaises(Exception):  # noqa: B017  (whichever error says the token is no longer valid)
             fresh.authorize(ann.token)
 
     def test_sessions_carry_over_and_respect_password_resets(self) -> None:

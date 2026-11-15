@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ruff:
+    name: Ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements-dev.txt
+      # The same report is read by SonarQube, so Ruff stays the single authority on lint.
+      - name: Ruff report for SonarQube
+        run: ruff check --output-format=json --output-file=ruff-report.json . || true
+      - name: Ruff (fails the build on any finding)
+        run: ruff check --output-format=github .
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ruff-report
+          path: ruff-report.json
+
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements-dev.txt
+      # run_tests.py is the project's runner: it prints which tests failed and exits non-zero on any failure.
+      - name: Run the suite under coverage
+        run: coverage run run_tests.py
+      - name: Coverage report
+        if: always()
+        run: coverage xml -o coverage.xml
+      - name: Show the failing tests, if any
+        if: failure()
+        run: tail -n 80 test-output.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: |
+            coverage.xml
+            test-output.log
+
+  sonarqube:
+    name: SonarQube
+    needs: [ruff, tests]
+    # Secrets are not available to pull requests from forks, so only same-repo PRs and pushes are scanned.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # SonarQube needs full history to decide what is "new code" and who changed it
+      - uses: actions/download-artifact@v4
+        with:
+          name: ruff-report
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage
+      - uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      # Fail this job (a required status check) if the quality gate is red.
+      - uses: SonarSource/sonarqube-quality-gate-action@v1
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

@@ -51,3 +51,9 @@ icon_files/
 extension/dist/
 extension/dist-test/
 extension/*.zip
+
+# Tooling output (see CI.md)
+.coverage
+coverage.xml
+ruff-report.json
+.ruff_cache/

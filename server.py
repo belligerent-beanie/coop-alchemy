@@ -127,39 +127,39 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from accounts import SESSION_MAX_SECONDS, AccountStore, clean_email, key_of
 import alchemylog
-from breach import BreachChecker
-from captcha import ORIGIN as TURNSTILE_ORIGIN
-from captcha import Turnstile
+from accounts import SESSION_MAX_SECONDS, AccountStore, clean_email, key_of
 from achievements import ACHIEVEMENTS, BADGES, MULTIPLAYER_UNLOCK_AT, describe_badges
 from achievements import describe as describe_achievements
 from achievements import one as achievement_json
-from daily import DailyStore
-from emotes import emote_list
 from bots import BotPolicy, BotRunner, bot_loop
+from breach import BreachChecker
+from captcha import ORIGIN as TURNSTILE_ORIGIN
+from captcha import Turnstile
 from cast import CAST
-from metrics import Metrics, metrics_loop
-from pictures import PictureIndex, slugify
-from iconstore import IconStore
-from patches import PatchError, PatchStore
-from profiles import ProfileStore, profile_loop
-from visitor import VisitorPolicy, is_reserved
-from solo import SoloStore
+from daily import DailyStore
 from drafts import DraftStore
+from emotes import emote_list
 from erasure import erase_account
 from games import IDLE_CLOSE_SECONDS, MAX_GAMES, GameRegistry
 from hints import find_element
 from hotreload import restore_snapshot, write_snapshot
+from iconstore import IconStore
 from invites import InviteStore
-from namefilter import NameFilter
 from mailer import MailConfigError, Mailer, verification_message
+from metrics import Metrics, metrics_loop
+from namefilter import NameFilter
+from patches import PatchError, PatchStore
+from pictures import PictureIndex, slugify
+from profiles import ProfileStore, profile_loop
+from ratelimit import ACTION_BURST, ACTION_RATE, MOTION_BURST, MOTION_RATE, TokenBuckets
 from recipes import RecipeError, load_recipes
 from reports import REASONS, ReportStore, clean_note
 from saves import SaveStore
+from solo import SoloStore
 from state import GameError, GameState
-from ratelimit import ACTION_BURST, ACTION_RATE, MOTION_BURST, MOTION_RATE, TokenBuckets
 from throttle import Throttle, TicketStore, client_ip, parse_networks, throttle_key
+from visitor import VisitorPolicy, is_reserved
 
 BASE_DIR = Path(__file__).resolve().parent
 MAX_BODY = 4096
@@ -1464,7 +1464,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _static_version(self) -> str:
         """Changes whenever a page, script or stylesheet in static/ changes (pictures are not counted)."""
-        digest = hashlib.sha1()
+        digest = hashlib.sha1(usedforsecurity=False)   # a cache-busting fingerprint of the static files, not a secret
         try:
             for path in sorted(self.server.static_dir.iterdir()):
                 if path.is_file():
@@ -1631,7 +1631,7 @@ def lan_ip() -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Co-op Alchemy server")
-    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--host", default="0.0.0.0")  # noqa: S104  (listens on every interface on purpose: a tunnel/proxy fronts it)
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--recipes", default=str(BASE_DIR / "recipes.json"))
     parser.add_argument("--elements-dir", default=str(BASE_DIR / "static" / "elements"),
@@ -1949,7 +1949,7 @@ def reload_in_place(server: AlchemyServer, registry: GameRegistry, accounts: Acc
     os.set_inheritable(fd, True)
     os.environ["ALCHEMY_LISTEN_FD"] = str(fd)
     print("Reloading...")
-    os.execv(sys.executable, [sys.executable, str(Path(sys.argv[0]).resolve()), *sys.argv[1:]])
+    os.execv(sys.executable, [sys.executable, str(Path(sys.argv[0]).resolve()), *sys.argv[1:]])  # noqa: S606  (re-runs this same script in place)
 
 
 if __name__ == "__main__":

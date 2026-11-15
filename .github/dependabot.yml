@@ -1,0 +1,14 @@
+# The game has no third-party Python packages (requirements.txt is empty), so only the CI tooling is kept current.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      dev-tooling:
+        patterns: ["*"]

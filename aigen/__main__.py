@@ -13,9 +13,9 @@ from recipes import RecipeError, load_recipes
 
 from .embeddings import EmbeddingCache
 from .generate import Settings, run, save_report
-from .ratings import RatingCache
 from .lmstudio import DEFAULT_URL, GROQ_MODEL, GROQ_URL, LMStudio, LMStudioError
 from .planner import PlanSettings, plan_targets
+from .ratings import RatingCache
 from .scorer import Scorer, train
 
 HERE = Path(__file__).resolve().parent

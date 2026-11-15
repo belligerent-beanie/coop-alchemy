@@ -38,8 +38,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from ops import backup as backup_tools  # noqa: E402
-from ops import supervise  # noqa: E402
-from ops import smoke_test  # noqa: E402
+from ops import smoke_test, supervise  # noqa: E402
 
 SLOW_TESTS = ("test_aigen.py",)
 # The private recipe book and pictures are not in git, but they were once, and an old commit still has them. Moving the live folder

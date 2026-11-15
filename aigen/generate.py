@@ -14,9 +14,8 @@ from recipes import RecipeBook, depths, pair_key
 from state import TIME, GameError
 
 from .embeddings import EmbeddingCache
-from .lmstudio import LMStudio, LMStudioError
-from .propose import (NameIndex, ProposeError, SYSTEM, build_prompt, name_key, normalize_name, parse_reply,
-                      pick_examples)
+from .lmstudio import LMStudio
+from .propose import SYSTEM, NameIndex, ProposeError, build_prompt, name_key, normalize_name, parse_reply, pick_examples
 from .scorer import Scorer, dot, features
 
 MAX_USES_PER_ELEMENT = 2   # in the first round, how many proposed pairs may use the same existing element

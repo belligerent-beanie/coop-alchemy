@@ -12,14 +12,13 @@ import unittest
 from pathlib import Path
 
 import accounts as accounts_module
-import hotreload
 from accounts import AccountStore
 from commonpasswords import is_common, load_common
-from state import GameError
 from games import GameRegistry
-from test_coop import RECIPES, call, load_recipes, login_as, serve
-from server import MAX_DRAIN, Handler, broad_proxy_trust, log_safe
 from ratelimit import ACTION_BURST, ACTION_RATE, MOTION_BURST, MOTION_RATE, TokenBuckets
+from server import MAX_DRAIN, Handler, broad_proxy_trust, log_safe
+from state import GameError
+from test_coop import RECIPES, call, load_recipes, login_as, serve
 from throttle import Throttle, TicketStore, client_ip, parse_networks, throttle_key
 
 
@@ -316,8 +315,9 @@ class BreachCheckTests(unittest.TestCase):
         self.assertIsNone(self.checker(None)[0].count(self.PASSWORD))
 
     def test_a_lookup_that_hangs_is_cut_off_and_the_service_is_left_alone_for_a_while(self) -> None:
-        import breach
         import threading
+
+        import breach
         release = threading.Event()
         calls: list[str] = []
 
@@ -627,6 +627,7 @@ class ServerHardeningTests(unittest.TestCase):
 
     def test_the_console_stays_quiet(self) -> None:
         from http.server import BaseHTTPRequestHandler
+
         from server import Handler
         self.assertIsNot(Handler.log_message, BaseHTTPRequestHandler.log_message)  # no per-request access lines
 

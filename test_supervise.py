@@ -188,6 +188,7 @@ class InstallerTests(unittest.TestCase):
 
     def test_the_windows_task_never_times_out_restarts_on_failure_and_quotes_paths(self) -> None:
         import xml.etree.ElementTree as ET
+
         from ops import install_supervisor as inst
         command = [r"C:\Program Files\Python313\pythonw.exe", r"C:\games\coop alchemy\ops\supervise.py", "run",
                    "--data-dir", r"C:\games\coop alchemy\data", "--", "--contact", "a&b <me>"]
@@ -203,6 +204,7 @@ class InstallerTests(unittest.TestCase):
 
     def test_the_mac_launch_agent_starts_at_login_and_after_a_crash_only(self) -> None:
         import plistlib
+
         from ops import install_supervisor as inst
         agent = plistlib.loads(inst.plist_for(["python3", "ops/supervise.py", "run"], Path("/tmp/data")))
         self.assertEqual(agent["Label"], inst.LABEL)

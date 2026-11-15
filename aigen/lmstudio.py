@@ -105,10 +105,10 @@ class LMStudio:
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
         for attempt in range(MAX_RETRIES + 1):
-            request = urllib.request.Request(base + path, data=data, headers=headers,
+            request = urllib.request.Request(base + path, data=data, headers=headers,  # noqa: S310  (operator-configured local URL)
                                              method="GET" if payload is None else "POST")
             try:
-                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                with urllib.request.urlopen(request, timeout=self.timeout) as response:  # noqa: S310
                     return json.loads(response.read().decode("utf-8"))
             except urllib.error.HTTPError as exc:
                 detail = exc.read().decode("utf-8", "replace")[:600]

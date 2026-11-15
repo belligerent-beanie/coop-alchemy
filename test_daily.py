@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from daily import (KEEP_DAYS, MAX_ATTEMPTS, TIERS, DailyStore, best_route, pick_targets, reference_sizes)
+from daily import KEEP_DAYS, MAX_ATTEMPTS, TIERS, DailyStore, best_route, pick_targets, reference_sizes
 from games import GameRegistry
 from recipes import depths, load_recipes
 from state import GameError, GameState
@@ -55,7 +55,7 @@ class DailyPickTests(unittest.TestCase):
         self.assertEqual(picks, pick_targets(BOOK, DAY))
         self.assertEqual(list(picks), list(TIERS))
         depth = depths(BOOK)
-        for tier, pick in picks.items():
+        for pick in picks.values():
             self.assertNotIn(pick["target"], BOOK.starters)
             self.assertIn(pick["target"], depth)
             self.assertGreaterEqual(pick["reference"], depth[pick["target"]])  # never shorter than the longest chain

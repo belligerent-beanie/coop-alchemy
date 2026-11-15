@@ -37,6 +37,7 @@ class AccountToolTests(unittest.TestCase):
     def test_create_admin_saves_a_temporary_password_to_a_file_and_never_prints_it(self) -> None:
         import contextlib
         import io
+
         import accounts_admin
         path = Path(self.tmp.name) / "accounts.json"
         out, err = io.StringIO(), io.StringIO()

@@ -77,7 +77,7 @@ def build_report(data: object) -> tuple[list[str], int]:
     for s in book.starters:
         if s not in used:
             others.append(("WARNING", f"Starter {label[s]!r} is not used in any recipe.",
-                           f"Use it in a recipe, or remove it from 'starters' if it should not be there."))
+                           "Use it in a recipe, or remove it from 'starters' if it should not be there."))
     for note in book.notes:
         others.append(("NOTE", f"Repeated recipe, cleaned up automatically: {note}.",
                        "Delete the repeated entry from the file so it matches what the game uses."))

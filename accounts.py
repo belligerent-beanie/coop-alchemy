@@ -20,11 +20,10 @@ import re
 import secrets
 import threading
 import time
-
 from pathlib import Path
 from typing import Any, Callable
 
-import alchemylog   # also gives the "alchemy" loggers a quiet default handler
+import alchemylog  # also gives the "alchemy" loggers a quiet default handler
 from commonpasswords import is_common
 from state import MAX_NAME_LEN, GameError
 

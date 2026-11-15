@@ -1,0 +1,7 @@
+# Optional local safety net: `pip install -r requirements-dev.txt` then `pre-commit install`.
+# CI (.github/workflows/ci.yml) runs the same Ruff check and is the real gate; hooks can be skipped, CI cannot.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.5
+    hooks:
+      - id: ruff-check

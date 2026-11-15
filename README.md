@@ -672,6 +672,7 @@ skipped if `recipes.json` is missing.
 | `erasure.py` | Deleting an account and everything kept under its name (used by the player, the admin page and the admin tool). |
 | `API.md` | The HTTP API: every endpoint, the event stream, errors and limits, plus a change log. `test_api_docs.py` fails if it drifts from the code. |
 | `ops/` , `OPS.md` | Running the live server: safe deploys with automatic rollback, backups, the supervisor (keeps the server running, on Windows, macOS and in Docker), a daily summary, smoke test. See OPS.md. |
+| `CI.md`, `pyproject.toml`, `sonar-project.properties`, `.github/` | The checks every pull request must pass (Ruff, tests with coverage, SonarQube, CodeQL) and how Ruff and Sonar are kept in agreement. See CI.md. |
 | `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `.env.example` | Run the game, and its Cloudflare Tunnel, in containers on any host (not yet built: see DEPLOYMENT.md). |
 | `touch_check.py` | Drives a real Chrome as a phone, a tablet and a desktop, with real touch input, and checks layout and gestures (needs Chrome or Edge installed). |
 | `bench_load.py` | Load test: rooms of players and solo players against a real server; CPU, memory, threads, delay, errors. |
