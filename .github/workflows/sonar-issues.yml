@@ -1,0 +1,31 @@
+name: Sonar issues
+
+# Turns SonarQube findings on main into GitHub issues (ops/sonar_issues.py). Creating an issue never starts an
+# agent: a person adds the `agent` label for that (see AGENTS.md).
+on:
+  schedule:
+    - cron: "30 5 * * *"   # daily, after the overnight CodeQL and Dependabot runs
+  workflow_dispatch:
+    inputs:
+      max_new:
+        description: "Most new issues to open"
+        default: "15"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sync:
+    name: Sync Sonar findings to issues
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
+      - name: Create and close issues
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MAX_NEW: ${{ inputs.max_new || '15' }}
+        run: python3 ops/sonar_issues.py --apply --max-new "$MAX_NEW"
