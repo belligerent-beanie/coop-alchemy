@@ -795,7 +795,7 @@ body.admin { overflow: auto; }
 .collection-category:first-child h3 { margin-top: 0; }
 .collection-category h3 .muted { font-weight: 400; font-size: 0.85rem; }
 .collection-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr)); gap: 6px; align-content: start; grid-auto-rows: 2.4rem; }
-.collection-tile { box-sizing: border-box; display: flex; align-items: center; justify-content: center; line-height: 1.2; border: 1px solid var(--line); background: var(--tile); color: inherit; font: inherit; font-size: 0.9rem; border-radius: 8px; padding: 8px 6px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collection-tile { box-sizing: border-box; display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); background: var(--tile); color: inherit; font: inherit; line-height: 1.2; font-size: 0.9rem; border-radius: 8px; padding: 8px 6px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button.collection-tile { cursor: pointer; }
 button.collection-tile:hover { border-color: var(--accent); }
 .collection-tile.locked { background: none; border-style: dashed; opacity: 0.45; font-size: 1.1rem; }
