@@ -1,0 +1,45 @@
+name: Agent fix
+
+# Adding the `agent` label to an issue hands it to Claude (Sonnet), which fixes it on a branch and opens a PR.
+# Only people with write access can add labels, so only they can start it. See AGENTS.md.
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write   # the Claude GitHub App's token is exchanged through OIDC; its PRs then trigger CI
+
+concurrency:
+  group: agent-fix-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    name: Fix issue
+    if: github.event.label.name == 'agent' && github.event.issue.state == 'open'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
+      - run: "pip install --require-hashes --only-binary :all: -r requirements-ci.txt"
+      - uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1.0.276
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            ISSUE: #${{ github.event.issue.number }}
+
+            Read .github/agents/fixer.md and follow it to resolve issue #${{ github.event.issue.number }}.
+            Start with `gh issue view ${{ github.event.issue.number }}`.
+          claude_args: |
+            --model claude-sonnet-5-5
+            --max-turns 80
+            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(git:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr create:*),Bash(gh pr list:*),Bash(python3 run_tests.py:*),Bash(python3 -m unittest:*),Bash(ruff check:*),Bash(node --check:*)"
