@@ -32,6 +32,15 @@ Decisions made so far, and why:
 | B905 `zip` strictness | ignored | style opinion; adding `strict=` could start raising in live code |
 | E701/E702, E741 | ignored | compact one-line style and short names are used on purpose |
 
+## Pinned tooling (supply-chain safety)
+
+CI never runs code it has not pinned exactly:
+
+- **Actions are pinned to a full commit SHA**, with the version in a comment (`actions/checkout@<sha> # v4.4.0`). A tag such as `@v4` can be moved to different code by whoever controls the action's repository; a SHA cannot. Dependabot still updates them, rewriting the SHA and the comment together.
+- **CI's Python tools are hash-locked** in `requirements-ci.txt` and installed with `pip install --require-hashes --only-binary :all:`. pip refuses any file whose hash is not listed, and installs wheels only, so no package's setup script runs on the runner. `requirements-dev.txt` adds pre-commit on top for local use.
+
+When adding an action or a CI tool, pin it the same way, or SonarQube flags it (rules S7637, S8541, S8544) and the quality gate fails.
+
 ## Running the checks locally
 
 ```
