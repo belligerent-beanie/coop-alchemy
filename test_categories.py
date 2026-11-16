@@ -11,6 +11,7 @@ from test_coop import RECIPES, load_recipes
 HERE = Path(__file__).parent
 
 
+@unittest.skipUnless((HERE / "recipes.json").is_file(), "the private recipe book is not in this checkout")
 class CategoryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.elements = json.loads((HERE / "recipes.json").read_text(encoding="utf-8"))["elements"]
@@ -47,6 +48,7 @@ class JournalCategoryTests(unittest.TestCase):
         self.assertEqual(categories.of("something new"), categories.OTHER)
 
 
+@unittest.skipUnless((HERE / "recipes.json").is_file(), "the private recipe book is not in this checkout")
 class NoteTests(unittest.TestCase):
     def test_notes_are_for_real_elements_and_short(self) -> None:
         elements = {label.casefold() for label in json.loads((HERE / "recipes.json").read_text(encoding="utf-8"))["elements"]}

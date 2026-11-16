@@ -1,0 +1,40 @@
+# Tooling configuration only: Co-op Alchemy is not a pip-installable package (it is stdlib-only, see requirements.txt).
+# Ruff is the single authority for Python lint. CI fails on any Ruff finding, and SonarQube imports the same Ruff
+# report (see sonar-project.properties) so the two tools cannot disagree about what is a lint error.
+
+[tool.ruff]
+target-version = "py310"          # README: Python 3.10 or newer
+line-length = 130                 # the codebase's existing width; formatting is not enforced
+extend-exclude = ["_private-backup-*", "_transfer", "touch-check-output", "extension", "design", "static"]
+
+[tool.ruff.lint]
+select = [
+    "E4", "E7", "E9",   # pycodestyle: imports, statements, syntax errors (line length/whitespace left to a formatter)
+    "F",                # pyflakes: unused/undefined names
+    "B",                # bugbear: likely bugs
+    "I",                # import order
+    "S",                # bandit: security
+]
+ignore = [
+    "S101",   # assert: used for internal invariants and in tests
+    "S311",   # random: gameplay only (bots, element picks, daily); tokens/captcha/invites/accounts never import `random`
+    "E701", "E702",   # one-line `a; b` statements are used deliberately in this codebase's compact style
+    "E741",   # `l` as a short loop/comprehension name
+    "B905",   # zip() without strict=: behaviour-preserving style opinion; adding strict= could start raising in live code
+]
+
+[tool.ruff.lint.per-file-ignores]
+"test_*.py" = ["S"]                  # tests build fake passwords, shell out and use random on purpose
+"bench_*.py" = ["S"]                 # load/benchmark tools, not shipped code
+"touch_check.py" = ["S", "E731"]   # (E731: a lambda wrapping a JS snippet reads better than a def)
+"ops/*" = ["S603", "S607"]          # operator tools run fixed argument lists (git, schtasks, python), never user input
+"recipe_flowchart.py" = ["S603"]
+"reload.py" = ["S603"]
+
+[tool.coverage.run]
+source = ["."]
+omit = ["test_*.py", "bench_*.py", "touch_check.py", "_private-backup-*/*", "_transfer/*", "extension/*", "design/*", "ops/*"]
+branch = true
+
+[tool.coverage.report]
+exclude_also = ["if __name__ == .__main__.:"]

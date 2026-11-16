@@ -23,7 +23,7 @@ from typing import Any, Callable
 
 from accounts import key_of
 from hints import find_element
-from recipes import MAX_ID_LEN, RecipeBook, id_problem, pair_key
+from recipes import RecipeBook, id_problem, pair_key
 from state import GameError
 
 MAX_DRAFT_RECIPES = 200      # per account (bot accounts have no limit)

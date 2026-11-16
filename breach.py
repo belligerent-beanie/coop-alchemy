@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 from typing import Callable
 
-import alchemylog   # also gives the "alchemy" loggers a quiet default handler
+import alchemylog  # noqa: F401  (imported for its side effect: it gives the "alchemy" loggers a quiet default handler)
 
 API = "https://api.pwnedpasswords.com/range/"
 TIMEOUT_SECONDS = 3.0
@@ -34,8 +34,8 @@ log = logging.getLogger("alchemy.breach")
 
 def fetch_range(prefix: str) -> str:
     """The service's answer for a five-character hash prefix (raises OSError-like errors on failure)."""
-    request = urllib.request.Request(API + prefix, headers={"Add-Padding": "true", "User-Agent": "coop-alchemy-password-check"})
-    with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:   # https only: API is a fixed https URL
+    request = urllib.request.Request(API + prefix, headers={"Add-Padding": "true", "User-Agent": "coop-alchemy-password-check"})  # noqa: S310
+    with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:   # noqa: S310  (https only: API is a fixed https URL)
         return response.read(MAX_RESPONSE_BYTES).decode("ascii", "replace")
 
 

@@ -22,13 +22,13 @@ import unicodedata
 from typing import Any, Callable
 
 from accounts import key_of
+from achievements import MULTIPLAYER_UNLOCK_AT, unlock_progress
 from daily import MAX_ATTEMPTS, TIERS, DailyStore, reference_sizes, target_pools
 from pictures import PictureIndex
 from profiles import ProfileStore
 from race import GOALS, RaceRoom
 from recipes import RecipeBook, depths
 from saves import SaveStore
-from achievements import MULTIPLAYER_UNLOCK_AT, unlock_progress
 from solo import SoloStore
 from state import Challenge, GameError, GameState
 from visitor import VisitorPolicy

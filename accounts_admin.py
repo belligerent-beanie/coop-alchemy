@@ -34,12 +34,12 @@ from pathlib import Path
 from accounts import AccountStore
 from daily import DailyStore
 from drafts import DraftStore
-from iconstore import IconStore
 from erasure import erase_account
+from iconstore import IconStore
 from invites import InviteStore
+from profiles import ProfileStore
 from reports import ReportStore
 from saves import SaveStore
-from profiles import ProfileStore
 from solo import SoloStore
 from state import GameError
 

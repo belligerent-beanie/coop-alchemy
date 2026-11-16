@@ -27,8 +27,8 @@ from daily import DailyStore
 from drafts import DraftStore
 from iconstore import IconStore
 from invites import InviteStore
-from reports import ReportStore
 from profiles import ProfileStore
+from reports import ReportStore
 from saves import SaveStore
 from solo import SoloStore
 

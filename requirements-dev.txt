@@ -1,0 +1,4 @@
+# Developer tooling. The game itself needs nothing (see requirements.txt).
+# CI installs only requirements-ci.txt (hash-locked); pre-commit is for local use.
+-r requirements-ci.txt
+pre-commit==4.2.0

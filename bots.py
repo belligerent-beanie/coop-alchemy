@@ -222,7 +222,7 @@ class Bot:
         """React to what other players find: now and then a wow or a cheer, a moment later, like a person who noticed."""
         found = self.game.discovered()
         if len(found) > self._seen:
-            for eid, by in list(found.items())[self._seen:]:
+            for _eid, by in list(found.items())[self._seen:]:
                 if by and by not in (self.name, MR_ALCHEMY) and not self._reactions and self.rng.random() < self.p.chatty * 0.7:
                     self._reactions.append((now + self.rng.uniform(0.9, 2.6), self.rng.choice(("wow", "cheer", "thanks"))))
             self._seen = len(found)

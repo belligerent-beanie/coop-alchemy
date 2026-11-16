@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import random
 import tempfile
 import threading
 import unittest
@@ -15,10 +14,19 @@ from aigen import fake_lmstudio
 from aigen.embeddings import EmbeddingCache
 from aigen.generate import Settings, available_ids, run
 from aigen.lmstudio import DailyLimitError, LMStudio, LMStudioError, is_daily_limit, retry_delay, strip_reasoning
-from aigen.planner import PlanSettings, Planner, TargetResult, plan_targets
+from aigen.planner import Planner, PlanSettings, TargetResult, plan_targets
+from aigen.propose import (
+    Judgement,
+    NameIndex,
+    ProposeError,
+    name_key,
+    normalize_name,
+    parse_options,
+    parse_profile,
+    parse_ratings,
+    parse_reply,
+)
 from aigen.ratings import RatingCache
-from aigen.propose import (Judgement, NameIndex, ProposeError, name_key, normalize_name, parse_options, parse_profile,
-                           parse_ratings, parse_reply)
 from aigen.scorer import Scorer, auc, features, train
 from drafts import DraftStore
 from recipes import load_recipes

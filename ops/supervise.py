@@ -312,7 +312,7 @@ class Supervisor:
             if not WINDOWS:
                 child.terminate()   # SIGTERM: the same polite stop, sooner
             child.wait(timeout=STOP_TIMEOUT)
-            self.log(f"server stopped (it saved the running games)")
+            self.log("server stopped (it saved the running games)")
         except subprocess.TimeoutExpired:
             self.log(f"the server did not stop within {int(STOP_TIMEOUT)} s: ending it")
             child.kill()
@@ -523,7 +523,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--live-dir", default=str(ROOT), help="the code folder (server.py); default: this checkout")
     parser.add_argument("--data-dir", help="where the data files live; default: <live-dir>/data")
     parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--host", default="0.0.0.0")  # noqa: S104  (same default as the server)
     parser.add_argument("--python", help="the Python to run the server with; default: this one")
     parser.add_argument("--backups-dir", help="default: <live-dir>/backups")
     parser.add_argument("--summaries-dir", help="default: <live-dir>/summaries")

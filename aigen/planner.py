@@ -19,15 +19,27 @@ from typing import Any, Callable
 
 from drafts import DraftStore, clean_label
 from recipes import RecipeBook, pair_key
-from state import GameError
 
 from .embeddings import EmbeddingCache
 from .generate import Candidate, Settings, available_ids, write_drafts
 from .lmstudio import LMStudio
+from .propose import (
+    SYSTEM,
+    Judgement,
+    NameIndex,
+    ProposeError,
+    RawOption,
+    build_goal_prompt,
+    build_judge_prompt,
+    build_profile_prompt,
+    name_key,
+    normalize_name,
+    parse_options,
+    parse_profile,
+    parse_ratings,
+    pick_examples,
+)
 from .ratings import RatingCache
-from .propose import (Judgement, NameIndex, ProposeError, RawOption, SYSTEM, build_goal_prompt, build_judge_prompt,
-                      build_profile_prompt, name_key, normalize_name, parse_options, parse_profile, parse_ratings,
-                      pick_examples)
 from .scorer import Scorer, dot, features
 
 NEW_ELEMENT_PENALTY = 0.10   # between similar chains, prefer the one that invents fewer elements

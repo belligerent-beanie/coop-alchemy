@@ -8,7 +8,9 @@ same result whichever recipe set the game is running with.
 """
 from __future__ import annotations
 
+import contextlib
 import http.client
+import io
 import json
 import os
 import random
@@ -18,21 +20,19 @@ import unittest
 from pathlib import Path
 from typing import Any
 from unittest import mock
-import contextlib
-import categories
-import io
 
+import accounts_admin
+import categories
+from accounts import LOCKOUT_SECONDS, MAX_FAILURES, SESSION_SECONDS, AccountStore, clean_username
 from games import GameRegistry, clean_game_name, slugify
 from hints import find_element, hint_can_make, hint_recipe, hint_try, new_combinations
-import accounts_admin
-from accounts import AccountStore, LOCKOUT_SECONDS, MAX_FAILURES, SESSION_SECONDS, clean_username
 from recipe_flowchart import build_flowchart, html_page, label_text, needed_for
 from recipe_report import build_report
-from saves import SaveStore
 from recipes import RecipeError, depths, find_problems, load_recipes, parse_recipes, reachable
-from server import AlchemyServer, BASE_DIR
-from throttle import Throttle
+from saves import SaveStore
+from server import BASE_DIR, AlchemyServer
 from state import DJINN, MAX_TILES, PALETTE, RECENT_SECONDS, TIME_UNLOCK_AT, UNLOCKED_BY, GameError, GameState
+from throttle import Throttle
 
 RECIPES = BASE_DIR / "test_recipes.json"  # fixed test data, independent of the real recipes.json
 
@@ -1752,7 +1752,7 @@ class ServerTests(unittest.TestCase):
 
     def test_saving_over_http_is_for_the_creator_only(self) -> None:
         slug = self.new_game()  # created by the default Host account
-        host = self.join(slug, "Host")
+        self.join(slug, "Host")
         guest = self.join(slug, "Guest")
         snapshot = SSEClient(self.port, slug, guest["token"])
         self.assertEqual(snapshot.until("snapshot")["game"]["creator"], "Host")
