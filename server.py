@@ -139,7 +139,6 @@ from captcha import Turnstile
 from cast import CAST
 from daily import DailyStore
 from drafts import DraftStore
-from recipe_review import RecipeReview
 from emotes import emote_list
 from erasure import erase_account
 from games import IDLE_CLOSE_SECONDS, MAX_GAMES, GameRegistry
@@ -154,6 +153,7 @@ from patches import PatchError, PatchStore
 from pictures import PictureIndex, slugify
 from profiles import ProfileStore, profile_loop
 from ratelimit import ACTION_BURST, ACTION_RATE, MOTION_BURST, MOTION_RATE, TokenBuckets
+from recipe_review import RecipeReview
 from recipes import RecipeError, load_recipes
 from reports import REASONS, ReportStore, clean_note
 from saves import SaveStore

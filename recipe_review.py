@@ -5,8 +5,16 @@ has. Each recipe gets one verdict, shared by all administrators: *ok* or *flag*,
 Nothing here edits recipes.json: the flagged recipes are listed on the page for you to fix by hand, then run
 `python3 reload.py`.
 
-When the review is finished, delete this file, test_recipe_review.py, static/recipe-review.html, .js and .css, the
-`/admin/recipes` routes in server.py and the `recipe_review.json` line in .gitignore.
+When the review is finished, take it out again (`git grep -il -e recipe_review -e review-file -e admin/recipes` finds every place):
+
+- delete this file, test_recipe_review.py, and static/recipe-review.html, .js and .css;
+- server.py: the `from recipe_review import RecipeReview` import, the `self.review = RecipeReview(None)` line in the server's
+  constructor, the `server.review = RecipeReview(args.review_file)` line and the `--review-file` option in main(), the
+  `/admin/recipes`, `/admin/recipes/queue` and `/admin/recipes/flagged` branches in do_GET, and the `/admin/recipes/handle` and
+  `/admin/recipes/undo` branches in `_drafts_action`;
+- README.md: the `--review-file` row of the options table and its entry in the usage line;
+- API.md: the five `/admin/recipes...` rows, and the "recipe review" line of the change log (add a line saying it was removed);
+- .gitignore: the `recipe_review.json` line (and delete recipe_review.json once its flagged list has been dealt with).
 
 The verdicts live in one JSON file (recipe_review.json), written atomically. A damaged file is never overwritten.
 """
