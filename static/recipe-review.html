@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/static/euler.css">
   <link rel="stylesheet" href="/static/icons.css">
   <link rel="stylesheet" href="/patches.css">
+  <link rel="stylesheet" href="/static/recipe-review.css">
   <script src="/static/look.js"></script>
   <script src="/static/sparkle.js" defer></script>
 </head>
@@ -15,8 +16,8 @@
   <main id="admin-main">
     <p><a href="/admin">← Review proposals</a> · <a href="/">Home</a></p>
     <h1>Review recipes</h1>
-    <p class="who">A temporary once-over of every recipe in the game. Mark each one <strong>OK</strong> or <strong>Flag</strong> it
-      (with a note on what is wrong). Answers are shared between admins and nothing here edits <code>recipes.json</code>:
+    <p class="who">A temporary once-over of every recipe in the game. Mark each one <strong>OK</strong> or <strong>Flag</strong> it,
+      with a comment if you like. Answers are shared between admins and nothing here edits <code>recipes.json</code>:
       fix the flagged ones by hand (list below), then run <code>python3 reload.py</code>.</p>
     <p id="admin-msg" class="error" role="alert"></p>
 
@@ -32,14 +33,16 @@
         </div>
         <div id="also"></div>
       </article>
-      <input id="note" type="text" maxlength="300" placeholder="Note for a flag: what is wrong with this recipe?">
+      <input id="note" type="text" maxlength="300" placeholder="Comment (optional): press Shift + left or right arrow to judge with a comment">
       <div class="swipe-buttons">
         <button type="button" id="flag" class="danger">&larr; Flag</button>
         <button type="button" id="undo" disabled>Undo (Z)</button>
         <button type="button" id="skip">Skip (S)</button>
         <button type="button" id="ok">OK &rarr;</button>
       </div>
-      <p class="who keys">Keys: &larr; flag, &rarr; OK, S or &darr; skip (decide later), Z undo (not while typing a note).</p>
+      <p id="pending" class="who" role="status"></p>
+      <p class="who keys">Keys: &larr; flag, &rarr; OK, S or &darr; skip (decide later), Z undo. Add <strong>Shift</strong>
+        (&#8679;&larr; or &#8679;&rarr;) to judge with a comment: type it, then Enter to send or Esc to cancel.</p>
     </section>
 
     <p id="empty" class="who" hidden>Every recipe has been reviewed. You are all caught up.</p>
@@ -48,6 +51,11 @@
       <summary>Flagged so far (<span id="flagged-count">0</span>)</summary>
       <ul id="flagged-list"></ul>
       <button type="button" id="copy">Copy list</button>
+    </details>
+
+    <details id="commented-box">
+      <summary>Comments on OK recipes (<span id="commented-count">0</span>)</summary>
+      <ul id="commented-list"></ul>
     </details>
   </main>
   <script src="/static/auth.js"></script>

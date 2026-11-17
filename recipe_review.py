@@ -1,11 +1,11 @@
 """A temporary once-over of every recipe in the book, one card at a time (the /admin/recipes page).
 
 It follows the proposal review in drafts.py (look at `A + B = C`, answer, undo) but it reviews the recipes the game already
-has. Each recipe gets one verdict, shared by all administrators: *ok* or *flag* (with an optional note saying what is wrong).
+has. Each recipe gets one verdict, shared by all administrators: *ok* or *flag*, either with an optional comment.
 Nothing here edits recipes.json: the flagged recipes are listed on the page for you to fix by hand, then run
 `python3 reload.py`.
 
-When the review is finished, delete this file, test_recipe_review.py, static/recipe-review.html, static/recipe-review.js, the
+When the review is finished, delete this file, test_recipe_review.py, static/recipe-review.html, .js and .css, the
 `/admin/recipes` routes in server.py and the `recipe_review.json` line in .gitignore.
 
 The verdicts live in one JSON file (recipe_review.json), written atomically. A damaged file is never overwritten.
@@ -104,6 +104,14 @@ class RecipeReview:
             verdicts = self._load()["verdicts"]
             return [{**self._card(book, row), "note": verdicts[row[0]]["note"], "by": verdicts[row[0]]["by"]}
                     for row in every_recipe(book) if verdicts.get(row[0], {}).get("verdict") == FLAG]
+
+    def commented(self, book: RecipeBook) -> list[dict[str, Any]]:
+        """Recipes marked ok with a comment (the flagged ones carry theirs in `flagged`)."""
+        with self._lock:
+            verdicts = self._load()["verdicts"]
+            return [{**self._card(book, row), "note": verdicts[row[0]]["note"], "by": verdicts[row[0]]["by"]}
+                    for row in every_recipe(book)
+                    if verdicts.get(row[0], {}).get("verdict") == OK and verdicts[row[0]]["note"]]
 
     # ---- answering -----------------------------------------------------
 

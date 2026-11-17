@@ -69,6 +69,14 @@ class StoreTests(unittest.TestCase):
             self.review.undo("Rooty", rid)
         self.assertEqual(err.exception.status, 409)
 
+    def test_comments_on_ok_recipes_are_listed_apart_from_flags(self) -> None:
+        a, b, c = (card["id"] for card in self.review.queue(BOOK)["cards"][:3])
+        self.review.handle("Rooty", BOOK, a, "ok", "check the spelling")
+        self.review.handle("Rooty", BOOK, b, "ok", "")
+        self.review.handle("Rooty", BOOK, c, "flag", "wrong")
+        self.assertEqual([(x["id"], x["note"]) for x in self.review.commented(BOOK)], [(a, "check the spelling")])
+        self.assertEqual([x["id"] for x in self.review.flagged(BOOK)], [c])
+
     def test_a_long_note_is_cut_and_control_characters_dropped(self) -> None:
         rid = self.first()
         self.review.handle("Rooty", BOOK, rid, "flag", "a\x00b" + "x" * 1000)
@@ -125,7 +133,17 @@ class HttpTests(unittest.TestCase):
         flagged = self.req(self.admin, "GET", "/admin/recipes/flagged")[1]["flagged"]
         self.assertEqual([(f["id"], f["note"]) for f in flagged], [(card["id"], "odd")])
         self.assertEqual(self.req(self.admin, "POST", "/admin/recipes/undo", {"id": card["id"]})[1], {"id": card["id"], "verdict": None})
-        self.assertEqual(self.req(self.admin, "GET", "/admin/recipes/flagged")[1], {"flagged": []})
+        self.assertEqual(self.req(self.admin, "GET", "/admin/recipes/flagged")[1], {"flagged": [], "commented": []})
+
+    def test_a_comment_can_go_with_either_verdict(self) -> None:
+        a, b = (c["id"] for c in self.req(self.admin, "GET", "/admin/recipes/queue")[1]["cards"][:2])
+        self.req(self.admin, "POST", "/admin/recipes/handle", {"id": a, "verdict": "ok", "note": "fine, but the name is odd"})
+        self.req(self.admin, "POST", "/admin/recipes/handle", {"id": b, "verdict": "ok"})   # no comment: not listed
+        data = self.req(self.admin, "GET", "/admin/recipes/flagged")[1]
+        self.assertEqual(data["flagged"], [])
+        self.assertEqual([(c["id"], c["note"], c["by"]) for c in data["commented"]], [(a, "fine, but the name is odd", "Rooty")])
+        for rid in (a, b):
+            self.req(self.admin, "POST", "/admin/recipes/undo", {"id": rid})
 
 
 if __name__ == "__main__":

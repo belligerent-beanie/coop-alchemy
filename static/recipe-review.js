@@ -12,6 +12,7 @@ let busy = false;
 let shownId = null;
 let counts = null;
 let flaggedText = "";
+let pending = null;     // "ok" or "flag" while a comment is being typed (Shift + arrow)
 
 if (!Auth.loggedIn()) Auth.toLogin();
 
@@ -59,6 +60,7 @@ async function answer(verdict) {
   if (!card || busy) return;
   busy = true;
   $("admin-msg").textContent = "";
+  setPending(null);
   try {
     await Auth.fetch("/admin/recipes/handle", { id: card.id, verdict, note: $("note").value });
     await fly(verdict === "ok" ? 1 : -1);
@@ -72,6 +74,18 @@ async function answer(verdict) {
     busy = false;
     render();
   }
+}
+
+/** Start (or cancel, with null) judging with a comment: the comment box takes the keys until Enter or Esc. */
+function setPending(verdict) {
+  pending = verdict;
+  $("pending").textContent = verdict
+    ? `Comment, then Enter to mark this recipe ${verdict === "ok" ? "OK" : "flagged"} (Esc cancels).`
+    : "";
+  $("ok").classList.toggle("armed", verdict === "ok");
+  $("flag").classList.toggle("armed", verdict === "flag");
+  if (verdict) $("note").focus();
+  else if (document.activeElement === $("note")) $("note").blur();
 }
 
 /** Put this recipe at the back of the deck without answering it; it stays waiting. */
@@ -126,11 +140,14 @@ async function refresh() {
 async function loadFlagged() {
   try {
     const data = await Auth.fetch("/admin/recipes/flagged");
+    const line = (c) => `${c.a.label} + ${c.b.label} = ${c.result.label}${c.note ? " \u2014 " + c.note : ""}`;
+    const items = (cards) => cards.map((c) => Object.assign(document.createElement("li"), { textContent: line(c) }));
     $("flagged-count").textContent = data.flagged.length;
-    const lines = data.flagged.map((c) => `${c.a.label} + ${c.b.label} = ${c.result.label}${c.note ? " — " + c.note : ""}`);
-    $("flagged-list").replaceChildren(...lines.map((text) => Object.assign(document.createElement("li"), { textContent: text })));
-    flaggedText = lines.join("\n");
-    $("copy").disabled = lines.length === 0;
+    $("flagged-list").replaceChildren(...items(data.flagged));
+    $("commented-count").textContent = data.commented.length;
+    $("commented-list").replaceChildren(...items(data.commented));
+    flaggedText = data.flagged.map(line).join("\n");
+    $("copy").disabled = data.flagged.length === 0;
   } catch (_) { /* the queue shows the error */ }
 }
 
@@ -138,10 +155,19 @@ document.addEventListener("keydown", (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const el = document.activeElement;
   if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) return;
-  if (e.key === "ArrowRight") { e.preventDefault(); answer("ok"); }
+  if (e.shiftKey && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
+    e.preventDefault();
+    if (deck.length && !busy) setPending(e.key === "ArrowRight" ? "ok" : "flag");
+  }
+  else if (e.shiftKey) return;
+  else if (e.key === "ArrowRight") { e.preventDefault(); answer("ok"); }
   else if (e.key === "ArrowLeft") { e.preventDefault(); answer("flag"); }
   else if (e.key === "ArrowDown" || e.key === "s" || e.key === "S") { e.preventDefault(); skip(); }
   else if (e.key === "z" || e.key === "Z") { e.preventDefault(); undo(); }
+});
+$("note").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && pending) { e.preventDefault(); answer(pending); }
+  else if (e.key === "Escape") { e.preventDefault(); setPending(null); }
 });
 $("ok").addEventListener("click", () => answer("ok"));
 $("flag").addEventListener("click", () => answer("flag"));

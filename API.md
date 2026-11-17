@@ -176,8 +176,8 @@ A ticket works once, so after a dropped connection a page asks for a fresh ticke
 | `POST /admin/reopen` | session + admin | `{"id"}`: reopen a handled proposal. |
 | `GET /admin/recipes` | session | The temporary once-over page that steps through every recipe in the book (see `recipe_review.py`). |
 | `GET /admin/recipes/queue` | session + admin | `{"cards": [...], "total", "left", "ok", "flagged"}`: the next recipes nobody has answered, and the counts. |
-| `GET /admin/recipes/flagged` | session + admin | `{"flagged": [...]}`: every flagged recipe with the reviewer's note, for fixing by hand. |
-| `POST /admin/recipes/handle` | session + admin | `{"id", "verdict": "ok"\|"flag", "note"?}`: mark one recipe (`409` if someone already did). |
+| `GET /admin/recipes/flagged` | session + admin | `{"flagged": [...], "commented": [...]}`: every flagged recipe with the reviewer's comment, for fixing by hand, and the recipes marked ok that carry a comment. |
+| `POST /admin/recipes/handle` | session + admin | `{"id", "verdict": "ok"\|"flag", "note"?}`: mark one recipe, with an optional comment on either verdict (`409` if someone already did). |
 | `POST /admin/recipes/undo` | session + admin | `{"id"}`: take back your own verdict; the recipe waits again. |
 
 ## Design patches

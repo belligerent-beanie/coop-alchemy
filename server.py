@@ -725,7 +725,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, self.server.review.queue(self.server.registry.book))
             elif path == "/admin/recipes/flagged":
                 self._admin()
-                self._json(200, {"flagged": self.server.review.flagged(self.server.registry.book)})
+                book, review = self.server.registry.book, self.server.review
+                self._json(200, {"flagged": review.flagged(book), "commented": review.commented(book)})
             elif path == "/lan":
                 self._user()
                 self._json(200, {"base": self.server.public_base})
