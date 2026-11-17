@@ -174,6 +174,11 @@ A ticket works once, so after a dropped connection a page asks for a fresh ticke
 | `GET /admin/approved` | session + admin | Accepted proposals, with the snippet to paste into `recipes.json`. |
 | `POST /admin/handle` | session + admin | `{"id", "action", "reply"?}`: accept or reject a proposal. |
 | `POST /admin/reopen` | session + admin | `{"id"}`: reopen a handled proposal. |
+| `GET /admin/recipes` | session | The temporary once-over page that steps through every recipe in the book (see `recipe_review.py`). |
+| `GET /admin/recipes/queue` | session + admin | `{"cards": [...], "total", "left", "ok", "flagged"}`: the next recipes nobody has answered, and the counts. |
+| `GET /admin/recipes/flagged` | session + admin | `{"flagged": [...]}`: every flagged recipe with the reviewer's note, for fixing by hand. |
+| `POST /admin/recipes/handle` | session + admin | `{"id", "verdict": "ok"\|"flag", "note"?}`: mark one recipe (`409` if someone already did). |
+| `POST /admin/recipes/undo` | session + admin | `{"id"}`: take back your own verdict; the recipe waits again. |
 
 ## Design patches
 
@@ -235,6 +240,7 @@ checks that every option the server accepts appears in the README.
 
 Newest first. Add a line whenever an endpoint, event, status code or option is added, changed or removed.
 
+- **2026-11 (recipe review)**: `GET /admin/recipes`, `/admin/recipes/queue`, `/admin/recipes/flagged`, `POST /admin/recipes/handle`, `/admin/recipes/undo`; option `--review-file`. Temporary: removed when the once-over is done.
 - **2026-11 (guides)**: `GET /guides`; `?guide=<name>` on the pages that hold a guide.
 - **2026-11 (small fixes)**: `GET /favicon.ico`; `GET /icons/design` answers `{"design": null}` instead of `404` when nothing is saved.
 - **2026-11 (icon set)**: `GET /icons/set`; `GET /icons?element=<id>`.

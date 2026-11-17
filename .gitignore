@@ -12,6 +12,7 @@ invites.json
 saves/
 *.pem
 drafts.json
+recipe_review.json
 daily.json
 solo.json
 profiles.json

@@ -139,6 +139,7 @@ from captcha import Turnstile
 from cast import CAST
 from daily import DailyStore
 from drafts import DraftStore
+from recipe_review import RecipeReview
 from emotes import emote_list
 from erasure import erase_account
 from games import IDLE_CLOSE_SECONDS, MAX_GAMES, GameRegistry
@@ -294,6 +295,7 @@ class AlchemyServer(ThreadingHTTPServer):
         self.registry = registry
         self.accounts = accounts
         self.drafts = drafts or DraftStore(None)  # draft recipes and promotion requests (memory only if no file)
+        self.review = RecipeReview(None)          # the temporary once-over of every recipe (recipe_review.py; --review-file keeps it)
         self.contact = ""      # how to reach the person who runs this server, shown on /terms and /privacy (--contact)
         self.public_base = ""  # how other players reach this server, e.g. http://192.168.1.20:8000 (set by main)
         self.static_dir = Path(static_dir).resolve()
@@ -716,6 +718,14 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/admin/approved":
                 self._admin()
                 self._json(200, self.server.drafts.approved(self.server.registry.book))
+            elif path == "/admin/recipes":
+                self._static("recipe-review.html")
+            elif path == "/admin/recipes/queue":
+                self._admin()
+                self._json(200, self.server.review.queue(self.server.registry.book))
+            elif path == "/admin/recipes/flagged":
+                self._admin()
+                self._json(200, {"flagged": self.server.review.flagged(self.server.registry.book)})
             elif path == "/lan":
                 self._user()
                 self._json(200, {"base": self.server.public_base})
@@ -1293,6 +1303,10 @@ class Handler(BaseHTTPRequestHandler):
             return drafts.handle(admin, body.get("id"), body.get("action"), body.get("reply"))
         if path == "/admin/reopen":
             return drafts.reopen(self._admin(), body.get("id"))
+        if path == "/admin/recipes/handle":
+            return self.server.review.handle(self._admin(), book, body.get("id"), body.get("verdict"), body.get("note"))
+        if path == "/admin/recipes/undo":
+            return self.server.review.undo(self._admin(), body.get("id"))
         username = self._user()
         if not self._may_create(username):
             raise GameError(403, "Create Recipes opens once you have found every element in Solo mode")
@@ -1678,6 +1692,9 @@ def main() -> int:
                         help="the site's public address, used in emailed links (e.g. https://alchemy.example.com)")
     parser.add_argument("--tls-cert", help="certificate file (PEM): serve over HTTPS so passwords are encrypted")
     parser.add_argument("--tls-key", help="private key file (PEM) for --tls-cert")
+    parser.add_argument("--review-file", default=str(BASE_DIR / "recipe_review.json"),
+                        help="the temporary once-over of every recipe: who marked which recipe ok or flagged "
+                             "(default: ./recipe_review.json)")
     parser.add_argument("--drafts-file", default=str(BASE_DIR / "drafts.json"),
                         help="where draft recipes and promotion requests are kept (default: ./drafts.json)")
     parser.add_argument("--solo-file", default=str(BASE_DIR / "solo.json"),
@@ -1751,6 +1768,7 @@ def main() -> int:
     except OSError as exc:
         print(f"cannot listen on {args.host}:{args.port}: {exc}", file=sys.stderr)
         return 1
+    server.review = RecipeReview(args.review_file)
     registry.multiplayer_unlock_at = max(0, args.multiplayer_unlock)
     server.max_connections = max(10, args.max_connections)
     server.max_per_peer = max(2, args.max_connections_per_address)

@@ -334,7 +334,7 @@ python3 server.py [--host 0.0.0.0] [--port 8000]
                   [--saves-dir saves] [--accounts-file accounts.json]
                   [--tls-cert cert.pem --tls-key key.pem]
                   [--idle-minutes 10]
-                  [--drafts-file drafts.json] [--daily-file daily.json] [--solo-file solo.json]
+                  [--drafts-file drafts.json] [--review-file recipe_review.json] [--daily-file daily.json] [--solo-file solo.json]
                   [--snapshot-file reload_snapshot.json] [--pid-file alchemy.pid]
 ```
 
@@ -376,6 +376,7 @@ python3 server.py [--host 0.0.0.0] [--port 8000]
 | `--log-file`, `--log-days` | console, 14 | Write the server's messages (logins, failures, admin actions) to a file that starts afresh each midnight, keeping this many days. |
 | `--idle-minutes` | `10` | How long an empty game stays open. |
 | `--drafts-file` | `drafts.json` next to `server.py` | Players' draft recipes and promotion proposals. |
+| `--review-file` | `recipe_review.json` next to `server.py` | The temporary once-over of every recipe (`/admin/recipes`): which recipes were marked ok or flagged, by whom. |
 | `--daily-file` | `daily.json` next to `server.py` | The daily challenge's targets, routes, attempts used and scores (the last 400 days). |
 | `--profile-file` | `profiles.json` next to `server.py` | Each account's achievement counters and the achievements earned in shared games, daily challenges and races. |
 | `--solo-file` | `solo.json` next to `server.py` | Each account's solo-mode progress and whether it has found everything (which opens Create Recipes). |
