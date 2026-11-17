@@ -90,7 +90,7 @@ class DraftStore:
         tmp = self.path.with_name(self.path.name + ".tmp")
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")  # NOSONAR (path is the operator-set --drafts-file option; the content written is JSON data, not a path)
             os.replace(tmp, self.path)
         except OSError as exc:
             raise GameError(500, "the draft could not be saved (see the server console)") from exc
