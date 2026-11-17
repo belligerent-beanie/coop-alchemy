@@ -23,6 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      - name: Note the start time
+        run: echo "STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
       - name: Acknowledge the issue
         continue-on-error: true   # a cosmetic comment must never stop the fix
         env:
@@ -30,7 +32,7 @@ jobs:
           ISSUE: ${{ github.event.issue.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "🤖 Picked up by the agent (Claude Sonnet 5.5). Working on it now: [run log]($RUN_URL). I'll comment again when it finishes."
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "🤖 Picked up by the agent. Working on it now: [run log]($RUN_URL). I'll comment again when it finishes."
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
@@ -60,8 +62,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           JOB_STATUS: ${{ job.status }}
         run: |
-          started=$(gh run view "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --json createdAt --jq .createdAt)
-          pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "agent/issue-$ISSUE" --state open --json number,createdAt --jq "[.[] | select(.createdAt >= \"$started\")][0].number // empty")
+          pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "agent/issue-$ISSUE" --state open --json number,createdAt --jq "[.[] | select(.createdAt >= \"$STARTED\")][0].number // empty")
           if [ -n "$pr" ]; then
             msg="🤖 Done: opened PR #$pr. It gets an automated review next; you merge."
           elif [ "$JOB_STATUS" = "success" ]; then
