@@ -69,7 +69,10 @@ async function answer(verdict) {
     setTimeout(refresh, 0);
   } catch (err) {
     $("admin-msg").textContent = err.message;
-    if (err.status === 409) deck.shift();   // someone else answered it
+    if (err.status === 409) {   // someone else answered it: drop it and fetch what is still waiting
+      deck.shift();
+      setTimeout(refresh, 0);
+    }
   } finally {
     busy = false;
     render();
@@ -127,7 +130,7 @@ async function refresh() {
     deck = kept.concat(data.cards.filter((c) => !known.has(c.id)));
     counts = data;
     if (!busy) render();
-    loadFlagged();
+    void loadFlagged();
   } catch (err) {
     deck = [];
     render();
@@ -160,13 +163,13 @@ document.addEventListener("keydown", (e) => {
     if (deck.length && !busy) setPending(e.key === "ArrowRight" ? "ok" : "flag");
   }
   else if (e.shiftKey) return;
-  else if (e.key === "ArrowRight") { e.preventDefault(); answer("ok"); }
-  else if (e.key === "ArrowLeft") { e.preventDefault(); answer("flag"); }
+  else if (e.key === "ArrowRight") { e.preventDefault(); void answer("ok"); }
+  else if (e.key === "ArrowLeft") { e.preventDefault(); void answer("flag"); }
   else if (e.key === "ArrowDown" || e.key === "s" || e.key === "S") { e.preventDefault(); skip(); }
-  else if (e.key === "z" || e.key === "Z") { e.preventDefault(); undo(); }
+  else if (e.key === "z" || e.key === "Z") { e.preventDefault(); void undo(); }
 });
 $("note").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && pending) { e.preventDefault(); answer(pending); }
+  if (e.key === "Enter" && pending) { e.preventDefault(); void answer(pending); }
   else if (e.key === "Escape") { e.preventDefault(); setPending(null); }
 });
 $("ok").addEventListener("click", () => answer("ok"));
@@ -180,4 +183,4 @@ $("copy").addEventListener("click", async () => {
 });
 
 loadPictureMap(() => { if (deck.length) render(); });
-refresh();
+void refresh();

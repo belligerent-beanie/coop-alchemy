@@ -77,7 +77,7 @@ class RecipeReview:
             return
         tmp = self.path.with_name(self.path.name + ".tmp")
         try:
-            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")  # NOSONAR (the path is the --review-file option; a request only supplies the content written)
             os.replace(tmp, self.path)
         except OSError as exc:
             raise GameError(500, "the verdict could not be saved (see the server console)") from exc

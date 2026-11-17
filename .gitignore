@@ -13,6 +13,7 @@ saves/
 *.pem
 drafts.json
 recipe_review.json
+recipe_review.json.tmp
 daily.json
 solo.json
 profiles.json
