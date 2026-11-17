@@ -228,7 +228,7 @@ class DailyStore:
         tmp = self.path.with_name(self.path.name + ".tmp")
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")  # NOSONAR (path is the operator-set daily file option, never request data; the content written is only JSON)
             os.replace(tmp, self.path)
             stat = self.path.stat()
             self._cache = ((stat.st_mtime_ns, stat.st_size), data)
