@@ -128,7 +128,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import alchemylog
-from accounts import MAX_ACCOUNTS, SESSION_MAX_SECONDS, AccountStore, clean_email, key_of
+from accounts import MAX_ACCOUNTS, SESSION_MAX_SECONDS, AccountStore, account_limit, clean_email, key_of
 from achievements import ACHIEVEMENTS, BADGES, MULTIPLAYER_UNLOCK_AT, describe_badges
 from achievements import describe as describe_achievements
 from achievements import one as achievement_json
@@ -1743,7 +1743,7 @@ def main() -> int:
                             daily=DailyStore(args.daily_file, book), solo=SoloStore(args.solo_file),
                             profiles=ProfileStore(args.profile_file),
                             max_per_account=max(0, args.max_games_per_account))
-    accounts = AccountStore(args.accounts_file, max_accounts=max(1, args.max_accounts))
+    accounts = AccountStore(args.accounts_file, max_accounts=account_limit(args.max_accounts))
     if not args.no_breach_check:
         accounts.breach_count = BreachChecker().count
     listen_fd = int(os.environ.pop("ALCHEMY_LISTEN_FD")) if "ALCHEMY_LISTEN_FD" in os.environ else None

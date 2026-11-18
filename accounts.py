@@ -49,6 +49,11 @@ MAX_EMAIL_LEN = 254
 EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]+$")
 
 
+def account_limit(requested: int) -> int:
+    """The account limit to use for a --max-accounts value: never below 1, so a 0 or a negative number cannot lock everybody out."""
+    return max(1, requested)
+
+
 def clean_username(raw: object) -> str:
     """Validate and tidy a username: letters, digits, spaces and _ - . only."""
     if not isinstance(raw, str):

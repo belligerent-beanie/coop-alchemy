@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from accounts import MAX_ACCOUNTS, AccountStore
+from accounts import MAX_ACCOUNTS, AccountStore, account_limit
 from state import GameError
 
 PASSWORD = "correct horse battery"
@@ -16,6 +16,11 @@ class AccountCapTests(unittest.TestCase):
         self.assertEqual(MAX_ACCOUNTS, 5000)
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(AccountStore(Path(tmp) / "accounts.json").max_accounts, 5000)
+
+    def test_a_zero_or_negative_option_cannot_lock_everybody_out(self) -> None:
+        self.assertEqual(account_limit(0), 1)
+        self.assertEqual(account_limit(-7), 1)
+        self.assertEqual(account_limit(250), 250)
 
     def test_signup_is_refused_at_the_limit_and_works_again_below_it(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

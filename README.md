@@ -425,7 +425,7 @@ python3 reload.py
   **restarting the server logs everybody out** (and ends the games that were
   running).
 - `accounts.json` is created when the first person registers. Keep it private; it
-  holds the hashes. At most 500 accounts are allowed.
+  holds the hashes. At most 5000 accounts are allowed (change it with `--max-accounts`).
 
 ### Managing accounts
 
