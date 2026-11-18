@@ -47,7 +47,12 @@ MAX_SESSIONS = 2000
 LAST_LOGIN_RESOLUTION = 24 * 3600.0   # last_login is rewritten at most this often, so a login does not rewrite the file every time
 VERIFY_SECONDS = 24 * 3600.0    # an emailed link works this long; an account still unverified then is deleted
 MAX_EMAIL_LEN = 254
-EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]+$")
+EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]{3,}$")   # the domain must also have a dot inside it: see has_inner_dot
+
+
+def has_inner_dot(domain: str) -> bool:
+    """True if the domain has a dot that is neither its first nor its last character (checked here, not in EMAIL_RE, to keep the regex linear)."""
+    return "." in domain[1:-1]
 
 
 def account_limit(requested: int) -> int:
@@ -94,7 +99,7 @@ def clean_email(raw: object) -> tuple[str, str]:
     if not isinstance(raw, str):
         raise GameError(400, "the email address must be text")
     email = raw.strip()
-    if not email.isascii() or len(email) > MAX_EMAIL_LEN or not EMAIL_RE.match(email):
+    if not email.isascii() or len(email) > MAX_EMAIL_LEN or not EMAIL_RE.match(email) or not has_inner_dot(email.rsplit("@", 1)[1]):
         raise GameError(400, "please enter a valid email address")
     local, domain = email.rsplit("@", 1)
     local, domain = local.lower().split("+")[0], domain.lower()
