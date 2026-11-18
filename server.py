@@ -145,13 +145,13 @@ from games import IDLE_CLOSE_SECONDS, MAX_GAMES, GameRegistry
 from hints import find_element
 from hotreload import restore_snapshot, write_snapshot
 from iconstore import IconStore
+from inactive import inactive_loop
 from invites import InviteStore
 from mailer import MailConfigError, Mailer, verification_message
 from metrics import Metrics, metrics_loop
 from namefilter import NameFilter
 from patches import PatchError, PatchStore
 from pictures import PictureIndex, slugify
-from inactive import inactive_loop
 from profiles import ProfileStore, profile_loop
 from ratelimit import ACTION_BURST, ACTION_RATE, MOTION_BURST, MOTION_RATE, TokenBuckets
 from recipes import RecipeError, load_recipes
@@ -1893,7 +1893,8 @@ def run(server: AlchemyServer, registry: GameRegistry, accounts: AccountStore, a
     if registry.bots is not None:
         threading.Thread(target=bot_loop, args=(registry.bots,), daemon=True, name="companions").start()
     if args.inactive_days > 0:
-        threading.Thread(target=inactive_loop, args=(accounts, lambda name: erase_inactive(server, name), args.inactive_days * 86400.0),
+        idle_seconds = args.inactive_days * 86400.0
+        threading.Thread(target=inactive_loop, args=(accounts, lambda name: erase_inactive(server, name, idle_seconds), idle_seconds),
                          daemon=True, name="inactive-accounts").start()
     try:
         while True:
@@ -1934,12 +1935,14 @@ def run(server: AlchemyServer, registry: GameRegistry, accounts: AccountStore, a
 VISITOR_CHECK_SECONDS = 5.0   # how often games are looked at to see whether Mr Alchemy is due
 
 
-def erase_inactive(server: AlchemyServer, username: str) -> None:
-    """Delete an account that has been idle too long, everywhere, as "delete my account" would (inactive.py decides which)."""
+def erase_inactive(server: AlchemyServer, username: str, idle_seconds: float) -> None:
+    """Delete an account that has been idle for `idle_seconds`, everywhere, as "delete my account" would (inactive.py decides which).
+
+    AccountActive if its owner has come back since (nothing is deleted)."""
     registry = server.registry
     erase_account(username, accounts=server.accounts, saves=registry.saves, drafts=server.drafts,
                   daily=registry.daily, invites=server.invites, reports=server.reports,
-                  solo=registry.solo, profiles=registry.profiles, icons=server.icons)
+                  solo=registry.solo, profiles=registry.profiles, icons=server.icons, idle_seconds=idle_seconds)
     server.bump("accounts_purged")
     registry.evict_account(username)
 

@@ -10,7 +10,7 @@ import logging
 import time
 from typing import Callable
 
-from accounts import AccountStore
+from accounts import AccountActive, AccountStore
 from state import GameError
 
 log = logging.getLogger("alchemy.inactive")
@@ -22,15 +22,16 @@ FIRST_CHECK_SECONDS = 60.0   # soon after a start, so accounts from before last 
 def purge_inactive(accounts: AccountStore, erase: Callable[[str], None], max_idle_seconds: float) -> list[str]:
     """Erase every account idle for longer than `max_idle_seconds`; returns the usernames deleted.
 
-    Each name is checked again just before it is erased, so someone who logged in a moment ago keeps their account. One account
-    failing to erase is logged and does not stop the rest.
+    `erase(username)` must delete the account only if it is still idle, atomically (erasure.erase_account with idle_seconds), and
+    raise AccountActive if its owner has just come back: that account is kept. One account failing to erase is logged and
+    does not stop the rest.
     """
     deleted: list[str] = []
     for username in accounts.inactive_accounts(max_idle_seconds):
-        if not accounts.still_inactive(username, max_idle_seconds):
-            continue
         try:
             erase(username)
+        except AccountActive:
+            continue   # logged in after the list was made
         except GameError as exc:
             log.warning("inactive account %s could not be deleted: %s", username, exc.message)
             continue

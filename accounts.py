@@ -113,9 +113,14 @@ def key_of(username: str) -> str:
     return " ".join(username.split()).casefold()
 
 
-def _last_login(record: dict[str, Any]) -> float:
+class AccountActive(GameError):
+    """The account was used recently (or never counts as idle), so it must not be deleted for inactivity."""
+
+
+def _last_login(record: dict[str, Any]) -> float | None:
+    """The time of the account's last login, or None if the record has none or it is not a number (a hand-edited file)."""
     value = record.get("last_login")
-    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0.0
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
 def _keeps_forever(record: dict[str, Any]) -> bool:
@@ -371,7 +376,8 @@ class AccountStore:
     def _touch_last_login(self, key: str, now: float) -> None:
         """Record that the account was just logged in to, at most once a day (call with the lock held). Never stops a login."""
         peeked = self._peek().get(key)
-        if peeked is None or now - _last_login(peeked) < LAST_LOGIN_RESOLUTION:
+        last = _last_login(peeked) if peeked is not None else None
+        if peeked is None or (last is not None and now - last < LAST_LOGIN_RESOLUTION):
             return   # the usual case: nothing to write
         accounts = self._load()
         record = accounts[key]
@@ -396,20 +402,34 @@ class AccountStore:
             for record in accounts.values():
                 if _keeps_forever(record):
                     continue
-                if "last_login" not in record:
+                last = _last_login(record)
+                if last is None:   # missing, or not a number: start the period now rather than treat it as ancient
                     record["last_login"] = int(now)
                     stamped = True
-                elif now - _last_login(record) > max_idle_seconds:
+                elif now - last > max_idle_seconds:
                     idle.append(str(record["name"]))
             if stamped:
                 self._save(accounts)
             return sorted(idle, key=str.casefold)
 
-    def still_inactive(self, username: str, max_idle_seconds: float) -> bool:
-        """True if this account is still idle for that long (asked again just before deleting it, in case its owner just came back)."""
+    def delete_if_inactive(self, username: str, max_idle_seconds: float) -> None:
+        """Delete the account record only if it is still idle, checking and deleting under one lock.
+
+        A login that finishes first makes the account active, so it is refused (AccountActive, 409) and nothing is deleted;
+        one that comes later finds no account. 404 if there is no such account. Everything else stored under the name is
+        removed by erasure.erase_account, which calls this first.
+        """
+        key = key_of(username)
         with self._lock:
-            record = self._peek().get(key_of(username))
-            return record is not None and not _keeps_forever(record) and self._clock() - _last_login(record) > max_idle_seconds
+            accounts = self._load()
+            record = accounts.get(key)
+            if record is None:
+                raise GameError(404, f"there is no account called {username!r}")
+            last = _last_login(record)
+            if _keeps_forever(record) or last is None or self._clock() - last <= max_idle_seconds:
+                raise AccountActive(409, f"the account {username!r} is in use, or is one that is never deleted for inactivity")
+            del accounts[key]
+            self._save(accounts)
 
     def _maybe_check_breach(self, key: str, record: dict[str, Any], password: str) -> None:
         """After a right password: if it has not been looked up lately, do so in the background (the login does not wait).
