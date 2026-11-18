@@ -30,7 +30,7 @@ from state import MAX_NAME_LEN, GameError
 MIN_USERNAME_LEN = 3
 MIN_PASSWORD_LEN = 10           # for new passwords and password changes; logging in still accepts older, shorter ones
 MAX_PASSWORD_LEN = 128
-MAX_ACCOUNTS = 500
+MAX_ACCOUNTS = 5000             # the default for --max-accounts; every signup and login rewrites the whole file, fine to low thousands
 PBKDF2_ITERATIONS = 600_000
 SESSION_SECONDS = 24 * 3600.0   # a session ends after this long without being used ...
 SESSION_MAX_SECONDS = 14 * 24 * 3600.0   # ... and, however often it is used, this long after it was made (log in again)
@@ -112,8 +112,9 @@ log = logging.getLogger("alchemy.accounts")
 
 class AccountStore:
     def __init__(self, path: str | Path, *, clock: Callable[[], float] = time.time,
-                 iterations: int = PBKDF2_ITERATIONS) -> None:
+                 iterations: int = PBKDF2_ITERATIONS, max_accounts: int = MAX_ACCOUNTS) -> None:
         self.path = Path(path)
+        self.max_accounts = max_accounts
         self._clock = clock
         self._iterations = iterations
         self._lock = threading.Lock()
@@ -238,7 +239,7 @@ class AccountStore:
             raise GameError(409, "that username is taken")
         if email_key and any(r.get("email_key") == email_key for r in accounts.values()):
             raise GameError(409, "that email address already has an account")
-        if len(accounts) >= MAX_ACCOUNTS:
+        if len(accounts) >= self.max_accounts:
             raise GameError(409, "this server has reached its limit on accounts")
 
     # ---- email verification --------------------------------------------
