@@ -346,6 +346,8 @@ python3 server.py [--host 0.0.0.0] [--port 8000]
 | `--elements-dir` | `static/elements` next to `server.py` | Where the element pictures are (one `<name>.png` each). Not in git, like the recipe file. |
 | `--saves-dir` | `saves` next to `server.py` | Where saved games are kept. |
 | `--accounts-file` | `accounts.json` next to `server.py` | Usernames and password hashes. |
+| `--max-accounts` | `5000` | The most accounts the server holds; signup is refused beyond it. |
+| `--inactive-days` | `90` | Delete an account nobody has logged in to for this many days, with everything stored under its name (as "delete my account" does). `0` never deletes. Administrators, bots, disabled and unverified accounts are never deleted. Accounts from before last logins were recorded get the full period from the first check. |
 | `--client-ip-header` | none | Behind a trusted proxy, take the visitor's address from this header (Cloudflare: `CF-Connecting-IP`); otherwise `X-Forwarded-For` is used. |
 | `--contact` | none (or `ALCHEMY_CONTACT`) | An email or web address players can reach you at, shown on the terms of use and privacy pages. |
 | `--require-invite` | off | Signup needs a single-use invite code (`accounts_admin.py invite create`; see DEPLOYMENT.md). |
@@ -424,7 +426,7 @@ python3 reload.py
   **restarting the server logs everybody out** (and ends the games that were
   running).
 - `accounts.json` is created when the first person registers. Keep it private; it
-  holds the hashes. At most 500 accounts are allowed.
+  holds the hashes. At most 5000 accounts are allowed (change it with `--max-accounts`).
 
 ### Managing accounts
 

@@ -128,7 +128,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import alchemylog
-from accounts import SESSION_MAX_SECONDS, AccountStore, clean_email, key_of
+from accounts import MAX_ACCOUNTS, SESSION_MAX_SECONDS, AccountStore, account_limit, clean_email, key_of
 from achievements import ACHIEVEMENTS, BADGES, MULTIPLAYER_UNLOCK_AT, describe_badges
 from achievements import describe as describe_achievements
 from achievements import one as achievement_json
@@ -145,6 +145,7 @@ from games import IDLE_CLOSE_SECONDS, MAX_GAMES, GameRegistry
 from hints import find_element
 from hotreload import restore_snapshot, write_snapshot
 from iconstore import IconStore
+from inactive import inactive_loop
 from invites import InviteStore
 from mailer import MailConfigError, Mailer, verification_message
 from metrics import Metrics, metrics_loop
@@ -1641,6 +1642,11 @@ def main() -> int:
                         help="where saved games are kept for 3 days (default: ./saves)")
     parser.add_argument("--accounts-file", default=str(BASE_DIR / "accounts.json"),
                         help="where usernames and password hashes are kept (default: ./accounts.json)")
+    parser.add_argument("--inactive-days", type=int, default=90,
+                        help="delete an account nobody has logged in to for this many days, with everything stored under its name "
+                             "(default 90; 0 never deletes; administrators and bots are never deleted)")
+    parser.add_argument("--max-accounts", type=int, default=MAX_ACCOUNTS,
+                        help=f"the most accounts this server will hold; signup is refused beyond it (default {MAX_ACCOUNTS})")
     parser.add_argument("--trusted-proxy", action="append", default=[], metavar="IP_OR_CIDR",
                         help="a reverse proxy in front of this server (repeatable, e.g. 127.0.0.1): its "
                              "X-Forwarded-For / X-Forwarded-Proto headers are believed, so rate limits see real client addresses")
@@ -1741,7 +1747,7 @@ def main() -> int:
                             daily=DailyStore(args.daily_file, book), solo=SoloStore(args.solo_file),
                             profiles=ProfileStore(args.profile_file),
                             max_per_account=max(0, args.max_games_per_account))
-    accounts = AccountStore(args.accounts_file)
+    accounts = AccountStore(args.accounts_file, max_accounts=account_limit(args.max_accounts))
     if not args.no_breach_check:
         accounts.breach_count = BreachChecker().count
     listen_fd = int(os.environ.pop("ALCHEMY_LISTEN_FD")) if "ALCHEMY_LISTEN_FD" in os.environ else None
@@ -1886,6 +1892,10 @@ def run(server: AlchemyServer, registry: GameRegistry, accounts: AccountStore, a
     threading.Thread(target=profile_loop, args=(registry.profiles,), daemon=True, name="profile-saves").start()
     if registry.bots is not None:
         threading.Thread(target=bot_loop, args=(registry.bots,), daemon=True, name="companions").start()
+    if args.inactive_days > 0:
+        idle_seconds = args.inactive_days * 86400.0
+        threading.Thread(target=inactive_loop, args=(accounts, lambda name: erase_inactive(server, name, idle_seconds), idle_seconds),
+                         daemon=True, name="inactive-accounts").start()
     try:
         while True:
             thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True)
@@ -1923,6 +1933,18 @@ def run(server: AlchemyServer, registry: GameRegistry, accounts: AccountStore, a
 
 
 VISITOR_CHECK_SECONDS = 5.0   # how often games are looked at to see whether Mr Alchemy is due
+
+
+def erase_inactive(server: AlchemyServer, username: str, idle_seconds: float) -> None:
+    """Delete an account that has been idle for `idle_seconds`, everywhere, as "delete my account" would (inactive.py decides which).
+
+    AccountActive if its owner has come back since (nothing is deleted)."""
+    registry = server.registry
+    erase_account(username, accounts=server.accounts, saves=registry.saves, drafts=server.drafts,
+                  daily=registry.daily, invites=server.invites, reports=server.reports,
+                  solo=registry.solo, profiles=registry.profiles, icons=server.icons, idle_seconds=idle_seconds)
+    server.bump("accounts_purged")
+    registry.evict_account(username)
 
 
 def visitor_loop(registry: GameRegistry) -> None:

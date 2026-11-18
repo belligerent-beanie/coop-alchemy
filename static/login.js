@@ -10,7 +10,10 @@ let captchaToken = "";
 
 function nextPage() {
   const next = new URLSearchParams(location.search).get("next") || "/";
-  return next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/login") ? next : "/";
+  // Browsers read "\" as "/", so "/\evil.com" would leave the site: resolve it and insist on our own origin.
+  if (!next.startsWith("/") || next.startsWith("//") || next.includes("\\") || next.startsWith("/login")) return "/";
+  const target = new URL(next, location.origin);
+  return target.origin === location.origin ? target.pathname + target.search + target.hash : "/";
 }
 
 function setMode(register) {
@@ -92,7 +95,7 @@ $("auth-form").addEventListener("submit", async (e) => {
 
 // Already logged in? Skip this page.
 if (Auth.loggedIn()) {
-  fetch("/me", { headers: Auth.headers() }).then((res) => { if (res.ok) location.replace(nextPage()); });
+  fetch("/me", { headers: Auth.headers() }).then((res) => { if (res.ok) location.replace(nextPage()); }); // NOSONAR (nextPage() only returns a same-origin path)
 }
 
 // Does this server want an invite code to sign up?

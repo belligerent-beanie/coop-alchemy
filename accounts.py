@@ -30,7 +30,7 @@ from state import MAX_NAME_LEN, GameError
 MIN_USERNAME_LEN = 3
 MIN_PASSWORD_LEN = 10           # for new passwords and password changes; logging in still accepts older, shorter ones
 MAX_PASSWORD_LEN = 128
-MAX_ACCOUNTS = 500
+MAX_ACCOUNTS = 5000             # the default for --max-accounts; every signup and login rewrites the whole file, fine to low thousands
 PBKDF2_ITERATIONS = 600_000
 SESSION_SECONDS = 24 * 3600.0   # a session ends after this long without being used ...
 SESSION_MAX_SECONDS = 14 * 24 * 3600.0   # ... and, however often it is used, this long after it was made (log in again)
@@ -44,9 +44,15 @@ KNOWN_CLIENT_SECONDS = 30 * 24 * 3600.0   # a client address that logged in to a
 MAX_KNOWN_CLIENTS = 20          # per account
 BREACH_RECHECK_SECONDS = 7 * 24 * 3600.0   # a password is looked up in the breach list at login, then not again for this long
 MAX_SESSIONS = 2000
+LAST_LOGIN_RESOLUTION = 24 * 3600.0   # last_login is rewritten at most this often, so a login does not rewrite the file every time
 VERIFY_SECONDS = 24 * 3600.0    # an emailed link works this long; an account still unverified then is deleted
 MAX_EMAIL_LEN = 254
 EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]+$")
+
+
+def account_limit(requested: int) -> int:
+    """The account limit to use for a --max-accounts value: never below 1, so a 0 or a negative number cannot lock everybody out."""
+    return max(1, requested)
 
 
 def clean_username(raw: object) -> str:
@@ -107,13 +113,29 @@ def key_of(username: str) -> str:
     return " ".join(username.split()).casefold()
 
 
+class AccountActive(GameError):
+    """The account was used recently (or never counts as idle), so it must not be deleted for inactivity."""
+
+
+def _last_login(record: dict[str, Any]) -> float | None:
+    """The time of the account's last login, or None if the record has none or it is not a number (a hand-edited file)."""
+    value = record.get("last_login")
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def _keeps_forever(record: dict[str, Any]) -> bool:
+    """Accounts that inactivity never deletes: administrators, bots, disabled accounts and ones still waiting for email confirmation."""
+    return record.get("admin") is True or record.get("bot") is True or record.get("disabled") is True or record.get("verified") is False
+
+
 log = logging.getLogger("alchemy.accounts")
 
 
 class AccountStore:
     def __init__(self, path: str | Path, *, clock: Callable[[], float] = time.time,
-                 iterations: int = PBKDF2_ITERATIONS) -> None:
+                 iterations: int = PBKDF2_ITERATIONS, max_accounts: int = MAX_ACCOUNTS) -> None:
         self.path = Path(path)
+        self.max_accounts = max_accounts
         self._clock = clock
         self._iterations = iterations
         self._lock = threading.Lock()
@@ -210,7 +232,7 @@ class AccountStore:
             accounts = self._load()
             self._claim_free(accounts, key, email_key)
             accounts[key] = {"name": username, "salt": salt, "hash": digest,
-                             "iterations": self._iterations, "created": self._clock()}
+                             "iterations": self._iterations, "created": self._clock(), "last_login": int(self._clock())}
             if email:
                 accounts[key].update(email=email, email_key=email_key, verified=False)
             saving = time.monotonic()
@@ -238,7 +260,7 @@ class AccountStore:
             raise GameError(409, "that username is taken")
         if email_key and any(r.get("email_key") == email_key for r in accounts.values()):
             raise GameError(409, "that email address already has an account")
-        if len(accounts) >= MAX_ACCOUNTS:
+        if len(accounts) >= self.max_accounts:
             raise GameError(409, "this server has reached its limit on accounts")
 
     # ---- email verification --------------------------------------------
@@ -348,7 +370,66 @@ class AccountStore:
             if record.get("disabled") is True:
                 raise GameError(403, "this account has been disabled by an administrator")
             self._maybe_check_breach(key, record, raw_password)
+            self._touch_last_login(key, now)
             return self._new_session(key, record["salt"]), record["name"]
+
+    def _touch_last_login(self, key: str, now: float) -> None:
+        """Record that the account was just logged in to, at most once a day (call with the lock held). Never stops a login."""
+        peeked = self._peek().get(key)
+        last = _last_login(peeked) if peeked is not None else None
+        if peeked is None or (last is not None and now - last < LAST_LOGIN_RESOLUTION):
+            return   # the usual case: nothing to write
+        accounts = self._load()
+        record = accounts[key]
+        record["last_login"] = int(now)
+        try:
+            self._save(accounts)
+        except GameError:
+            log.warning("could not record the last login of an account (the login goes ahead)")
+
+    def inactive_accounts(self, max_idle_seconds: float) -> list[str]:
+        """Usernames of accounts nobody has logged in to for longer than `max_idle_seconds`.
+
+        Never listed: administrators, bot accounts, disabled accounts (the record of a ban) and unverified ones (they have
+        their own, shorter expiry). An account from before last logins were recorded is stamped with the present, so it gets
+        the whole period before it can be listed.
+        """
+        with self._lock:
+            accounts = self._load()
+            now = self._clock()
+            idle: list[str] = []
+            stamped = False
+            for record in accounts.values():
+                if _keeps_forever(record):
+                    continue
+                last = _last_login(record)
+                if last is None:   # missing, or not a number: start the period now rather than treat it as ancient
+                    record["last_login"] = int(now)
+                    stamped = True
+                elif now - last > max_idle_seconds:
+                    idle.append(str(record["name"]))
+            if stamped:
+                self._save(accounts)
+            return sorted(idle, key=str.casefold)
+
+    def delete_if_inactive(self, username: str, max_idle_seconds: float) -> None:
+        """Delete the account record only if it is still idle, checking and deleting under one lock.
+
+        A login that finishes first makes the account active, so it is refused (AccountActive, 409) and nothing is deleted;
+        one that comes later finds no account. 404 if there is no such account. Everything else stored under the name is
+        removed by erasure.erase_account, which calls this first.
+        """
+        key = key_of(username)
+        with self._lock:
+            accounts = self._load()
+            record = accounts.get(key)
+            if record is None:
+                raise GameError(404, f"there is no account called {username!r}")
+            last = _last_login(record)
+            if _keeps_forever(record) or last is None or self._clock() - last <= max_idle_seconds:
+                raise AccountActive(409, f"the account {username!r} is in use, or is one that is never deleted for inactivity")
+            del accounts[key]
+            self._save(accounts)
 
     def _maybe_check_breach(self, key: str, record: dict[str, Any], password: str) -> None:
         """After a right password: if it has not been looked up lately, do so in the background (the login does not wait).
