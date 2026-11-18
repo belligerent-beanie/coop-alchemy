@@ -272,14 +272,14 @@ def main() -> int:
     results = [run_scenario(spec, args.seconds) for spec in args.scenarios.split(",")]
     if args.json:
         print(json.dumps(results))
-        return 0
+        return 1 if any(r["errors"] for r in results) else 0
     print(f"{'':<30}" + "".join(f"{r['scenario']:>10}" for r in results))
     for key, label, digits in ROWS:
         print(f"{label:<30}" + "".join(f"{r[key]:>10.{digits}f}" for r in results))
-    for r in results:
-        if r["errors"]:
-            print(f"errors in {r['scenario']}: {r['error_kinds']}")
-    return 0
+    failed = [r for r in results if r["errors"]]
+    for r in failed:
+        print(f"errors in {r['scenario']}: {r['error_kinds']}")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
