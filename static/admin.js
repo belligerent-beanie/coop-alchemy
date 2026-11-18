@@ -117,7 +117,7 @@ async function answer(action) {
     await fly(action === "approve" ? 1 : -1);
     deck.shift();
     history.push({ proposal: p, action });
-    loadApproved();
+    void loadApproved();
     setTimeout(loadQueue, 0);
   } catch (err) {
     $("admin-msg").textContent = err.message;
@@ -148,7 +148,7 @@ async function undo() {
     await Auth.fetch("/admin/reopen", { id: last.proposal.id });
     history.pop();
     deck.unshift(last.proposal);
-    loadApproved();
+    void loadApproved();
     setTimeout(loadQueue, 0);
   } catch (err) {
     $("admin-msg").textContent = err.message;
@@ -194,10 +194,10 @@ document.addEventListener("keydown", (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const el = document.activeElement;
   if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) return;
-  if (e.key === "ArrowRight") { e.preventDefault(); answer("approve"); }
-  else if (e.key === "ArrowLeft") { e.preventDefault(); answer("reject"); }
+  if (e.key === "ArrowRight") { e.preventDefault(); void answer("approve"); }
+  else if (e.key === "ArrowLeft") { e.preventDefault(); void answer("reject"); }
   else if (e.key === "ArrowDown" || e.key === "s" || e.key === "S") { e.preventDefault(); skip(); }
-  else if (e.key === "z" || e.key === "Z") { e.preventDefault(); undo(); }
+  else if (e.key === "z" || e.key === "Z") { e.preventDefault(); void undo(); }
 });
 $("accept").addEventListener("click", () => answer("approve"));
 $("reject").addEventListener("click", () => answer("reject"));
@@ -209,7 +209,7 @@ $("copy").addEventListener("click", async () => {
   setTimeout(() => { $("copy").textContent = "Copy snippet"; }, 1500);
 });
 
-loadPictureMap(() => { if (deck.length) render(); });
-loadQueue();
-loadApproved();
+void loadPictureMap(() => { if (deck.length) render(); });
+void loadQueue();
+void loadApproved();
 Net.poll(() => { if (!busy) return loadQueue(); }, 15000);
