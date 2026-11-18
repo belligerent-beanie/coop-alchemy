@@ -140,7 +140,7 @@ function onItemPointerUp(e) {
   if (!inside(rect, e.clientX, e.clientY)) return;
   const target = tileAt(e.clientX, e.clientY, null);
   const tile = addTile(d.id, e.clientX - rect.left, e.clientY - rect.top);
-  if (tile && target) combine(tile, target);
+  if (tile && target) void combine(tile, target);
 }
 
 // ---- tiles --------------------------------------------------------------------------------------
@@ -254,7 +254,7 @@ function onTilePointerUp(e, tile) {
     removeTile(tile);
     return;
   }
-  if (target && tiles.has(target.id)) combine(tile, target);
+  if (target && tiles.has(target.id)) void combine(tile, target);
 }
 
 // ---- combining ----------------------------------------------------------------------------------
@@ -450,7 +450,7 @@ async function start() {
   }
 }
 
-start();
+void start();
 
 // On a touch screen the board says how to play with fingers.
 if (matchMedia("(pointer: coarse)").matches) {
