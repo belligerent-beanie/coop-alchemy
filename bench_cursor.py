@@ -278,7 +278,7 @@ ROWS = (("connections", "new connections", 0), ("updates_sent", "cursor updates 
         ("server_cpu_pct_of_one_core", "server cpu (% of one core)", 1))
 
 
-def main() -> int:
+def main() -> None:
     parser = argparse.ArgumentParser(description="Benchmark shared-cursor traffic")
     parser.add_argument("--seconds", type=float, default=10)
     parser.add_argument("--players", type=int, default=5)
@@ -292,14 +292,13 @@ def main() -> int:
                for _ in range(args.runs)]
     if args.json:
         print(json.dumps(results))
-        return 0
+        return
     print(f"{args.players} players, {args.seconds:g} s per run, {args.runs} run(s), {args.client} client; medians:")
     for key, label, digits in ROWS:
         print(f"  {label:<30}{statistics.median(r[key] for r in results):>10.{digits}f}")
     ok = min(r["final_position_ok"] for r in results)
     print(f"  {'final positions delivered':<30}{ok:>6} of {results[0]['final_position_of']}")
-    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
