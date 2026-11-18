@@ -261,7 +261,7 @@ async function start() {
 }
 
 for (const id of ["is-size", "is-bg", "is-sort", "is-flagged", "is-missing"]) $(id).addEventListener("change", render);
-$("is-previews").addEventListener("change", () => { render(); measureAll(); });
+$("is-previews").addEventListener("change", () => { render(); measureAll().catch(console.error); });
 $("is-search").addEventListener("input", render);
 $("is-d-close").addEventListener("click", () => { detail = null; $("is-detail").hidden = true; });
-start();
+start().catch(console.error);
