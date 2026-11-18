@@ -150,7 +150,7 @@ async function upgradeOldToken() {
     if (res.ok) localStorage.removeItem("alchemy-session");
   } catch (_) { /* try again at the next page load */ }
 }
-upgradeOldToken();
+void upgradeOldToken();   // never rejects: the body catches everything
 
 /** Accounts marked as designers get the on-page UI picker (designer.js). Only an answer from the server ("designer": true on
  *  /me) loads it. It is asked on every page load, and again while the picker is not loaded yet: when the tab comes back into
@@ -173,8 +173,8 @@ upgradeOldToken();
       document.head.append(Object.assign(document.createElement("script"), { src: "/static/designer.js" }));
     } catch (_) { /* offline: try again at the next check */ } finally { asking = false; }
   }
-  check();
-  document.addEventListener("visibilitychange", () => { if (!document.hidden && !Net.wait()) check(); });
-  window.addEventListener("focus", () => { if (!Net.wait()) check(); });
+  void check();
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && !Net.wait()) void check(); });
+  window.addEventListener("focus", () => { if (!Net.wait()) void check(); });
   Net.poll(check, RECHECK_MS);   // check() does nothing once the picker is loaded
 })();
