@@ -87,4 +87,4 @@ async function start() {
     render(me);
   });
 }
-start();
+start().catch((err) => { $("guides-error").textContent = err.message; });
