@@ -432,13 +432,13 @@ class Supervisor:
             self.save_state(force=True)
 
 
-def run(args: argparse.Namespace, extra: list[str]) -> int:
+def run(args: argparse.Namespace, extra: list[str]) -> None:
     live, data = Path(args.live_dir).resolve(), Path(args.data_dir).resolve()
     data.mkdir(parents=True, exist_ok=True)
     lock = Lock(data / LOCK_FILE)
     if not lock.acquire():
         print(f"A supervisor is already running for {data}.")
-        return 0   # not a failure: nothing for a login item or a container to retry
+        return   # not a failure: nothing for a login item or a container to retry
     stopping = threading.Event()
     for name in ("SIGTERM", "SIGINT", "SIGBREAK", "SIGHUP"):
         if hasattr(signal, name):
@@ -458,7 +458,7 @@ def run(args: argparse.Namespace, extra: list[str]) -> int:
     try:
         while not stopping.is_set():
             if not supervisor.tick():
-                return 0
+                return
             stopping.wait(1.0)
     finally:
         if not supervisor.stopped:
@@ -466,7 +466,6 @@ def run(args: argparse.Namespace, extra: list[str]) -> int:
             supervisor.stop_server()
             supervisor.stopped = True
             supervisor.save_state(force=True)
-    return 0
 
 
 def parse_time(text: str) -> tuple[int, int] | None:
@@ -534,7 +533,8 @@ def main(argv: list[str] | None = None) -> int:
     args.data_dir = args.data_dir or str(Path(args.live_dir) / "data")
     data = Path(args.data_dir).resolve()
     if args.command == "run":
-        return run(args, extra)
+        run(args, extra)
+        return 0
     if args.command == "status":
         return show_status(data)
     return ask(data, args.command)
