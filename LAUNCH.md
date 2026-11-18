@@ -97,7 +97,7 @@ Zero Trust > **Access** > **Applications** > **Add an application** > **Self-hos
 | `/patches/set` | switching a design patch on or off |
 | `/patches/list` | the list of design patches |
 
-Policy: **Allow**, include **Emails** = yours (and any designer's, since designers use `/patches/*` too), with the one-time PIN login method.
+Policy: **Allow**, include **Emails** = yours, with the one-time PIN login method. A designer uses `/patches/set` and `/patches/list` (behind Access) but also the icon studio (`/icons/set`, `/icons/design`, `/icons/mine`, `/icons/file/*`), which is **not** behind Access. So a designer's email must be on this list for the patches page to work, and the icon studio works for them either way.
 
 **Do not use `/patches*` or `/icons*`.** The pages players use load `/patches.css`, `/patches/text` and `/icons/previews` for every
 visitor, so protecting them would break the game for players.
