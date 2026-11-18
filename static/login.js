@@ -92,7 +92,8 @@ $("auth-form").addEventListener("submit", async (e) => {
 
 // Already logged in? Skip this page.
 if (Auth.loggedIn()) {
-  fetch("/me", { headers: Auth.headers() }).then((res) => { if (res.ok) location.replace(nextPage()); });
+  fetch("/me", { headers: Auth.headers() }).then((res) => { if (res.ok) location.replace(nextPage()); })
+    .catch(() => { /* offline or server down: stay on the login page */ });
 }
 
 // Does this server want an invite code to sign up?
