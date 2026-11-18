@@ -50,6 +50,6 @@
   };
 
   chrome.runtime.onMessage.addListener((message) => {
-    if (message && message.type === "toggle") ready.then(() => { if (window.__designerApi) window.__designerApi.toggle(); });
+    if (message && message.type === "toggle") ready.then(() => { if (window.__designerApi) window.__designerApi.toggle(); }).catch((error) => console.error("designer toggle failed", error));
   });
 })();
