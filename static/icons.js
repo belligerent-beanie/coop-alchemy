@@ -524,6 +524,7 @@ async function redo() {
   undoStack.push(snapshot);
   await restoreSnapshot(snapshot);
 }
+const reportFailure = (err) => showError(err.message);   // for promises started from event handlers
 
 function loadImage(src) {
   return new Promise((resolve, reject) => {
@@ -1120,8 +1121,8 @@ document.addEventListener("keydown", (event) => {
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName) && event.target.type !== "range" && event.target.type !== "checkbox") return;
   const mod = event.metaKey || event.ctrlKey;
   const key = event.key.toLowerCase();
-  if (mod && key === "z") { event.preventDefault(); if (event.shiftKey) redo(); else undo(); return; }
-  if (mod && key === "y") { event.preventDefault(); redo(); return; }
+  if (mod && key === "z") { event.preventDefault(); (event.shiftKey ? redo() : undo()).catch(reportFailure); return; }
+  if (mod && key === "y") { event.preventDefault(); redo().catch(reportFailure); return; }
   if (mod && key === "d") { event.preventDefault(); duplicateShape(); return; }
   if (mod || event.altKey) return;
   if ((key === "backspace" || key === "delete") && selectedShape()) { event.preventDefault(); deleteShape(); return; }
@@ -1160,4 +1161,4 @@ async function start() {
   if (el) await openElement(el);
   if (takeGuide("icons") || !tourSeen()) showTour(0);   // asked for on the Guides page, or the first visit in this browser
 }
-start();
+start().catch(reportFailure);
