@@ -151,6 +151,7 @@ from metrics import Metrics, metrics_loop
 from namefilter import NameFilter
 from patches import PatchError, PatchStore
 from pictures import PictureIndex, slugify
+from inactive import inactive_loop
 from profiles import ProfileStore, profile_loop
 from ratelimit import ACTION_BURST, ACTION_RATE, MOTION_BURST, MOTION_RATE, TokenBuckets
 from recipes import RecipeError, load_recipes
@@ -1641,6 +1642,9 @@ def main() -> int:
                         help="where saved games are kept for 3 days (default: ./saves)")
     parser.add_argument("--accounts-file", default=str(BASE_DIR / "accounts.json"),
                         help="where usernames and password hashes are kept (default: ./accounts.json)")
+    parser.add_argument("--inactive-days", type=int, default=90,
+                        help="delete an account nobody has logged in to for this many days, with everything stored under its name "
+                             "(default 90; 0 never deletes; administrators and bots are never deleted)")
     parser.add_argument("--max-accounts", type=int, default=MAX_ACCOUNTS,
                         help=f"the most accounts this server will hold; signup is refused beyond it (default {MAX_ACCOUNTS})")
     parser.add_argument("--trusted-proxy", action="append", default=[], metavar="IP_OR_CIDR",
@@ -1888,6 +1892,9 @@ def run(server: AlchemyServer, registry: GameRegistry, accounts: AccountStore, a
     threading.Thread(target=profile_loop, args=(registry.profiles,), daemon=True, name="profile-saves").start()
     if registry.bots is not None:
         threading.Thread(target=bot_loop, args=(registry.bots,), daemon=True, name="companions").start()
+    if args.inactive_days > 0:
+        threading.Thread(target=inactive_loop, args=(accounts, lambda name: erase_inactive(server, name), args.inactive_days * 86400.0),
+                         daemon=True, name="inactive-accounts").start()
     try:
         while True:
             thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True)
@@ -1925,6 +1932,16 @@ def run(server: AlchemyServer, registry: GameRegistry, accounts: AccountStore, a
 
 
 VISITOR_CHECK_SECONDS = 5.0   # how often games are looked at to see whether Mr Alchemy is due
+
+
+def erase_inactive(server: AlchemyServer, username: str) -> None:
+    """Delete an account that has been idle too long, everywhere, as "delete my account" would (inactive.py decides which)."""
+    registry = server.registry
+    erase_account(username, accounts=server.accounts, saves=registry.saves, drafts=server.drafts,
+                  daily=registry.daily, invites=server.invites, reports=server.reports,
+                  solo=registry.solo, profiles=registry.profiles, icons=server.icons)
+    server.bump("accounts_purged")
+    registry.evict_account(username)
 
 
 def visitor_loop(registry: GameRegistry) -> None:

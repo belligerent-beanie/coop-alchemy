@@ -44,6 +44,7 @@ KNOWN_CLIENT_SECONDS = 30 * 24 * 3600.0   # a client address that logged in to a
 MAX_KNOWN_CLIENTS = 20          # per account
 BREACH_RECHECK_SECONDS = 7 * 24 * 3600.0   # a password is looked up in the breach list at login, then not again for this long
 MAX_SESSIONS = 2000
+LAST_LOGIN_RESOLUTION = 24 * 3600.0   # last_login is rewritten at most this often, so a login does not rewrite the file every time
 VERIFY_SECONDS = 24 * 3600.0    # an emailed link works this long; an account still unverified then is deleted
 MAX_EMAIL_LEN = 254
 EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]+$")
@@ -110,6 +111,16 @@ def token_digest(token: str) -> str:
 
 def key_of(username: str) -> str:
     return " ".join(username.split()).casefold()
+
+
+def _last_login(record: dict[str, Any]) -> float:
+    value = record.get("last_login")
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0.0
+
+
+def _keeps_forever(record: dict[str, Any]) -> bool:
+    """Accounts that inactivity never deletes: administrators, bots, disabled accounts and ones still waiting for email confirmation."""
+    return record.get("admin") is True or record.get("bot") is True or record.get("disabled") is True or record.get("verified") is False
 
 
 log = logging.getLogger("alchemy.accounts")
@@ -216,7 +227,7 @@ class AccountStore:
             accounts = self._load()
             self._claim_free(accounts, key, email_key)
             accounts[key] = {"name": username, "salt": salt, "hash": digest,
-                             "iterations": self._iterations, "created": self._clock()}
+                             "iterations": self._iterations, "created": self._clock(), "last_login": int(self._clock())}
             if email:
                 accounts[key].update(email=email, email_key=email_key, verified=False)
             saving = time.monotonic()
@@ -354,7 +365,51 @@ class AccountStore:
             if record.get("disabled") is True:
                 raise GameError(403, "this account has been disabled by an administrator")
             self._maybe_check_breach(key, record, raw_password)
+            self._touch_last_login(key, now)
             return self._new_session(key, record["salt"]), record["name"]
+
+    def _touch_last_login(self, key: str, now: float) -> None:
+        """Record that the account was just logged in to, at most once a day (call with the lock held). Never stops a login."""
+        peeked = self._peek().get(key)
+        if peeked is None or now - _last_login(peeked) < LAST_LOGIN_RESOLUTION:
+            return   # the usual case: nothing to write
+        accounts = self._load()
+        record = accounts[key]
+        record["last_login"] = int(now)
+        try:
+            self._save(accounts)
+        except GameError:
+            log.warning("could not record the last login of an account (the login goes ahead)")
+
+    def inactive_accounts(self, max_idle_seconds: float) -> list[str]:
+        """Usernames of accounts nobody has logged in to for longer than `max_idle_seconds`.
+
+        Never listed: administrators, bot accounts, disabled accounts (the record of a ban) and unverified ones (they have
+        their own, shorter expiry). An account from before last logins were recorded is stamped with the present, so it gets
+        the whole period before it can be listed.
+        """
+        with self._lock:
+            accounts = self._load()
+            now = self._clock()
+            idle: list[str] = []
+            stamped = False
+            for record in accounts.values():
+                if _keeps_forever(record):
+                    continue
+                if "last_login" not in record:
+                    record["last_login"] = int(now)
+                    stamped = True
+                elif now - _last_login(record) > max_idle_seconds:
+                    idle.append(str(record["name"]))
+            if stamped:
+                self._save(accounts)
+            return sorted(idle, key=str.casefold)
+
+    def still_inactive(self, username: str, max_idle_seconds: float) -> bool:
+        """True if this account is still idle for that long (asked again just before deleting it, in case its owner just came back)."""
+        with self._lock:
+            record = self._peek().get(key_of(username))
+            return record is not None and not _keeps_forever(record) and self._clock() - _last_login(record) > max_idle_seconds
 
     def _maybe_check_breach(self, key: str, record: dict[str, Any], password: str) -> None:
         """After a right password: if it has not been looked up lately, do so in the background (the login does not wait).
