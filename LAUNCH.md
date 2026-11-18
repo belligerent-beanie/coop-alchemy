@@ -99,8 +99,8 @@ Zero Trust > **Access** > **Applications** > **Add an application** > **Self-hos
 
 Policy: **Allow**, include **Emails** = yours (and any designer's, since designers use `/patches/*` too), with the one-time PIN login method.
 
-**Do not use `/patches*` or `/icons*`.** Every page loads `/patches.css`, `/patches/text` and `/icons/previews` for every visitor, so
-protecting them would break the whole game for players.
+**Do not use `/patches*` or `/icons*`.** The pages players use load `/patches.css`, `/patches/text` and `/icons/previews` for every
+visitor, so protecting them would break the game for players.
 
 Check: in a private window, `https://alchemy.example.com/ops` asks for an email code *before* anything of the game loads. Signed in as
 yourself it works, and the game's own administrator check still applies after that. Also check `https://alchemy.example.com/icons/queue`
