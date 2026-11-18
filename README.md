@@ -347,6 +347,7 @@ python3 server.py [--host 0.0.0.0] [--port 8000]
 | `--saves-dir` | `saves` next to `server.py` | Where saved games are kept. |
 | `--accounts-file` | `accounts.json` next to `server.py` | Usernames and password hashes. |
 | `--max-accounts` | `5000` | The most accounts the server holds; signup is refused beyond it. |
+| `--inactive-days` | `90` | Delete an account nobody has logged in to for this many days, with everything stored under its name (as "delete my account" does). `0` never deletes. Administrators, bots, disabled and unverified accounts are never deleted. Accounts from before last logins were recorded get the full period from the first check. |
 | `--client-ip-header` | none | Behind a trusted proxy, take the visitor's address from this header (Cloudflare: `CF-Connecting-IP`); otherwise `X-Forwarded-For` is used. |
 | `--contact` | none (or `ALCHEMY_CONTACT`) | An email or web address players can reach you at, shown on the terms of use and privacy pages. |
 | `--require-invite` | off | Signup needs a single-use invite code (`accounts_admin.py invite create`; see DEPLOYMENT.md). |

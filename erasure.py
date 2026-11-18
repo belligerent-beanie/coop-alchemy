@@ -52,9 +52,16 @@ class ErasureSummary:
 def erase_account(username: str, *, accounts: AccountStore, saves: SaveStore, drafts: DraftStore, daily: DailyStore,
                   invites: InviteStore | None = None, reports: ReportStore | None = None,
                   solo: SoloStore | None = None, profiles: ProfileStore | None = None,
-                  icons: IconStore | None = None) -> ErasureSummary:
-    """Delete `username` everywhere. Raises GameError(404) first, touching nothing, if there is no such account."""
-    accounts.delete(username)  # the 404 for an unknown account happens here, before anything else is changed
+                  icons: IconStore | None = None, idle_seconds: float | None = None) -> ErasureSummary:
+    """Delete `username` everywhere. Raises GameError(404) first, touching nothing, if there is no such account.
+
+    With `idle_seconds` (deleting for inactivity) the account is deleted only if it is still idle for that long, checked and
+    deleted under one lock; otherwise AccountActive is raised first and nothing is changed.
+    """
+    if idle_seconds is None:
+        accounts.delete(username)  # the 404 for an unknown account happens here, before anything else is changed
+    else:
+        accounts.delete_if_inactive(username, idle_seconds)
     deleted, rewritten = saves.anonymize_player(username)
     return ErasureSummary(
         saves_deleted=len(deleted),

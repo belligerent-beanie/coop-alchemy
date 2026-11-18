@@ -303,6 +303,10 @@ python3 server.py --host 127.0.0.1 --trusted-proxy 127.0.0.1 \
 - Signup reveals whether a username or address is already taken ("that email address already has an account"). The
   per-address signup limit (5 per 10 minutes) keeps that slow to harvest, but it is enumeration.
 - You now store email addresses: say so in the privacy notice, and plan account deletion (below).
+- Accounts nobody has logged in to for 90 days are deleted (`--inactive-days`, `inactive.py`): the check runs a minute after the start and then every 6 hours.
+  The terms, privacy page and login page say so. Deleting is the same as "delete my account" (`erasure.py`), and it is logged as `inactive account deleted`.
+  Administrators, bots, disabled and unverified accounts are exempt. The first start after this was added stamps every older account with the present, so nobody is
+  deleted for being idle before the rule existed. To pause deleting, start with `--inactive-days 0`.
 - The account limit is 5000 (`--max-accounts`). It is a global cap, so a flood of signups can fill it: for open signup keep Turnstile on.
   Looking up the logged-in account
   no longer re-reads `accounts.json` on every request: it is parsed once and again only when the file changes (about
