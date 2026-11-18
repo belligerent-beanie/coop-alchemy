@@ -832,7 +832,7 @@
     toastTimer = setTimeout(() => { toast.hidden = true; }, 3500);
   }
   function fileName() {
-    const slug = location.pathname.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase();
+    const slug = location.pathname.split(/[^A-Za-z0-9]+/).filter(Boolean).join("-").toLowerCase();
     return `ui-changes-${slug || "home"}.md`;
   }
   function downloadExport() {
