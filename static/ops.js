@@ -257,7 +257,7 @@ function renderInvites(data) {
 
 $("invite-form").addEventListener("submit", (e) => {
   e.preventDefault();
-  run(async () => {
+  void run(async () => {
     const data = await Auth.fetch("/ops/invites/create", {
       count: Number($("invite-count").value) || 1, note: $("invite-note").value,
     });
@@ -323,5 +323,5 @@ async function refresh() {
 }
 
 $("refresh").addEventListener("click", refresh);
-refresh();
+void refresh();
 Net.poll(refresh, REFRESH_MS);
