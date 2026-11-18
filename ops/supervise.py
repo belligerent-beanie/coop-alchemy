@@ -466,7 +466,6 @@ def run(args: argparse.Namespace, extra: list[str]) -> None:
             supervisor.stop_server()
             supervisor.stopped = True
             supervisor.save_state(force=True)
-    return 0
 
 
 def parse_time(text: str) -> tuple[int, int] | None:
