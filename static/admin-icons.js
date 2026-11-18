@@ -104,7 +104,7 @@
     }
   }
 
-  (async () => {
+  void (async () => {
     try { labels = new Map((await Auth.fetch("/icons/elements")).elements.map((e) => [e.id, e.label])); } catch (_) { /* ids then */ }
     await load();
     Net.poll(() => { if (!busy) return load(); }, 15000);
