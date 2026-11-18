@@ -51,6 +51,7 @@ services:
   tunnel:
     image: cloudflare/cloudflared:2026.11.1   # pinned so an update never surprises you; bump it on purpose (releases: github.com/cloudflare/cloudflared)
     restart: unless-stopped
+    # Hardened the same way as the game, and just as UNTRIED: if the tunnel will not start, remove read_only first.
     read_only: true
     cap_drop:
       - ALL
