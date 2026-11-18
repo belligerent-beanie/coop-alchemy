@@ -29,7 +29,7 @@ services:
       - no-new-privileges:true
     mem_limit: 1g
     cpus: 0.8
-    pids_limit: 512
+    pids_limit: 1024   # the server allows 600 connections at once and each takes a thread (--max-connections), plus its own helper threads
     command:
       - "--trusted-proxy"
       - "172.16.0.0/12"
