@@ -57,7 +57,7 @@
       const head = node("div", "", "ir-head");
       head.append(node("strong", label(p.element)), node("span", `by ${p.author} · ${when(p.created)}`, "who"));
       const compare = node("div", "", "ir-compare");
-      compare.append(sizes(fileUrl(p.png), "Proposed"), sizes(p.current, p.current ? "In the game now" : "In the game now"));
+      compare.append(sizes(fileUrl(p.png), "Proposed"), sizes(p.current, "In the game now"));
       card.append(head, compare);
       if (p.note) card.append(node("p", p.note, "note"));
       const actions = node("div", "", "ir-actions");
