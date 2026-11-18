@@ -681,7 +681,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", str(len(data)))
                 self.send_header("Cache-Control", "private, max-age=86400")   # a stored file never changes: new work gets a new name
                 self.end_headers()
-                self.wfile.write(data)
+                self.wfile.write(data)   # NOSONAR (PNG bytes from the icon store, sent as image/png with nosniff, not HTML)
             elif path == "/icons/previews":   # every page that shows pictures asks; only admins and designers get any
                 self._json(200, {"previews": self._icon_previews()})
             elif path == "/icons/queue":
@@ -1345,7 +1345,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")   # what it holds depends on who asks and changes when a patch is switched
         self.end_headers()
-        self.wfile.write(body)
+        self.wfile.write(body)   # NOSONAR (only called with server-held CSS as text/css, never request input; nosniff is set on every response)
 
     def _sees_previews(self) -> bool:
         """Whether this visitor gets design patches in preview: logged-in administrators and designers. Anyone else (logged out,
@@ -1443,7 +1443,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(body)
+        self.wfile.write(body)   # NOSONAR (json.dumps output sent as application/json with nosniff, not HTML)
 
     def _missing_game_page(self) -> None:
         body = (
@@ -1489,7 +1489,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "private, max-age=3600")
         self.end_headers()
-        self.wfile.write(data)
+        self.wfile.write(data)   # NOSONAR (PNG bytes from the picture store, sent as image/png with nosniff, not HTML)
 
     def _contact_html(self) -> str:
         """The administrator's contact line for the terms and privacy pages: an email or web address becomes a link."""
@@ -1537,7 +1537,7 @@ class Handler(BaseHTTPRequestHandler):
         # Element pictures rarely change; everything else is always re-checked.
         self.send_header("Cache-Control", "max-age=3600" if relative.startswith("elements/") else "no-cache")
         self.end_headers()
-        self.wfile.write(data)
+        self.wfile.write(data)   # NOSONAR (file under static/ chosen by a checked path, content type from its extension, nosniff is set)
 
     def _events(self, game: GameState, slug: str, query: dict[str, list[str]]) -> None:
         token = self.server.tickets.redeem(query.get("ticket", [""])[0], slug)
