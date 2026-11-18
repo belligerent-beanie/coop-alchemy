@@ -19,7 +19,7 @@
     </div>
     <form id="auth-form" autocomplete="on">
       <label for="username">Username</label>
-      <input id="username" name="username" autocomplete="username" maxlength="24" required autofocus>
+      <input id="username" name="username" autocomplete="username" maxlength="24" required autofocus> <!-- NOSONAR (the login form is the only thing on this page, so focusing the first field helps rather than hinders) -->
       <p id="username-hint" class="muted" hidden>3 to 24 characters: letters, digits, spaces, _ - . This is the name other
         players see, and no one else can use it.</p>
       <label for="email" id="email-label" hidden>Email address</label>
