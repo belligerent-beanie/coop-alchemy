@@ -79,7 +79,7 @@ class LatestSender {
 
   send(body) {
     this.pending = body;
-    if (!this.busy) this.pump();
+    if (!this.busy) void this.pump();
   }
 
   async pump() {
@@ -249,7 +249,7 @@ function setRace(r) {
   $("invite").hidden = true;   // a private world
   $("hints").hidden = true;    // no hints in a race (the server refuses them too)
   $("end").hidden = true;      // leaving goes through "Leave race"
-  pollRace();
+  void pollRace();
   raceTimer = Net.poll(pollRace, 1500);
 }
 
@@ -324,7 +324,7 @@ function showChallengeDone(score, reference, hintReward) {
   challenge.done = score;
   $("challenge-count").textContent = `found it with ${score} unlocked`;
   if (!$("challenge-done").open) $("challenge-done").showModal();
-  showAttemptsLeft();
+  void showAttemptsLeft();
 }
 
 /** Shows on the "Try again" button how many attempts are left in this tier today (none: it is disabled). */
@@ -611,7 +611,7 @@ function duplicateTile(id, clientX, clientY) {
   const t = tiles.get(id);
   if (!t || t.data.held_by) return;
   const r = wsRect();
-  addNewTile(t.data.element, clamp01((clientX - r.left) / r.width), clamp01((clientY - r.top) / r.height));
+  void addNewTile(t.data.element, clamp01((clientX - r.left) / r.width), clamp01((clientY - r.top) / r.height));
 }
 
 // In the element list a click adds a tile, so the second click of a double click would add another: it is ignored.
@@ -780,7 +780,7 @@ function onTilePointerUp(e) {
   if (!d || e.pointerId !== d.pointerId) return;
   drag = null;
   if (!d.started) return; // just a click: nothing was grabbed, so there is nothing to put down
-  finishTileDrag(d, e.type === "pointercancel" ? d.lastX : e.clientX, e.type === "pointercancel" ? d.lastY : e.clientY);
+  void finishTileDrag(d, e.type === "pointercancel" ? d.lastX : e.clientX, e.type === "pointercancel" ? d.lastY : e.clientY);
 }
 
 async function finishTileDrag(d, clientX, clientY) {
@@ -869,7 +869,7 @@ function onItemPointerUp(e) {
   if (!d.ghost) { // a plain click or tap: drop a new tile somewhere near the middle
     if (isSecondClick(lastItemClick, d.id, e)) { lastItemClick = null; return; }   // the second click of a double click adds nothing
     lastItemClick = { id: d.id, time: e.timeStamp, x: e.clientX, y: e.clientY };
-    addNewTile(d.id, 0.3 + Math.random() * 0.4, 0.3 + Math.random() * 0.4);
+    void addNewTile(d.id, 0.3 + Math.random() * 0.4, 0.3 + Math.random() * 0.4);
     return;
   }
   const r = wsRect();
@@ -878,7 +878,7 @@ function onItemPointerUp(e) {
   const y = clamp01((e.clientY - r.top) / r.height);
   const targetId = findTarget(e.clientX, e.clientY, null);
   if (!targetId) {
-    addNewTile(d.id, x, y);
+    void addNewTile(d.id, x, y);
     return;
   }
   api("/combine", { element: d.id, b: targetId, x, y })
@@ -949,7 +949,7 @@ let lastTouchAt = -Infinity;
 function peekElement(id) {
   if (genieArmed || !id || !me.token) return;
   tooltip.hidden = true;
-  openJournalFor(id);
+  void openJournalFor(id);
 }
 
 function cancelPress() {
@@ -1098,7 +1098,7 @@ document.querySelectorAll("[data-hint]").forEach((button) => {
 
 $("hint-find").addEventListener("submit", (e) => {
   e.preventDefault();
-  askHint("find", $("hint-target").value);
+  void askHint("find", $("hint-target").value);
 });
 
 // ---- the genie ------------------------------------------------------------------------------
@@ -1585,7 +1585,7 @@ const handlers = {
     paintHintsLeft();
     maybeShowHintTutorial();
     $("emote-open").hidden = !!(s.challenge || s.race || s.game.solo);   // emotes are for shared games
-    if (!$("emote-open").hidden && !emoteList.length) loadEmotes();
+    if (!$("emote-open").hidden && !emoteList.length) void loadEmotes();
     clearAllTiles();
     elements.clear();
     itemEls.clear();
@@ -1680,7 +1680,7 @@ const handlers = {
   },
 
   race_won() {
-    pollRace();
+    void pollRace();
   },
 
   challenge_done(d) {
@@ -1706,7 +1706,7 @@ function reconnectLater() {
 
 // Back in view (a laptop opened again, a tab switched to) while a reconnect is waiting: try now, unless the server said to wait.
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden && reconnectTimer && !gameEnded && !Net.wait() && !$("status").classList.contains("on")) connect();
+  if (!document.hidden && reconnectTimer && !gameEnded && !Net.wait() && !$("status").classList.contains("on")) void connect();
 });
 
 /** Opens the event stream with a one-time ticket, so the player token never appears in a URL. */
@@ -1718,7 +1718,7 @@ async function connect() {
     ticket = (await api("/ticket")).ticket;
   } catch (err) {
     if (gameEnded) return;
-    if (err.status === 403 || err.status === 404) rejoin(); // the server no longer knows us (e.g. it restarted)
+    if (err.status === 403 || err.status === 404) void rejoin(); // the server no longer knows us (e.g. it restarted)
     else reconnectLater();                                  // busy or unreachable: keep trying, more slowly each time
     return;
   }
@@ -1793,7 +1793,7 @@ async function rejoin() {
   rejoining = true;
   try {
     await join();
-    connect();
+    void connect();
     toast("Reconnected");
   } catch (err) {
     forget();
@@ -1809,7 +1809,7 @@ $("join-form").addEventListener("submit", async (e) => {
   try {
     await join();
     showApp();
-    connect();
+    void connect();
   } catch (err) {
     $("join-error").textContent = err.message;
   }
@@ -1879,10 +1879,10 @@ $("cat").addEventListener("click", () => {
     me.token = token;
     me.name = name;
     showApp();
-    connect();
+    void connect();
   } else if (["race-", "solo-", "daily-"].some((prefix) => GAME_ID.startsWith(prefix))) {
     // A racer's, solo player's or challenger's world is theirs alone and already open: no "Join" step.
-    loaded.then(() => $("join-form").requestSubmit());
+    void loaded.then(() => $("join-form").requestSubmit());
   }
 })();
 
@@ -1901,6 +1901,6 @@ async function checkVersion() {
 }
 
 $("update-reload").addEventListener("click", () => location.reload());
-$("update-later").addEventListener("click", () => { $("update").hidden = true; pageVersion = null; checkVersion(); });
-checkVersion();
+$("update-later").addEventListener("click", () => { $("update").hidden = true; pageVersion = null; void checkVersion(); });
+void checkVersion();
 Net.poll(checkVersion, 20000);
