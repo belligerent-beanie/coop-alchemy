@@ -5,7 +5,7 @@ const message = document.getElementById("verify-msg");
 const token = location.hash.slice(1);
 history.replaceState(null, "", location.pathname); // do not leave the token in the address bar or history
 
-(async () => {
+void (async () => {
   if (!token) {
     message.textContent = "This page needs the link from your confirmation email.";
     return;
