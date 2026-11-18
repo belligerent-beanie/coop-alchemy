@@ -994,7 +994,7 @@
     Promise.resolve(host.openPreview(width, height)).then((result) => {
       if (result === false) showToast("The browser blocked the window: allow pop-ups for this site, then try again.");
       else if (typeof result === "string") showToast(result);
-    });
+    }).catch(() => showToast("Could not open the preview window."));
   }
   function previewPanel() {
     return h("div", { class: "dz-panel" },
@@ -1875,7 +1875,7 @@
   }
   function onKey(event) {
     if (event.altKey && event.shiftKey && event.code === "KeyP") { event.preventDefault(); setOn(!on); return; }
-    if (event.altKey && event.shiftKey && event.code === "KeyE") { event.preventDefault(); copyChanges(); return; }   // works with the picker off too
+    if (event.altKey && event.shiftKey && event.code === "KeyE") { event.preventDefault(); void copyChanges(); return; }   // works with the picker off too
     if (!on) return;
     if (event.altKey && event.shiftKey && (event.code === "KeyC" || event.code === "KeyV") && selected) {
       event.preventDefault();
