@@ -991,10 +991,24 @@ const TOUR = [
     "[[⌘D]] duplicate · [[⌫]] delete · [[[]] / [[]]] backward / forward · arrows nudge (Shift: 8 px) · [[Esc]] deselect"] },
 ];
 let tourStep = null;
+// Splits text into plain parts and [[key]] parts (at least one character inside), without a backtracking regex.
+function tourParts(text) {
+  const parts = [];
+  let pos = 0;
+  while (pos < text.length) {
+    const open = text.indexOf("[[", pos);
+    const close = open < 0 ? -1 : text.indexOf("]]", open + 3);
+    if (close < 0) break;
+    parts.push(text.slice(pos, open), text.slice(open, close + 2));
+    pos = close + 2;
+  }
+  parts.push(text.slice(pos));
+  return parts;
+}
 function tourLine(text) {
   const p = document.createElement("p");
-  for (const part of text.split(/(\[\[.+?\]\])/)) {
-    if (part.startsWith("[[") && part.endsWith("]]")) {
+  for (const part of tourParts(text)) {
+    if (part.length > 4 && part.startsWith("[[") && part.endsWith("]]")) {
       const k = document.createElement("kbd");
       k.textContent = part.slice(2, -2);
       p.append(k);
