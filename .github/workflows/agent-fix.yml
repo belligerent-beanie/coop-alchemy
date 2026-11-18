@@ -23,6 +23,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      - name: Note the start time
+        run: echo "STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+      - name: Acknowledge the issue
+        continue-on-error: true   # a cosmetic comment must never stop the fix
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "🤖 Picked up by the agent. Working on it now: [run log]($RUN_URL). I'll comment again when it finishes."
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
@@ -43,3 +53,21 @@ jobs:
             --model claude-sonnet-5-5
             --max-turns 80
             --allowedTools "Read,Edit,Write,Glob,Grep,Bash(git:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr create:*),Bash(gh pr list:*),Bash(python3 run_tests.py:*),Bash(python3 -m unittest:*),Bash(ruff check:*),Bash(node --check:*)"
+      - name: Report the outcome on the issue
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "agent/issue-$ISSUE" --state open --json number,createdAt --jq "[.[] | select(.createdAt >= \"$STARTED\")][0].number // empty")
+          if [ -n "$pr" ]; then
+            msg="🤖 Done: opened PR #$pr. It gets an automated review next; you merge."
+          elif [ "$JOB_STATUS" = "success" ]; then
+            msg="🤖 Finished without opening a PR. If the fix looked risky or large, the reason is in the comment above; otherwise see the [run log]($RUN_URL)."
+          else
+            msg="🤖 The run ended with status \`$JOB_STATUS\` and no PR. See the [run log]($RUN_URL). Remove and re-add \`agent\` to retry."
+          fi
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "$msg"

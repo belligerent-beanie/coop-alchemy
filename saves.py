@@ -169,7 +169,7 @@ class SaveStore:
                     data["discovered"] = {eid: (DELETED_PLAYER if isinstance(by, str) and normalise(by) == wanted else by)
                                           for eid, by in data["discovered"].items()}
                 tmp = path.with_name(path.name + ".tmp")
-                tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+                tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")  # NOSONAR (path comes from _path(), which only accepts slugs matching SLUG_RE inside the saves directory)
                 os.replace(tmp, path)
                 rewritten.append(data["slug"])
             except OSError as exc:

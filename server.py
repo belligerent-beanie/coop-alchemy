@@ -128,7 +128,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import alchemylog
-from accounts import SESSION_MAX_SECONDS, AccountStore, clean_email, key_of
+from accounts import MAX_ACCOUNTS, SESSION_MAX_SECONDS, AccountStore, account_limit, clean_email, key_of
 from achievements import ACHIEVEMENTS, BADGES, MULTIPLAYER_UNLOCK_AT, describe_badges
 from achievements import describe as describe_achievements
 from achievements import one as achievement_json
@@ -681,7 +681,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", str(len(data)))
                 self.send_header("Cache-Control", "private, max-age=86400")   # a stored file never changes: new work gets a new name
                 self.end_headers()
-                self.wfile.write(data)
+                self.wfile.write(data)   # NOSONAR (PNG bytes from the icon store, sent as image/png with nosniff, not HTML)
             elif path == "/icons/previews":   # every page that shows pictures asks; only admins and designers get any
                 self._json(200, {"previews": self._icon_previews()})
             elif path == "/icons/queue":
@@ -1345,7 +1345,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")   # what it holds depends on who asks and changes when a patch is switched
         self.end_headers()
-        self.wfile.write(body)
+        self.wfile.write(body)   # NOSONAR (only called with server-held CSS as text/css, never request input; nosniff is set on every response)
 
     def _sees_previews(self) -> bool:
         """Whether this visitor gets design patches in preview: logged-in administrators and designers. Anyone else (logged out,
@@ -1443,7 +1443,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(body)
+        self.wfile.write(body)   # NOSONAR (json.dumps output sent as application/json with nosniff, not HTML)
 
     def _missing_game_page(self) -> None:
         body = (
@@ -1489,7 +1489,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "private, max-age=3600")
         self.end_headers()
-        self.wfile.write(data)
+        self.wfile.write(data)   # NOSONAR (PNG bytes from the picture store, sent as image/png with nosniff, not HTML)
 
     def _contact_html(self) -> str:
         """The administrator's contact line for the terms and privacy pages: an email or web address becomes a link."""
@@ -1537,7 +1537,7 @@ class Handler(BaseHTTPRequestHandler):
         # Element pictures rarely change; everything else is always re-checked.
         self.send_header("Cache-Control", "max-age=3600" if relative.startswith("elements/") else "no-cache")
         self.end_headers()
-        self.wfile.write(data)
+        self.wfile.write(data)   # NOSONAR (file under static/ chosen by a checked path, content type from its extension, nosniff is set)
 
     def _events(self, game: GameState, slug: str, query: dict[str, list[str]]) -> None:
         token = self.server.tickets.redeem(query.get("ticket", [""])[0], slug)
@@ -1641,6 +1641,8 @@ def main() -> int:
                         help="where saved games are kept for 3 days (default: ./saves)")
     parser.add_argument("--accounts-file", default=str(BASE_DIR / "accounts.json"),
                         help="where usernames and password hashes are kept (default: ./accounts.json)")
+    parser.add_argument("--max-accounts", type=int, default=MAX_ACCOUNTS,
+                        help=f"the most accounts this server will hold; signup is refused beyond it (default {MAX_ACCOUNTS})")
     parser.add_argument("--trusted-proxy", action="append", default=[], metavar="IP_OR_CIDR",
                         help="a reverse proxy in front of this server (repeatable, e.g. 127.0.0.1): its "
                              "X-Forwarded-For / X-Forwarded-Proto headers are believed, so rate limits see real client addresses")
@@ -1741,7 +1743,7 @@ def main() -> int:
                             daily=DailyStore(args.daily_file, book), solo=SoloStore(args.solo_file),
                             profiles=ProfileStore(args.profile_file),
                             max_per_account=max(0, args.max_games_per_account))
-    accounts = AccountStore(args.accounts_file)
+    accounts = AccountStore(args.accounts_file, max_accounts=account_limit(args.max_accounts))
     if not args.no_breach_check:
         accounts.breach_count = BreachChecker().count
     listen_fd = int(os.environ.pop("ALCHEMY_LISTEN_FD")) if "ALCHEMY_LISTEN_FD" in os.environ else None
