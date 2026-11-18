@@ -17,7 +17,7 @@
       <p id="join-game" class="game-title"></p>
       <p>Combine elements together with your friends on one shared board.</p>
       <p class="who">Playing as <strong id="name"></strong> · <button type="button" id="logout" class="link">Not you? Log out</button></p>
-      <button type="submit" autofocus>Join</button>
+      <button type="submit" autofocus>Join</button> <!-- NOSONAR (the join screen has one action and nothing before it, so keyboard users can press Enter at once) -->
       <p id="join-error" class="error" role="alert"></p>
       <a href="/">← All games</a>
     </form>
