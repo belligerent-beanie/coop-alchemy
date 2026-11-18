@@ -84,6 +84,6 @@ $("race-leave").addEventListener("click", async () => {
   location.href = "/";
 });
 
-poll();
+void poll();  // poll() catches its own errors
 timer = Net.poll(poll, 1000);
 setInterval(render, 200);  // the countdown ticks faster than the polling
