@@ -123,7 +123,7 @@
     if (lengths.length < 2) return null;
     const [x, y, blur = 0, spread = 0] = lengths.map((n) => Math.round(parseFloat(n)));
     const alphaText = numbers[3];
-    const alpha = alphaText === undefined ? 1 : alphaText.endsWith("%") ? parseFloat(alphaText) / 100 : parseFloat(alphaText);
+    const alpha = alphaText === undefined ? 1 : alphaText.endsWith("%") ? parseFloat(alphaText) / 100 : parseFloat(alphaText); // NOSONAR (numbers comes from split(), which may have only three entries, so numbers[3] can be undefined)
     return { x, y, blur, spread, rgb: numbers.slice(0, 3).map(Number), alpha: Math.round(alpha * 100) / 100, inset: /\binset\b/.test(text) };
   }
   /** A shadow as CSS: offsets, blur, spread, then the colour (#rrggbb when solid, rgba() when see-through), then "inset". */
