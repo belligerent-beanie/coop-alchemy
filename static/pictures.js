@@ -56,7 +56,7 @@ async function loadPreviews() {
   for (const node of document.querySelectorAll(".pic-host")) if (node.__picElement) applyImage(node, node.__picElement);
 }
 if (typeof Auth !== "undefined" && Auth.loggedIn()) {
-  loadPreviews();
+  void loadPreviews();   // it handles its own errors
   if (typeof Net !== "undefined") Net.poll(loadPreviews, 60000);   // a preview switched on elsewhere shows within a minute
 }
 
