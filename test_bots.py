@@ -107,7 +107,7 @@ class PointerTests(unittest.TestCase):
         def path(seed: int) -> list[tuple[float, float, float]]:
             p = self.pointer(seed)
             return sample(p, 0.0, p.move_to(0.7, 0.6, 0.0) + 0.5)
-        self.assertEqual(path(5), path(5))
+        self.assertEqual(path(5), path(5))  # NOSONAR (deliberate: calling path(5) twice checks the same seed gives the same result)
         self.assertNotEqual(path(5), path(6))
 
     def test_it_sometimes_overshoots_when_it_is_clumsy_and_never_when_it_is_exact(self) -> None:
