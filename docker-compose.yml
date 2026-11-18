@@ -15,6 +15,21 @@ services:
     restart: unless-stopped
     volumes:
       - alchemy-data:/data
+    # Hardening: if the game were ever broken into, these limit what the intruder can do and how much of the host they can use.
+    #   read_only + tmpfs  nothing can be written outside /data (and a scratch /tmp that vanishes on restart). NOT TRIED on a real
+    #                      server: if the container will not start after this change, remove the next two lines first.
+    #   cap_drop, no-new-privileges  no special Linux powers, and none can be gained later.
+    #   mem_limit, cpus, pids_limit  a flood or a bug cannot eat the whole server (sized for 1 CPU and 2 GB; raise them on a bigger one).
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
+    cpus: 0.8
+    pids_limit: 512
     command:
       - "--trusted-proxy"
       - "172.16.0.0/12"
@@ -34,8 +49,15 @@ services:
     #   - TURNSTILE_SECRET_KEY=${TURNSTILE_SECRET_KEY}
 
   tunnel:
-    image: cloudflare/cloudflared:latest   # pin a version once it works, so an update never surprises you
+    image: cloudflare/cloudflared:2026.11.1   # pinned so an update never surprises you; bump it on purpose (releases: github.com/cloudflare/cloudflared)
     restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    pids_limit: 128
     command: tunnel --no-autoupdate run
     environment:
       - TUNNEL_TOKEN=${TUNNEL_TOKEN:?put TUNNEL_TOKEN in .env}
