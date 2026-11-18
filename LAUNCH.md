@@ -84,11 +84,28 @@ stop and fix it before inviting anyone, because every rate limit would treat all
 
 ## 6. Lock the admin pages (a second lock)
 
-Zero Trust > **Access** > **Applications** > **Add an application** > **Self-hosted**. Hostname `alchemy.example.com`, paths `/ops*` and
-`/admin*`. Policy: **Allow**, include **Emails** = yours, with the one-time PIN login method.
+Zero Trust > **Access** > **Applications** > **Add an application** > **Self-hosted**. Hostname `alchemy.example.com`, with these paths
+(add each as its own path):
+
+| Path | What it is |
+|---|---|
+| `/ops*` | the Operations page and its actions |
+| `/admin*` | the administrator pages (drafts, icons, accounts) |
+| `/icons/queue` | the icon proposals waiting for review |
+| `/icons/handle` | approving or rejecting an icon proposal |
+| `/icons/undo` | undoing an icon decision |
+| `/patches/set` | switching a design patch on or off |
+| `/patches/list` | the list of design patches |
+
+Policy: **Allow**, include **Emails** = yours, with the one-time PIN login method. A designer uses `/patches/set` and `/patches/list` (behind Access) but also the icon studio (`/icons/set`, `/icons/design`, `/icons/mine`, `/icons/file/*`), which is **not** behind Access. So a designer's email must be on this list for the patches page to work, and the icon studio works for them either way.
+
+**Do not use `/patches*` or `/icons*`.** The pages players use load `/patches.css`, `/patches/text` and `/icons/previews` for every
+visitor, so protecting them would break the game for players.
 
 Check: in a private window, `https://alchemy.example.com/ops` asks for an email code *before* anything of the game loads. Signed in as
-yourself it works, and the game's own administrator check still applies after that.
+yourself it works, and the game's own administrator check still applies after that. Also check `https://alchemy.example.com/icons/queue`
+the same way, and that the home page still loads for a logged-out visitor. After Access's session expires (24 hours by default), the
+admin pages' requests fail until you reload the page and sign in again.
 
 Optional, if your Cloudflare plan allows: **Security** > **WAF** > **Rate limiting rules** for `POST /login` and `POST /register`.
 
