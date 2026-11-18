@@ -72,7 +72,7 @@ $("new-game").addEventListener("submit", async (e) => {
     location.href = data.url;
   } catch (err) {
     $("create-error").textContent = err.message;
-    refresh();
+    void refresh();
   }
 });
 
@@ -218,7 +218,7 @@ async function startDaily(tier, fresh) {
     location.href = (await Auth.fetch("/daily/start", { tier, fresh })).url;
   } catch (err) {
     $("daily-error").textContent = err.message;
-    loadDaily();
+    void loadDaily();
   }
 }
 
@@ -230,7 +230,7 @@ async function revealRoute(tier) {
   } catch (err) {
     $("daily-error").textContent = err.message;
   }
-  loadDaily();
+  void loadDaily();
 }
 
 $("daily-share").addEventListener("click", async () => {
@@ -297,7 +297,7 @@ async function loadRaces() {
             location.href = `/race/${r.id}`;
           } catch (err) {
             $("race-error").textContent = err.message;
-            loadRaces();
+            void loadRaces();
           }
         });
         item.append(" ", join);
@@ -318,11 +318,11 @@ $("race-form").addEventListener("submit", async (event) => {
   }
 });
 
-loadRaces();
+void loadRaces();
 Net.poll(loadRaces, POLL_MS);
 window.addEventListener("pageshow", loadRaces);
 
-loadDaily();
+void loadDaily();
 Net.poll(loadDaily, 15000);
 
 /** The profile card: the player's own numbers, with nothing to compare them against. */
@@ -428,15 +428,15 @@ function paintMultiplayer(mp) {
 for (const button of document.querySelectorAll("[data-goto]")) {
   button.addEventListener("click", () => showHomeTab(button.dataset.goto));   // the address stays as it is: a click is not a new page
 }
-loadSolo();
-loadAchievements();
-loadProfile();
+void loadSolo();
+void loadAchievements();
+void loadProfile();
 Net.poll(loadProfile, 30000);
-window.addEventListener("pageshow", () => { loadSolo(); loadAchievements(); loadProfile(); });
+window.addEventListener("pageshow", () => { void loadSolo(); void loadAchievements(); void loadProfile(); });
 window.addEventListener("pageshow", loadDaily);  // coming back with the browser's back button
 
-refresh();
-loadSaved();
+void refresh();
+void loadSaved();
 Net.poll(refresh, POLL_MS);
 Net.poll(loadSaved, 15000); // a game that is resumed or expires drops off the list
 
@@ -517,7 +517,7 @@ async function loadAdmin() {
     $("admin-pending").hidden = waiting === 0;
   } catch (_) { /* the link just stays hidden */ }
 }
-loadAdmin();
+void loadAdmin();
 Net.poll(loadAdmin, 30000);
 
 // ---- the three ways to play: Solo, Multiplayer, Challenges ----
