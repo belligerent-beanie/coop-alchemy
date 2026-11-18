@@ -30,8 +30,8 @@ the exact commands and a check are in [LAUNCH.md](LAUNCH.md). Tick as you go.
 - [ ] Check the log shows **your real address** (`client=...`), not a `172.x` Docker address. If it shows Docker's, stop and fix before inviting anyone.
 - [ ] **Lock the admin paths** with Cloudflare Access (one-time PIN to your email): `/ops*`, `/admin*`, `/icons/queue`, `/icons/handle`,
       `/icons/undo`, `/patches/set`, `/patches/list`. Never `/patches*` or `/icons*` (LAUNCH.md step 6 says why).
-- [ ] **Inactive accounts:** the terms, privacy page and login page say an account nobody has logged in to for 90 days may be deleted.
-      Nothing deletes them yet (the accounts file records only when an account was created, not its last login). Decide whether to build it.
+- [ ] **Inactive accounts:** the terms, privacy page and login page say an account nobody has logged in to for 90 days may be deleted, and the server
+      does it (`--inactive-days`, default 90; `0` switches it off). Older accounts get the full 90 days from the first start. Decide if 90 is right.
 - [ ] Make a **throwaway invite code** and test from a phone: signup refused without it, works with it, refused the second time.
 - [ ] Delete the throwaway accounts.
 
