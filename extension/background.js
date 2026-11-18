@@ -63,7 +63,7 @@ async function openPreview({ url, width, height }) {
 
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (message.type === "who") {
-    previewTabs.get(sender.tab ? sender.tab.id : -1).then((info) => respond({ preview: !!info }));
+    previewTabs.get(sender.tab ? sender.tab.id : -1).then((info) => respond({ preview: !!info }), () => respond({ preview: false }));
     return true;
   }
   if (message.type === "restore") {
@@ -93,4 +93,4 @@ chrome.tabs.onUpdated.addListener(async (tabId, change) => {
     }
   } catch (_) { /* the page may not allow scripts */ }
 });
-chrome.tabs.onRemoved.addListener((tabId) => { previewTabs.remove(tabId); });
+chrome.tabs.onRemoved.addListener((tabId) => { previewTabs.remove(tabId).catch(() => { /* storage unavailable: nothing to clean up */ }); });
