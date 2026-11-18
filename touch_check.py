@@ -75,7 +75,7 @@ class WebSocket:
         head, _, self.buffer = head.partition(b"\r\n\r\n")
         if b" 101 " not in head.split(b"\r\n")[0]:
             raise ConnectionError(f"WebSocket handshake refused: {head[:80]!r}")
-        accept = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
+        accept = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()  # NOSONAR (SHA-1 is fixed by the WebSocket handshake, RFC 6455; not used for security)
         if accept.encode() not in head:
             raise ConnectionError("WebSocket handshake answer did not match")
 
