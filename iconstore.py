@@ -338,7 +338,7 @@ class IconStore:
             try:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 tmp = target.with_name(target.name + ".tmp")
-                tmp.write_bytes(png)  # NOSONAR (target is an element picture path built from the registry and a slug, chosen by an admin)
+                tmp.write_bytes(png)  # NOSONAR (target is the picture file of an element id checked against the recipe book, or its slug in the pictures folder; the slug keeps only a-z, 0-9 and "-")
                 os.replace(tmp, target)
             except OSError as exc:
                 self._drop_file(backup)
